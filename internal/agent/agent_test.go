@@ -403,6 +403,18 @@ func TestTextBeforeShowIsTheAnswer(t *testing.T) {
 	assert.Equal(t, []int64{2}, reply.ProductIDs)
 }
 
+func TestExplanationIsNotLostToAClosingLine(t *testing.T) {
+	// Seen in the evals: the explanation came with show_products, and the
+	// final step said only "Shall I add it?".
+	talkAndShow := llm.Call("c1", "show_products", map[string]any{"product_ids": []int64{2}})
+	talkAndShow.Response.Message.Text = "Для Camry потрібна олива 0W-20 — ось вона."
+	f := newAgent(t, llm.NewFake(talkAndShow, llm.Say("Додати в кошик?")))
+
+	reply, err := f.agent.Reply(context.Background(), chat, chat, "яке масло?")
+	require.NoError(t, err)
+	assert.Equal(t, "Для Camry потрібна олива 0W-20 — ось вона.\n\nДодати в кошик?", reply.Text)
+}
+
 func TestEmptyFinalTurnIsStoredWithTheSentText(t *testing.T) {
 	f := newAgent(t, llm.NewFake(llm.Call("c1", "show_products", map[string]any{"product_ids": []int64{2}}), llm.Say("")))
 

@@ -176,7 +176,7 @@ func (a *Agent) Reply(ctx context.Context, userID, chatID int64, text string, im
 
 		// An answer, possibly cut off by max_tokens; a cut answer still
 		// beats none, and the prompt keeps answers far below the limit.
-		reply := &Reply{Text: lastText(turn), ProductIDs: run.shown, CartChanged: run.cartChanged, CarSaved: run.carSaved}
+		reply := &Reply{Text: turnText(turn), ProductIDs: run.shown, CartChanged: run.cartChanged, CarSaved: run.carSaved}
 		if reply.Text == "" && len(reply.ProductIDs) == 0 {
 			reply.Text = replyStuck
 		}
@@ -269,16 +269,19 @@ func startsTurn(m llm.Message) bool {
 	return m.Role == llm.RoleUser && len(m.ToolResults) == 0
 }
 
-// lastText is the model's last words in this turn. The final step is usually
-// where they are, but after show_products the model often ends with no text at
-// all, having said "here are a few options" in the step before the call.
-func lastText(turn []llm.Message) string {
-	for i := len(turn) - 1; i >= 0; i-- {
-		if m := turn[i]; m.Role == llm.RoleAssistant && strings.TrimSpace(m.Text) != "" {
-			return m.Text
+// turnText is everything the model said to the buyer in this turn. The model
+// often explains its pick in the step that calls show_products and ends with
+// a short closing line -- or none at all -- so the last step alone can be
+// "Shall I add it to the cart?" with the explanation lost. Seen live; caught
+// by the evals.
+func turnText(turn []llm.Message) string {
+	var parts []string
+	for _, m := range turn {
+		if t := strings.TrimSpace(m.Text); m.Role == llm.RoleAssistant && t != "" {
+			parts = append(parts, t)
 		}
 	}
-	return ""
+	return strings.Join(parts, "\n\n")
 }
 
 func concat(a, b []llm.Message) []llm.Message {

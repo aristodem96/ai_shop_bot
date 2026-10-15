@@ -41,6 +41,10 @@ test: ## Run unit tests (integration tests are skipped)
 test-integration: ## Run the full suite, including testcontainers-backed tests (needs Docker)
 	go test -race -count=1 ./...
 
+.PHONY: eval
+eval: ## Run the consultant against the real model (needs ANTHROPIC_API_KEY and Docker; costs ~1 cent)
+	go test -tags eval -count=1 -v -timeout 15m ./internal/agent/evals/
+
 .PHONY: cover
 cover: ## Run unit tests and open an HTML coverage report
 	go test -short -coverprofile=coverage.out -covermode=atomic ./...
