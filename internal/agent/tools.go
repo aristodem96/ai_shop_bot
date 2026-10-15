@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
 	"github.com/aristodem96/ai_shop_bot/internal/llm"
@@ -40,12 +41,13 @@ type toolbox struct {
 	cart     Cart
 	garage   Garage
 	kits     Maintenance
+	now      func() time.Time
 	// catSlug maps category ids to the slugs the model knows them by.
 	catSlug map[int64]string
 }
 
 func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, cats []domain.Category) *toolbox {
-	tb := &toolbox{catalog: catalog, cart: cart, garage: garage, kits: kits, catSlug: make(map[int64]string, len(cats))}
+	tb := &toolbox{catalog: catalog, cart: cart, garage: garage, kits: kits, now: time.Now, catSlug: make(map[int64]string, len(cats))}
 	slugs := make([]string, 0, len(cats))
 	catalogue := make([]string, 0, len(cats))
 	for _, c := range cats {
@@ -75,6 +77,12 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, cat
 				"year":   integer("Year of manufacture."),
 				"engine": str("Engine as the buyer gives it, e.g. \"1.4\", \"TDI\"."),
 			}),
+		},
+		{
+			Name: "decode_vin",
+			Description: "Read a VIN (17 characters): returns the make and the possible model years. " +
+				"Model and engine cannot be read from a VIN; use find_vehicle with the make and year, and ask the buyer for the engine if several match.",
+			Schema: object(map[string]any{"vin": str("The VIN as the buyer wrote it.")}, "vin"),
 		},
 		{
 			Name:        "get_my_vehicle",
@@ -136,6 +144,7 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, cat
 
 	tb.handlers = map[string]handler{
 		"find_vehicle":   tb.findVehicle,
+		"decode_vin":     tb.decodeVIN,
 		"get_my_vehicle": tb.getMyVehicle,
 		"set_my_vehicle": tb.setMyVehicle,
 		"search_parts":   tb.searchParts,
@@ -290,6 +299,29 @@ func (tb *toolbox) findVehicle(ctx context.Context, _ *runState, input json.RawM
 			return nil, err
 		}
 		out["makes_covered"] = makes
+	}
+	return out, nil
+}
+
+// decodeVIN reads what a VIN reliably says. An invalid one is an input error
+// the model can relay: "a VIN has 17 characters" is useful to the buyer.
+func (tb *toolbox) decodeVIN(_ context.Context, _ *runState, input json.RawMessage) (any, error) {
+	var in struct {
+		VIN string `json:"vin"`
+	}
+	if err := decode(input, &in); err != nil {
+		return nil, err
+	}
+	v, err := domain.ParseVIN(in.VIN, tb.now().Year()+1)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errInput, err) //nolint:errorlint // the reason is for the model
+	}
+	out := map[string]any{"vin": v.Code, "wmi": v.WMI, "make": nil, "model_year_candidates": v.ModelYears}
+	if v.Make != "" {
+		out["make"] = v.Make
+	}
+	if len(v.ModelYears) == 0 {
+		out["note"] = "this VIN does not encode the model year; ask the buyer for it"
 	}
 	return out, nil
 }

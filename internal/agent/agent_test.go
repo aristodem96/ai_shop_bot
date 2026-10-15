@@ -491,3 +491,24 @@ func TestServiceKit(t *testing.T) {
 	assert.Contains(t, got, `"missing_in_stock":["cabin_filter"]`)
 	assert.Contains(t, got, `"total_uah":1450`)
 }
+
+func TestDecodeVIN(t *testing.T) {
+	model := llm.NewFake(
+		llm.Call("c1", "decode_vin", map[string]any{"vin": "tmb jg7ne 0 d0123456"}),
+		llm.Call("c2", "decode_vin", map[string]any{"vin": "TMB123"}),
+		llm.Say("Skoda 2013 року. Який двигун?"),
+	)
+	f := newAgent(t, model)
+
+	_, err := f.agent.Reply(context.Background(), chat, chat, "мій VIN TMBJG7NE0D0123456")
+	require.NoError(t, err)
+
+	got := result(model, 1)
+	assert.False(t, got.IsError)
+	assert.Contains(t, got.Content, `"make":"Skoda"`)
+	assert.Contains(t, got.Content, `"model_year_candidates":[2013`)
+
+	bad := result(model, 2)
+	assert.True(t, bad.IsError)
+	assert.Contains(t, bad.Content, "17", "the model can tell the buyer what is wrong")
+}
