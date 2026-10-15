@@ -48,7 +48,9 @@ services:
       redis:
         condition: service_healthy
     environment:
-      POSTGRES_DSN: postgres://shop:shop@postgres:5432/shop?sslmode=disable
+      # BOT_DB picks another database in the same Postgres, e.g. one with a
+      # real price list imported for local experiments.
+      POSTGRES_DSN: postgres://shop:shop@postgres:5432/${BOT_DB:-shop}?sslmode=disable
       REDIS_ADDR: redis:6379
       LLM_PROVIDER: ${LLM_PROVIDER:-claude}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
