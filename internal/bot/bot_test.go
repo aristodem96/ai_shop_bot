@@ -408,6 +408,7 @@ func TestEveryCallbackIsAnsweredOnce(t *testing.T) {
 		encode(actCategories), encode(actCategory, 1, 0), encode(actCategory, 99, 0),
 		encode(actProduct, padsID), encode(actProduct, 404), encode(actAnalogues, padsID),
 		encode(actCart), encode(actDec, padsID), encode(actForgetCar), encode(actKit), encode(actKitAdd),
+		encode(actCheckout), encode(actPay), encode(actCancelCheckout), encode(actManage, 1, 1),
 		encode(actNoop), "garbage", "gs:5", "p:999999999999999999999",
 	} {
 		b := newTestBot()

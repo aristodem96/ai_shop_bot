@@ -27,7 +27,8 @@ func mainMenu() *telegram.ReplyKeyboard {
 	return &telegram.ReplyKeyboard{
 		Rows: [][]telegram.KeyboardButton{
 			{{Text: btnCatalog}, {Text: btnCart}},
-			{{Text: btnCar}, {Text: btnHelp}},
+			{{Text: btnCar}, {Text: btnOrders}},
+			{{Text: btnHelp}},
 		},
 		Resize:     true,
 		Persistent: true,
@@ -323,9 +324,9 @@ func cartView(c *domain.Cart) (string, *telegram.InlineKeyboard) {
 	}
 	fmt.Fprintf(&b, "\nРазом: <b>%s</b> (%d шт.)", c.Total(), c.Items())
 
-	kb.Rows = append(kb.Rows, []telegram.InlineButton{
-		button("🧹 Очистити", actClear),
-		button(btnCatalog, actCategories),
-	})
+	kb.Rows = append(kb.Rows,
+		[]telegram.InlineButton{button("💳 Оформити замовлення", actCheckout)},
+		[]telegram.InlineButton{button("🧹 Очистити", actClear), button(btnCatalog, actCategories)},
+	)
 	return b.String(), kb
 }

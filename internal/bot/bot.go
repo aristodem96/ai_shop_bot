@@ -7,8 +7,10 @@ package bot
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
@@ -79,6 +81,11 @@ type Bot struct {
 	kits    Maintenance
 	cfg     Config
 	log     *slog.Logger
+
+	// orders and sessions are nil until UseOrders is called.
+	orders    Orders
+	sessions  Sessions
+	adminChat int64
 
 	// consultant, limiter and files are nil until UseConsultant is called.
 	consultant Consultant
@@ -200,6 +207,10 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 	}
 	chat, user := m.Chat.ID, m.From.ID
 
+	if st, ok := b.inCheckout(ctx, chat, m); ok {
+		b.checkoutInput(ctx, chat, user, m, st)
+		return
+	}
 	if len(m.Photo) > 0 {
 		b.consultPhoto(ctx, chat, user, m)
 		return
@@ -217,6 +228,12 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 		b.sendCart(ctx, chat, user)
 	case "/help", btnHelp:
 		b.send(ctx, chat, msgHelp, mainMenu())
+	case "/orders", btnOrders:
+		b.sendOrders(ctx, chat, user)
+	case "/id":
+		// For setting ADMIN_CHAT_ID: the operator asks the bot which chat
+		// this is.
+		b.send(ctx, chat, fmt.Sprintf("ID цього чату: <code>%d</code>", chat), nil)
 	case "/new":
 		b.resetConversation(ctx, chat)
 	case "":
@@ -261,6 +278,14 @@ func (b *Bot) handleCallback(ctx context.Context, q *telegram.CallbackQuery) {
 func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, error) {
 	a := cb.args
 	switch cb.act {
+	case actCheckout, actPay, actEditContacts, actCancelCheckout, actManage:
+		if b.orders == nil {
+			// A bot running without payments may still meet these buttons
+			// on old messages.
+			return "", errPaymentUnavailable
+		}
+	}
+	switch cb.act {
 	case actCategories:
 		return "", b.editCategories(ctx, cc)
 	case actCategory:
@@ -294,6 +319,16 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 		return "", b.sendKit(ctx, cc)
 	case actKitAdd:
 		return b.addKit(ctx, cc)
+	case actCheckout:
+		return b.startCheckout(ctx, cc)
+	case actPay:
+		return b.pay(ctx, cc)
+	case actEditContacts:
+		return "", b.askContacts(ctx, cc.chat)
+	case actCancelCheckout:
+		return "", b.cancelCheckout(ctx, cc)
+	case actManage:
+		return b.manage(ctx, cc, a[0], a[1])
 	case actForgetCar:
 		return "", b.forgetCar(ctx, cc)
 	case actNoop:
@@ -308,10 +343,22 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 // than an error string.
 func (b *Bot) explain(ctx context.Context, err error, data string) string {
 	switch {
+	case errors.Is(err, domain.ErrOutOfStock):
+		// A checkout names the part that ran out.
+		if name, ok := strings.CutPrefix(err.Error(), domain.ErrOutOfStock.Error()+": "); ok {
+			return fmt.Sprintf(msgOutOfStockNamed, name)
+		}
+		return msgOutOfStock
+	case errors.Is(err, domain.ErrCartEmpty):
+		return msgCartEmptyCheckout
+	case errors.Is(err, domain.ErrInvalidContacts):
+		return msgBadContacts
+	case errors.Is(err, domain.ErrBadTransition):
+		return msgBadTransition
+	case errors.Is(err, errPaymentUnavailable):
+		return msgPaymentUnavailable
 	case errors.Is(err, errBadCallback):
 		return msgStaleButton
-	case errors.Is(err, domain.ErrOutOfStock):
-		return msgOutOfStock
 	case errors.Is(err, domain.ErrQtyLimit):
 		return msgQtyLimit
 	case errors.Is(err, domain.ErrCartFull):

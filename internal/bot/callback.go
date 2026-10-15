@@ -17,21 +17,26 @@ import (
 type action string
 
 const (
-	actCategories action = "cats" // edit the message into the category menu
-	actCategory   action = "c"    // c:<category>:<page> edit into a product page
-	actCategoryN  action = "cn"   // cn:<category> send a product page as a new message
-	actProduct    action = "p"    // p:<product> send a product card
-	actAdd        action = "a"    // a:<product> add one unit to the cart
-	actAnalogues  action = "s"    // s:<product> send interchangeable parts
-	actCart       action = "cart" // send the cart as a new message
-	actInc        action = "ci"   // ci:<product> one more unit
-	actDec        action = "cd"   // cd:<product> one unit less
-	actDel        action = "cr"   // cr:<product> remove the line
-	actClear      action = "cx"   // empty the cart
-	actForgetCar  action = "gx"   // forget the car
-	actKit        action = "tk"   // send the maintenance kit for the buyer's car
-	actKitAdd     action = "ta"   // add the whole kit to the cart
-	actNoop       action = "x"    // a label that only looks like a button
+	actCategories     action = "cats" // edit the message into the category menu
+	actCategory       action = "c"    // c:<category>:<page> edit into a product page
+	actCategoryN      action = "cn"   // cn:<category> send a product page as a new message
+	actProduct        action = "p"    // p:<product> send a product card
+	actAdd            action = "a"    // a:<product> add one unit to the cart
+	actAnalogues      action = "s"    // s:<product> send interchangeable parts
+	actCart           action = "cart" // send the cart as a new message
+	actInc            action = "ci"   // ci:<product> one more unit
+	actDec            action = "cd"   // cd:<product> one unit less
+	actDel            action = "cr"   // cr:<product> remove the line
+	actClear          action = "cx"   // empty the cart
+	actForgetCar      action = "gx"   // forget the car
+	actKit            action = "tk"   // send the maintenance kit for the buyer's car
+	actKitAdd         action = "ta"   // add the whole kit to the cart
+	actCheckout       action = "co"   // start the checkout
+	actPay            action = "cp"   // place the order and get the payment link
+	actEditContacts   action = "ce"   // type the contacts again
+	actCancelCheckout action = "cq"   // leave the checkout
+	actManage         action = "om"   // om:<order>:<move> a manager's button
+	actNoop           action = "x"    // a label that only looks like a button
 )
 
 // arity is how many arguments each action takes. Parsing checks it, so a
@@ -40,6 +45,7 @@ var arity = map[action]int{
 	actCategories: 0, actCategory: 2, actCategoryN: 1, actProduct: 1,
 	actAdd: 1, actAnalogues: 1, actCart: 0, actInc: 1, actDec: 1, actDel: 1,
 	actClear: 0, actForgetCar: 0, actKit: 0, actKitAdd: 0, actNoop: 0,
+	actCheckout: 0, actPay: 0, actEditContacts: 0, actCancelCheckout: 0, actManage: 2,
 }
 
 // maxCallbackData is Telegram's limit on callback_data, in bytes.

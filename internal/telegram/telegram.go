@@ -74,6 +74,16 @@ type Message struct {
 	Photo []PhotoSize `json:"photo"`
 	// Caption is the text sent with a photo.
 	Caption string `json:"caption"`
+	// Contact is a phone number shared with the "share contact" button.
+	Contact *Contact `json:"contact"`
+}
+
+// Contact is a shared phone number. UserID is set when the contact is a
+// Telegram user, which tells the buyer's own number from someone else's.
+type Contact struct {
+	PhoneNumber string `json:"phone_number"`
+	FirstName   string `json:"first_name"`
+	UserID      int64  `json:"user_id"`
 }
 
 // PhotoSize is one size of a photo.
@@ -153,9 +163,11 @@ type ReplyKeyboard struct {
 
 func (*ReplyKeyboard) replyMarkup() {}
 
-// KeyboardButton is a reply keyboard button.
+// KeyboardButton is a reply keyboard button. With RequestContact set, a press
+// shares the user's phone number instead of sending the text.
 type KeyboardButton struct {
-	Text string `json:"text"`
+	Text           string `json:"text"`
+	RequestContact bool   `json:"request_contact,omitempty"`
 }
 
 // PollTimeout is how long a single getUpdates call waits for new events.
@@ -239,6 +251,15 @@ func (c *Client) AnswerCallbackQuery(ctx context.Context, id, text string, alert
 		"text":              text,
 		"show_alert":        alert,
 	}, nil)
+}
+
+// GetMe returns the bot's own account.
+func (c *Client) GetMe(ctx context.Context) (*User, error) {
+	var u User
+	if err := c.call(ctx, "getMe", map[string]any{}, &u); err != nil {
+		return nil, err
+	}
+	return &u, nil
 }
 
 // ChatActionTyping shows "typing..." in the chat header.
