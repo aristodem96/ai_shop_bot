@@ -37,13 +37,13 @@ func TestParseVehicles(t *testing.T) {
 
 	require.Len(t, problems, 4)
 	assert.Equal(t, 7, problems[0].Row.Line, "the line a text editor shows")
-	assert.Equal(t, "repeats line 6", problems[0].Reason)
-	assert.Contains(t, problems[1].Reason, `fuel "gas"`)
-	assert.Contains(t, problems[2].Reason, "run backwards")
-	assert.Contains(t, problems[3].Reason, "required")
+	assert.Equal(t, "повторює рядок 6", problems[0].Reason)
+	assert.Contains(t, problems[1].Reason, `пальне "gas"`)
+	assert.Contains(t, problems[2].Reason, "навпаки")
+	assert.Contains(t, problems[3].Reason, "потрібні")
 }
 
 func TestParseVehiclesNeedsColumns(t *testing.T) {
 	_, _, err := ParseVehicles([][]string{{"make", "model", "engine"}})
-	require.ErrorContains(t, err, `no column "year_from"`)
+	require.ErrorContains(t, err, `немає колонки "year_from"`)
 }

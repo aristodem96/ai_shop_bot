@@ -2,11 +2,14 @@ package importer
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/text/encoding/charmap"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
 )
@@ -91,8 +94,8 @@ func TestParse(t *testing.T) {
 
 	require.Len(t, parsed.Problems, 2)
 	assert.Equal(t, RowRef{Sheet: "Chery", Line: 9}, parsed.Problems[0].Row, "a problem points at the line Excel shows")
-	assert.Equal(t, "no name", parsed.Problems[0].Reason)
-	assert.Contains(t, parsed.Problems[1].Reason, "bad price")
+	assert.Equal(t, "немає назви", parsed.Problems[0].Reason)
+	assert.Contains(t, parsed.Problems[1].Reason, "незрозуміла ціна")
 }
 
 func TestParseWithoutHeader(t *testing.T) {
@@ -227,4 +230,61 @@ func TestReadCSV(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, [][]string{{"Назва", "Ціна"}, {"Колодки; передні", "1049"}, {"короткий"}}, rows,
 		"the byte order mark Excel writes is dropped, ragged rows are kept")
+}
+
+func TestHeaderErrorNamesTheRenamedColumn(t *testing.T) {
+	sh := Sheet{Name: "Прайс", Rows: [][]string{
+		{"Прайс-лист"},
+		{"Авто", "Артикул", "Виробник", "Найменування", "Ціна, грн", "Посилання"},
+	}}
+	_, err := Parse([]Sheet{sh}, priceList())
+	var he *HeaderError
+	require.ErrorAs(t, err, &he)
+	assert.Equal(t, []string{"Назва"}, he.Missing, "only the renamed column is missing")
+	assert.Equal(t, 2, he.Line)
+	assert.Contains(t, he.Found, "Найменування", "and the row shows what it is called now")
+}
+
+// writeTemp puts a file with the given bytes where readAndParse can read it.
+func writeTemp(t *testing.T, name string, data []byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+	return path
+}
+
+const csvPrice = "Авто;Артикул;Виробник;Назва;Ціна, грн;Посилання\n" +
+	"Skoda Octavia A7;5Q0698151;KYB;Колодки передні;1 049,50;https://shop/1\n"
+
+func TestReadsWindows1251(t *testing.T) {
+	cp1251, err := charmap.Windows1251.NewEncoder().Bytes([]byte(csvPrice))
+	require.NoError(t, err)
+	parsed, err := readAndParse(writeTemp(t, "price.csv", cp1251), priceList())
+	require.NoError(t, err, "a file saved by Excel on Windows is read without telling it the encoding")
+	require.Len(t, parsed.Offers, 1)
+	assert.Equal(t, "Колодки передні", parsed.Offers[0].Name)
+}
+
+func TestDetectsDelimiter(t *testing.T) {
+	for name, delim := range map[string]string{"semicolon": ";", "comma": ",", "tab": "\t"} {
+		t.Run(name, func(t *testing.T) {
+			data := strings.ReplaceAll(csvPrice, ";", delim)
+			// A comma inside a field must be quoted in a comma file.
+			if delim == "," {
+				data = strings.Replace(data, "Ціна, грн", `"Ціна, грн"`, 1)
+				data = strings.Replace(data, "1 049,50", `"1 049,50"`, 1)
+			}
+			parsed, err := readAndParse(writeTemp(t, "price.csv", []byte(data)), priceList())
+			require.NoError(t, err)
+			require.Len(t, parsed.Offers, 1)
+			assert.Equal(t, domain.Money(104950), parsed.Offers[0].Price)
+		})
+	}
+}
+
+func TestExceeded(t *testing.T) {
+	assert.False(t, Exceeded(20, 100, 20), "exactly the limit is allowed")
+	assert.True(t, Exceeded(21, 100, 20))
+	assert.False(t, Exceeded(5, 0, 20), "nothing on sale, nothing to protect")
+	assert.True(t, Exceeded(1, 1, 0), "a zero limit allows none")
 }

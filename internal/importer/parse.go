@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -47,7 +48,9 @@ type RowRef struct {
 
 func (r RowRef) String() string { return fmt.Sprintf("%s:%d", r.Sheet, r.Line) }
 
-// Problem is a row that could not be used, and why.
+// Problem is a row that could not be used, and why. The reason is in
+// Ukrainian: it is read by the shop's staff, in the terminal or in the
+// managers' chat.
 type Problem struct {
 	Row    RowRef
 	Reason string
@@ -78,12 +81,17 @@ func Parse(sheets []Sheet, p *Profile) (*Parsed, error) {
 	out := &Parsed{}
 	byKey := make(map[string]*Offer)
 	headers := 0
+	var best *HeaderError
 
 	for _, sh := range sheets {
-		idx, start, ok := findHeader(sh.Rows, p.Columns)
-		if !ok {
+		idx, start, miss := findHeader(sh, p.Columns)
+		if miss != nil {
 			// A workbook may hold a cover sheet or notes; only sheets with
-			// the header are price list.
+			// the header are price list. The closest miss explains a file
+			// where no sheet has it.
+			if best == nil || len(miss.Missing) < len(best.Missing) {
+				best = miss
+			}
 			continue
 		}
 		headers++
@@ -109,15 +117,39 @@ func Parse(sheets []Sheet, p *Profile) (*Parsed, error) {
 		}
 	}
 	if headers == 0 {
-		return nil, fmt.Errorf("importer: no sheet has a header row with the columns %q and %q", p.Columns.Name, p.Columns.Price)
+		if best == nil {
+			best = &HeaderError{Missing: p.Columns.all()}
+		}
+		return nil, best
 	}
 	return out, nil
 }
 
-// findHeader finds the first row that holds every column the profile names.
-func findHeader(rows [][]string, c Columns) (columnIndex, int, bool) {
+// HeaderError means no sheet has a row with every column the profile names:
+// the supplier renamed or dropped a column, or the profile belongs to another
+// file. It names what is missing and what the closest row has instead, which
+// is usually enough to see the renamed column at a glance.
+type HeaderError struct {
+	Missing []string // the profile's columns that the closest row lacks
+	Sheet   string   // where the closest row is
+	Line    int
+	Found   []string // that row's cells
+}
+
+func (e *HeaderError) Error() string {
+	if e.Line == 0 {
+		return fmt.Sprintf("importer: no header row with the columns %q", e.Missing)
+	}
+	return fmt.Sprintf("importer: no header row has the columns %q; the closest, %s:%d, has %q",
+		e.Missing, e.Sheet, e.Line, e.Found)
+}
+
+// findHeader finds the first row that holds every column the profile names,
+// or reports the row that came closest.
+func findHeader(sh Sheet, c Columns) (columnIndex, int, *HeaderError) {
 	want := c.all()
-	for i, row := range rows[:min(len(rows), headerSearchDepth)] {
+	var best *HeaderError
+	for i, row := range sh.Rows[:min(len(sh.Rows), headerSearchDepth)] {
 		idx := make(columnIndex, len(row))
 		for j, cell := range row {
 			if h := normHeader(cell); h != "" {
@@ -126,18 +158,34 @@ func findHeader(rows [][]string, c Columns) (columnIndex, int, bool) {
 				}
 			}
 		}
-		found := true
+		var missing []string
 		for _, h := range want {
 			if _, ok := idx[normHeader(h)]; !ok {
-				found = false
-				break
+				missing = append(missing, h)
 			}
 		}
-		if found {
-			return idx, i + 1, true
+		if len(missing) == 0 {
+			return idx, i + 1, nil
+		}
+		// A row matching nothing is a title or a blank, not a candidate.
+		if len(missing) < len(want) && (best == nil || len(missing) < len(best.Missing)) {
+			best = &HeaderError{Missing: missing, Sheet: sh.Name, Line: i + 1, Found: nonEmpty(row)}
 		}
 	}
-	return nil, 0, false
+	if best == nil {
+		best = &HeaderError{Missing: want}
+	}
+	return nil, 0, best
+}
+
+func nonEmpty(row []string) []string {
+	var out []string
+	for _, c := range row {
+		if c = clean(c); c != "" {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (c Columns) all() []string {
@@ -162,7 +210,7 @@ func parseRow(row []string, idx columnIndex, p *Profile) (*Offer, error) {
 		Category:   idx.get(row, c.Category),
 	}
 	if o.Name == "" {
-		return nil, fmt.Errorf("no name")
+		return nil, errors.New("немає назви")
 	}
 
 	price, err := parsePrice(idx.get(row, c.Price))
@@ -185,11 +233,11 @@ func parseRow(row []string, idx columnIndex, p *Profile) (*Offer, error) {
 	if ext := idx.get(row, c.ExternalID); ext != "" {
 		o.Key = ext
 	} else if c.ExternalID != "" {
-		return nil, fmt.Errorf("no %s", c.ExternalID)
+		return nil, fmt.Errorf("порожня колонка «%s»", c.ExternalID)
 	} else {
 		pn := domain.NormalizeOEM(o.PartNumber)
 		if pn == "" {
-			return nil, fmt.Errorf("no part number")
+			return nil, errors.New("немає артикула")
 		}
 		// Without the supplier's id, an offer is a part number from a
 		// brand: the same number from two brands is two products.
@@ -239,12 +287,12 @@ func parsePrice(s string) (domain.Money, error) {
 		whole, frac = whole+frac, ""
 	}
 	if whole == "" {
-		return 0, fmt.Errorf("bad price %q", s)
+		return 0, fmt.Errorf("незрозуміла ціна %q", s)
 	}
 	frac = (frac + "00")[:2]
 	n, err := strconv.ParseInt(whole+frac, 10, 64)
 	if err != nil || n <= 0 {
-		return 0, fmt.Errorf("bad price %q", s)
+		return 0, fmt.Errorf("незрозуміла ціна %q", s)
 	}
 	return domain.Money(n), nil
 }
@@ -260,7 +308,7 @@ func parseStock(s string) (int, error) {
 	s, _, _ = strings.Cut(s, ".")
 	n, err := strconv.Atoi(s)
 	if err != nil || n < 0 {
-		return 0, fmt.Errorf("bad stock %q", s)
+		return 0, fmt.Errorf("незрозумілий залишок %q", s)
 	}
 	return n, nil
 }
@@ -280,7 +328,7 @@ func parseYears(span, from, to string) (int, int, error) {
 		return 0, 0, err
 	}
 	if yf != 0 && yt != 0 && yt < yf {
-		return 0, 0, fmt.Errorf("years %d-%d run backwards", yf, yt)
+		return 0, 0, fmt.Errorf("роки %d–%d йдуть навпаки", yf, yt)
 	}
 	return yf, yt, nil
 }
@@ -299,7 +347,7 @@ func parseYear(s string) (int, error) {
 	}
 	y, err := strconv.Atoi(digits.String())
 	if err != nil || y < 1900 || y > 2100 {
-		return 0, fmt.Errorf("bad year %q", s)
+		return 0, fmt.Errorf("незрозумілий рік %q", s)
 	}
 	return y, nil
 }

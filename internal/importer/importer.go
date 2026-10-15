@@ -45,8 +45,38 @@ type Batch struct {
 	NewBrands         []NewBrand
 	CreateCategories  map[string]string
 	DeactivateMissing bool
-	Report            *Report
-	StartedAt         time.Time
+	// MaxDeactivatePercent caps what share of the supplier's active
+	// products the batch may take off sale, unless Force is set.
+	MaxDeactivatePercent int
+	Force                bool
+	Report               *Report
+	StartedAt            time.Time
+}
+
+// DeactivationError stops an import that would take off sale more of the
+// supplier's products than its profile allows. The import changes nothing;
+// the numbers say what it would have done.
+type DeactivationError struct {
+	Would, Active, LimitPercent int
+}
+
+func (e *DeactivationError) Error() string {
+	return fmt.Sprintf("importer: the file would take %d of %d active products off sale, more than %d%%; "+
+		"check that the file is complete, or force it", e.Would, e.Active, e.LimitPercent)
+}
+
+// Exceeded reports whether taking would of active products off sale passes
+// the limit.
+func Exceeded(would, active, limitPercent int) bool {
+	return active > 0 && would*100 > limitPercent*active
+}
+
+// Options tune a run.
+type Options struct {
+	// DryRun applies nothing and reports what would change.
+	DryRun bool
+	// Force lets the run take off sale more than the profile allows.
+	Force bool
 }
 
 // Product is an offer in catalogue terms.
@@ -113,15 +143,12 @@ type Result struct {
 	RunID                                    int64 // 0 for a dry run
 }
 
-// Run imports a file. With dryRun nothing is kept, but the counts are those a
-// real run would produce.
-func Run(ctx context.Context, store Store, p *Profile, path string, dryRun bool) (*Report, Result, error) {
+// Run imports a file. With DryRun nothing is kept, but the counts are those a
+// real run would produce. A run stopped by the deactivation limit returns
+// those counts with a *DeactivationError.
+func Run(ctx context.Context, store Store, p *Profile, path string, opts Options) (*Report, Result, error) {
 	started := time.Now()
-	sheets, err := ReadFile(path, p.delimiter())
-	if err != nil {
-		return nil, Result{}, err
-	}
-	parsed, err := Parse(sheets, p)
+	parsed, err := readAndParse(path, p)
 	if err != nil {
 		return nil, Result{}, err
 	}
@@ -131,11 +158,9 @@ func Run(ctx context.Context, store Store, p *Profile, path string, dryRun bool)
 	}
 	b.StartedAt = started
 	b.Report.File = filepath.Base(path)
-	res, err := store.Apply(ctx, b, dryRun)
-	if err != nil {
-		return b.Report, Result{}, err
-	}
-	return b.Report, res, nil
+	b.Force = opts.Force
+	res, err := store.Apply(ctx, b, opts.DryRun)
+	return b.Report, res, err
 }
 
 // Resolve turns parsed offers into catalogue products.
@@ -155,11 +180,12 @@ func Resolve(ctx context.Context, store Store, p *Profile, parsed *Parsed) (*Bat
 	rep := &Report{Rows: parsed.Rows, Offers: len(parsed.Offers), Skipped: len(parsed.Problems)}
 	rep.Problems = parsed.Problems[:min(len(parsed.Problems), maxProblems)]
 	b := &Batch{
-		Source:            p.Source,
-		CreateCategories:  p.CreateCategories,
-		DeactivateMissing: p.DeactivateMissing,
-		Report:            rep,
-		NewBrands:         brands.created,
+		Source:               p.Source,
+		CreateCategories:     p.CreateCategories,
+		DeactivateMissing:    p.DeactivateMissing,
+		MaxDeactivatePercent: p.maxDeactivatePercent(),
+		Report:               rep,
+		NewBrands:            brands.created,
 	}
 	for _, nb := range brands.created {
 		rep.NewBrands = append(rep.NewBrands, nb.Name)

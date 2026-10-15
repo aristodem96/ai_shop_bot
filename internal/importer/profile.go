@@ -30,7 +30,8 @@ type Profile struct {
 	// this file: "CA" gives "CA-7KQ2M9XW4P".
 	SKUPrefix string  `json:"sku_prefix"`
 	Columns   Columns `json:"columns"`
-	// CSVDelimiter is "," by default; Excel in a Ukrainian locale saves ";".
+	// CSVDelimiter separates CSV fields. Left empty, it is detected: ";"
+	// (Excel in a Ukrainian locale), ",", tab and "|" are tried in turn.
 	CSVDelimiter string `json:"csv_delimiter,omitempty"`
 	// LeadTimeDays makes every offer of a file without a stock column "on
 	// order, delivered in this many days". Such a file is a supplier's
@@ -53,6 +54,22 @@ type Profile struct {
 	// file no longer lists. Right for a full price list, wrong for a partial
 	// one, hence a choice.
 	DeactivateMissing bool `json:"deactivate_missing,omitempty"`
+	// MaxDeactivatePercent stops an import that would take more than this
+	// share of the supplier's products off sale: a truncated file, one sheet
+	// of six, looks exactly like a supplier dropping most of its range.
+	// Default 20; going past it takes an explicit force.
+	MaxDeactivatePercent *int `json:"max_deactivate_percent,omitempty"`
+}
+
+// defaultMaxDeactivatePercent is the share of a supplier's products one
+// import may take off sale unless forced.
+const defaultMaxDeactivatePercent = 20
+
+func (p *Profile) maxDeactivatePercent() int {
+	if p.MaxDeactivatePercent == nil {
+		return defaultMaxDeactivatePercent
+	}
+	return *p.MaxDeactivatePercent
 }
 
 // Columns are header texts, matched without regard to case or surrounding
@@ -132,6 +149,9 @@ func (p *Profile) Validate() error {
 	if p.LeadTimeDays != nil && *p.LeadTimeDays < 0 {
 		errs = append(errs, errors.New("lead_time_days cannot be negative"))
 	}
+	if p.MaxDeactivatePercent != nil && (*p.MaxDeactivatePercent < 0 || *p.MaxDeactivatePercent > 100) {
+		errs = append(errs, errors.New("max_deactivate_percent must be between 0 and 100"))
+	}
 	if p.MarkupPercent < 0 {
 		errs = append(errs, errors.New("markup_percent cannot be negative"))
 	}
@@ -149,10 +169,5 @@ func (p *Profile) Validate() error {
 	return errors.Join(errs...)
 }
 
-// delimiter is the CSV field separator.
-func (p *Profile) delimiter() rune {
-	if p.CSVDelimiter == "" {
-		return ','
-	}
-	return []rune(p.CSVDelimiter)[0]
-}
+// delimiter is the CSV field separator the profile names.
+func (p *Profile) delimiter() rune { return []rune(p.CSVDelimiter)[0] }

@@ -25,7 +25,7 @@ func importExample(t *testing.T, file string, dryRun bool) (*importer.Report, im
 	t.Helper()
 	p, err := importer.LoadProfile(exampleProfile)
 	require.NoError(t, err)
-	rep, res, err := importer.Run(context.Background(), NewImportRepository(testPool), p, file, dryRun)
+	rep, res, err := importer.Run(context.Background(), NewImportRepository(testPool), p, file, importer.Options{DryRun: dryRun})
 	require.NoError(t, err)
 	return rep, res
 }
@@ -162,4 +162,37 @@ func TestImportVehicleDirectory(t *testing.T) {
 	_, res, err = importer.ImportVehicles(ctx, repo, "../../../data/vehicles.csv", false)
 	require.NoError(t, err)
 	assert.Zero(t, res.Inserted, "a second load adds nothing")
+}
+
+// A file cut short -- one sheet of six, an export that stopped halfway --
+// looks exactly like a supplier dropping most of its range. The limit tells
+// them apart by asking.
+func TestImportStopsOnTruncatedFile(t *testing.T) {
+	skipShort(t)
+	cleanImports(t)
+	ctx := context.Background()
+	importExample(t, exampleFile, false)
+
+	data, err := os.ReadFile(exampleFile)
+	require.NoError(t, err)
+	lines := strings.Split(string(data), "\n")
+	truncated := filepath.Join(t.TempDir(), "price.csv")
+	require.NoError(t, os.WriteFile(truncated, []byte(strings.Join(lines[:6], "\n")), 0o600)) // the header and two offers
+
+	p, err := importer.LoadProfile(exampleProfile)
+	require.NoError(t, err)
+	repo := NewImportRepository(testPool)
+	_, res, err := importer.Run(ctx, repo, p, truncated, importer.Options{})
+	var limit *importer.DeactivationError
+	require.ErrorAs(t, err, &limit)
+	assert.Equal(t, importer.DeactivationError{Would: 5, Active: 7, LimitPercent: 20}, *limit)
+	assert.Equal(t, 5, res.Deactivated, "the report still says what the file would do")
+	var active int
+	require.NoError(t, testPool.QueryRow(ctx,
+		`SELECT count(*) FROM products WHERE source = 'demo-stock' AND is_active`).Scan(&active))
+	assert.Equal(t, 7, active, "and nothing changed")
+
+	_, res, err = importer.Run(ctx, repo, p, truncated, importer.Options{Force: true})
+	require.NoError(t, err, "a supplier that really dropped them is one explicit step away")
+	assert.Equal(t, 5, res.Deactivated)
 }

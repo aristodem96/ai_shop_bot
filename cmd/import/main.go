@@ -13,6 +13,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -44,6 +45,7 @@ func run() error {
 		filePath    = flag.String("file", "", "price list, .csv or .xlsx (required)")
 		vehicles    = flag.String("vehicles", "", "vehicle directory, .csv (instead of -profile and -file)")
 		dryRun      = flag.Bool("dry-run", false, "report what would change and change nothing")
+		force       = flag.Bool("force", false, "take off sale more of the supplier's products than its profile allows")
 	)
 	flag.Parse()
 	if (*vehicles == "") == (*profilePath == "" || *filePath == "") {
@@ -82,12 +84,20 @@ func run() error {
 	if *vehicles != "" {
 		return importVehicles(ctx, postgres.NewImportRepository(pool), *vehicles, *dryRun)
 	}
-	report, res, err := importer.Run(ctx, postgres.NewImportRepository(pool), profile, *filePath, *dryRun)
+	report, res, err := importer.Run(ctx, postgres.NewImportRepository(pool), profile, *filePath,
+		importer.Options{DryRun: *dryRun, Force: *force})
 	var out strings.Builder
 	if report != nil {
 		printReport(&out, report)
 	}
-	if err == nil {
+	var limit *importer.DeactivationError
+	switch {
+	case errors.As(err, &limit):
+		fmt.Fprintf(&out, "\nStopped, nothing changed: the file would take %d of %d active products off sale, more than %d%%.\n"+
+			"A truncated file looks just like this. If the supplier really dropped them, run again with -force.\n",
+			limit.Would, limit.Active, limit.LimitPercent)
+		err = errors.New("import stopped by the deactivation limit")
+	case err == nil:
 		printResult(&out, res, *dryRun, time.Since(started))
 	}
 	if _, werr := io.WriteString(os.Stdout, out.String()); werr != nil && err == nil {

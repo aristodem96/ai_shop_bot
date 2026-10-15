@@ -2,6 +2,7 @@ package importer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -81,7 +82,7 @@ func ParseVehicles(rows [][]string) ([]Vehicle, []Problem, error) {
 		start++
 	}
 	if start == len(rows) {
-		return nil, nil, fmt.Errorf("the file is empty")
+		return nil, nil, errors.New("файл порожній")
 	}
 	idx := make(map[string]int)
 	for i, h := range rows[start] {
@@ -89,7 +90,7 @@ func ParseVehicles(rows [][]string) ([]Vehicle, []Problem, error) {
 	}
 	for _, h := range vehicleRequired {
 		if _, ok := idx[h]; !ok {
-			return nil, nil, fmt.Errorf("no column %q; the header is %s", h,
+			return nil, nil, fmt.Errorf("немає колонки %q; шапка має бути такою: %s", h,
 				strings.Join(append(vehicleRequired, vehicleOptional...), ","))
 		}
 	}
@@ -117,7 +118,7 @@ func ParseVehicles(rows [][]string) ([]Vehicle, []Problem, error) {
 			continue
 		}
 		if first, dup := seen[v.Code()]; dup {
-			problems = append(problems, Problem{Row: ref, Reason: fmt.Sprintf("repeats line %d", first)})
+			problems = append(problems, Problem{Row: ref, Reason: fmt.Sprintf("повторює рядок %d", first)})
 			continue
 		}
 		seen[v.Code()] = ref.Line
@@ -139,25 +140,25 @@ func parseVehicle(get func([]string, string) string, row []string) (Vehicle, err
 		Fuel: strings.ToLower(get(row, "fuel")), OilViscosity: get(row, "oil_viscosity"),
 	}
 	if v.Make == "" || v.Model == "" || v.Engine == "" {
-		return v, fmt.Errorf("make, model and engine are required")
+		return v, errors.New("потрібні марка, модель і двигун")
 	}
 	if !fuels[v.Fuel] {
-		return v, fmt.Errorf("fuel %q is not one of petrol, diesel, hybrid, electric", v.Fuel)
+		return v, fmt.Errorf("пальне %q — не petrol, diesel, hybrid чи electric", v.Fuel)
 	}
 	var err error
 	if v.YearFrom, err = parseYear(get(row, "year_from")); err != nil || v.YearFrom == 0 {
-		return v, fmt.Errorf("bad year_from %q", get(row, "year_from"))
+		return v, fmt.Errorf("незрозумілий year_from %q", get(row, "year_from"))
 	}
 	if v.YearTo, err = parseYear(get(row, "year_to")); err != nil {
 		return v, err
 	}
 	if v.YearTo != 0 && v.YearTo < v.YearFrom {
-		return v, fmt.Errorf("years %d-%d run backwards", v.YearFrom, v.YearTo)
+		return v, fmt.Errorf("роки %d–%d йдуть навпаки", v.YearFrom, v.YearTo)
 	}
 	if s := get(row, "oil_volume_l"); s != "" {
 		v.OilVolume, err = strconv.ParseFloat(strings.ReplaceAll(s, ",", "."), 64)
 		if err != nil || v.OilVolume <= 0 || v.OilVolume >= 100 {
-			return v, fmt.Errorf("bad oil_volume_l %q", s)
+			return v, fmt.Errorf("незрозумілий oil_volume_l %q", s)
 		}
 	}
 	return v, nil

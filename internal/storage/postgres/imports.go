@@ -97,6 +97,13 @@ func (r *ImportRepository) Apply(ctx context.Context, b *importer.Batch, dryRun 
 		if _, err := tx.Exec(ctx, `SELECT 1 FROM products WHERE source = $1 ORDER BY id FOR UPDATE`, b.Source); err != nil {
 			return fmt.Errorf("postgres: lock supplier products: %w", err)
 		}
+		// What is on sale before the file is applied: the base the
+		// deactivation limit is a share of.
+		var active int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM products WHERE source = $1 AND is_active`,
+			b.Source).Scan(&active); err != nil {
+			return fmt.Errorf("postgres: count active products: %w", err)
+		}
 
 		// A stock column counts what is physically on the shelf, and units
 		// held by unpaid or not yet shipped orders are on it still. The
@@ -168,6 +175,9 @@ func (r *ImportRepository) Apply(ctx context.Context, b *importer.Batch, dryRun 
 				return fmt.Errorf("postgres: deactivate missing products: %w", err)
 			}
 			res.Deactivated = int(tag.RowsAffected())
+			if !b.Force && importer.Exceeded(res.Deactivated, active, b.MaxDeactivatePercent) {
+				return &importer.DeactivationError{Would: res.Deactivated, Active: active, LimitPercent: b.MaxDeactivatePercent}
+			}
 		}
 
 		if dryRun {
@@ -184,7 +194,14 @@ func (r *ImportRepository) Apply(ctx context.Context, b *importer.Batch, dryRun 
 			b.Source, b.Report.File, b.StartedAt, res.Inserted, res.Updated, res.Deactivated, res.Fitments, report,
 		).Scan(&res.RunID)
 	})
-	if err != nil && !errors.Is(err, errDryRun) {
+	var limit *importer.DeactivationError
+	switch {
+	case errors.As(err, &limit):
+		// Rolled back; the counts still tell the operator what the file
+		// would have done.
+		res.RunID = 0
+		return res, err
+	case err != nil && !errors.Is(err, errDryRun):
 		return importer.Result{}, err
 	}
 	return res, nil
