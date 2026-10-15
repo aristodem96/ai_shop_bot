@@ -230,7 +230,7 @@ func TestBadToolInputIsReportedToTheModel(t *testing.T) {
 }
 
 func TestRunningOutOfSteps(t *testing.T) {
-	var steps []llm.FakeStep
+	steps := make([]llm.FakeStep, 0, 4)
 	for i := range 4 {
 		steps = append(steps, llm.Call("c"+strings.Repeat("x", i), "search_products", map[string]any{}))
 	}

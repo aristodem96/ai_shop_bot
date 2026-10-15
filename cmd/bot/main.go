@@ -14,11 +14,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aristodem96/ai_shop_bot/internal/agent"
 	"github.com/aristodem96/ai_shop_bot/internal/bot"
 	"github.com/aristodem96/ai_shop_bot/internal/config"
+	"github.com/aristodem96/ai_shop_bot/internal/llm/claude"
 	"github.com/aristodem96/ai_shop_bot/internal/observability"
 	"github.com/aristodem96/ai_shop_bot/internal/service"
 	"github.com/aristodem96/ai_shop_bot/internal/storage/postgres"
+	redisstore "github.com/aristodem96/ai_shop_bot/internal/storage/redis"
 	"github.com/aristodem96/ai_shop_bot/internal/telegram"
 )
 
@@ -71,7 +74,29 @@ func run() error {
 		HandlerTimeout: cfg.HandlerTimeout,
 	}, log)
 
-	log.Info("bot started", slog.Int("max_pending", cfg.MaxPending))
+	if cfg.LLM.Provider != "none" {
+		rdb, err := redisstore.NewClient(startupCtx, cfg.Redis.Addr, cfg.Redis.Password, cfg.Redis.DB)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rdb.Close() }()
+
+		consultant, err := agent.New(startupCtx,
+			claude.New(claude.Config{APIKey: cfg.LLM.APIKey, Model: cfg.LLM.Model, Effort: cfg.LLM.Effort}),
+			catalog, cart,
+			redisstore.NewHistory(rdb, cfg.Agent.HistoryTTL),
+			agent.Config{MaxSteps: cfg.Agent.MaxSteps, MaxHistory: cfg.Agent.MaxHistory, Timeout: cfg.Agent.Timeout},
+			log)
+		if err != nil {
+			return err
+		}
+		b.UseConsultant(consultant, redisstore.NewRateLimiter(rdb, cfg.Agent.RateLimit, cfg.Agent.RateWindow))
+	}
+
+	log.Info("bot started",
+		slog.Int("max_pending", cfg.MaxPending),
+		slog.String("llm_provider", cfg.LLM.Provider),
+		slog.String("llm_model", cfg.LLM.Model))
 	if err := b.Run(ctx); err != nil {
 		return err
 	}

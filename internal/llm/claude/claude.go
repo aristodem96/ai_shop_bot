@@ -61,7 +61,7 @@ func New(cfg Config, opts ...option.RequestOption) *Client {
 // Chat implements llm.Client.
 func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, error) {
 	params := anthropic.MessageNewParams{
-		Model:     anthropic.Model(c.model),
+		Model:     c.model,
 		MaxTokens: maxTokens,
 		// The breakpoint on the system block caches tools and system together
 		// (tools render first). They are byte-identical on every request, so

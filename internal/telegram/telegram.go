@@ -217,6 +217,15 @@ func (c *Client) AnswerCallbackQuery(ctx context.Context, id, text string, alert
 	}, nil)
 }
 
+// ChatActionTyping shows "typing..." in the chat header.
+const ChatActionTyping = "typing"
+
+// SendChatAction shows a status such as "typing..." for about five seconds or
+// until the bot's next message, whichever comes first.
+func (c *Client) SendChatAction(ctx context.Context, chatID int64, action string) error {
+	return c.call(ctx, "sendChatAction", map[string]any{"chat_id": chatID, "action": action}, nil)
+}
+
 // Command is one entry of the menu Telegram shows under the message box.
 type Command struct {
 	Command     string `json:"command"`

@@ -62,11 +62,11 @@ fmt: ## Format the code
 	go fmt ./...
 
 .PHONY: deps-up
-deps-up: ## Start only Postgres (for `make run`)
-	docker compose up -d postgres
+deps-up: ## Start Postgres and Redis (for `make run`)
+	docker compose up -d --wait postgres redis
 
 .PHONY: up
-up: ## Start Postgres and the bot in Docker
+up: ## Start Postgres, Redis and the bot in Docker
 	docker compose --profile bot up --build -d
 
 .PHONY: down

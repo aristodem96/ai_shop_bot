@@ -65,6 +65,10 @@ func (f *fakeTelegram) AnswerCallbackQuery(_ context.Context, _, text string, al
 	return f.record(sent{method: "answerCallbackQuery", text: text, alert: alert})
 }
 
+func (f *fakeTelegram) SendChatAction(context.Context, int64, string) error {
+	return f.record(sent{method: "sendChatAction"})
+}
+
 func (f *fakeTelegram) methods() []string {
 	out := make([]string, 0, len(f.calls))
 	for _, c := range f.calls {
@@ -216,14 +220,6 @@ func TestStartShowsMenuAndCategories(t *testing.T) {
 	require.Equal(t, []string{"sendMessage", "sendMessage"}, tg.methods())
 	assert.IsType(t, &telegram.ReplyKeyboard{}, tg.calls[0].markup, "the main menu goes with the greeting")
 	assert.Contains(t, callbacks(tg.calls[1].markup), encode(actCategory, 1, 0))
-}
-
-func TestFreeTextPointsToTheCatalogue(t *testing.T) {
-	b, tg, _ := newTestBot()
-	b.Handle(context.Background(), text("тепла куртка до 3000"))
-
-	require.Len(t, tg.calls, 2)
-	assert.Equal(t, msgFreeTextSoon, tg.calls[0].text)
 }
 
 func TestGroupChatsAreRefused(t *testing.T) {

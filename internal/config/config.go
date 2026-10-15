@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +26,34 @@ type Postgres struct {
 	MaxConns int32
 }
 
+// Redis configures the store of conversations and rate limits.
+type Redis struct {
+	Addr     string
+	Password string
+	DB       int
+}
+
+// LLM selects and configures the model behind the consultant.
+type LLM struct {
+	// Provider is "claude", or "none" to run the bot on buttons alone.
+	Provider string
+	APIKey   string
+	Model    string
+	// Effort is the reasoning effort: low, medium or high.
+	Effort string
+}
+
+// Agent bounds the consultant.
+type Agent struct {
+	MaxSteps   int
+	Timeout    time.Duration
+	MaxHistory int
+	HistoryTTL time.Duration
+	// RateLimit messages per RateWindow per user go to the model.
+	RateLimit  int
+	RateWindow time.Duration
+}
+
 // Log configures the structured logger.
 type Log struct {
 	Level  string
@@ -34,6 +63,9 @@ type Log struct {
 // Bot is the configuration of the bot process.
 type Bot struct {
 	Postgres Postgres
+	Redis    Redis
+	LLM      LLM
+	Agent    Agent
 	Log      Log
 
 	TelegramToken string
@@ -69,7 +101,26 @@ func LoadBot() (*Bot, error) {
 		TelegramToken:  envString("TELEGRAM_BOT_TOKEN", ""),
 		TelegramAPIURL: envString("TELEGRAM_API_URL", "https://api.telegram.org"),
 		MaxPending:     envInt("BOT_MAX_PENDING", 256, collect),
-		HandlerTimeout: envDuration("BOT_HANDLER_TIMEOUT", 20*time.Second, collect),
+		HandlerTimeout: envDuration("BOT_HANDLER_TIMEOUT", 60*time.Second, collect),
+		Redis: Redis{
+			Addr:     envString("REDIS_ADDR", "localhost:6380"),
+			Password: envString("REDIS_PASSWORD", ""),
+			DB:       envInt("REDIS_DB", 0, collect),
+		},
+		LLM: LLM{
+			Provider: strings.ToLower(envString("LLM_PROVIDER", "claude")),
+			APIKey:   envString("ANTHROPIC_API_KEY", ""),
+			Model:    envString("LLM_MODEL", "claude-haiku-5-5"),
+			Effort:   strings.ToLower(envString("LLM_EFFORT", "low")),
+		},
+		Agent: Agent{
+			MaxSteps:   envInt("AGENT_MAX_STEPS", 6, collect),
+			Timeout:    envDuration("AGENT_TIMEOUT", 45*time.Second, collect),
+			MaxHistory: envInt("AGENT_HISTORY_MESSAGES", 30, collect),
+			HistoryTTL: envDuration("AGENT_HISTORY_TTL", 24*time.Hour, collect),
+			RateLimit:  envInt("AGENT_RATE_LIMIT", 30, collect),
+			RateWindow: envDuration("AGENT_RATE_WINDOW", time.Hour, collect),
+		},
 	}
 
 	require := func(ok bool, problem string) {
@@ -81,6 +132,26 @@ func LoadBot() (*Bot, error) {
 	require(cfg.TelegramAPIURL != "", "TELEGRAM_API_URL must be set")
 	require(cfg.MaxPending > 0, "BOT_MAX_PENDING must be positive")
 	require(cfg.HandlerTimeout >= time.Second, "BOT_HANDLER_TIMEOUT must be at least 1s")
+
+	switch cfg.LLM.Provider {
+	case "none":
+	case "claude":
+		require(cfg.LLM.APIKey != "", "ANTHROPIC_API_KEY must be set when LLM_PROVIDER=claude (or set LLM_PROVIDER=none)")
+		require(cfg.LLM.Model != "", "LLM_MODEL must be set")
+		require(slices.Contains([]string{"low", "medium", "high"}, cfg.LLM.Effort), "LLM_EFFORT must be low, medium or high")
+		require(cfg.Redis.Addr != "", "REDIS_ADDR must be set")
+		require(cfg.Agent.MaxSteps > 0, "AGENT_MAX_STEPS must be positive")
+		require(cfg.Agent.MaxHistory > 0, "AGENT_HISTORY_MESSAGES must be positive")
+		require(cfg.Agent.HistoryTTL > 0, "AGENT_HISTORY_TTL must be positive")
+		require(cfg.Agent.RateLimit > 0, "AGENT_RATE_LIMIT must be positive")
+		require(cfg.Agent.RateWindow > 0, "AGENT_RATE_WINDOW must be positive")
+		// The agent must give up before the update handler does, so the buyer
+		// gets "try again" rather than silence.
+		require(cfg.Agent.Timeout > 0 && cfg.Agent.Timeout < cfg.HandlerTimeout,
+			"AGENT_TIMEOUT must be positive and shorter than BOT_HANDLER_TIMEOUT")
+	default:
+		errs = append(errs, fmt.Errorf("LLM_PROVIDER must be claude or none, got %q", cfg.LLM.Provider))
+	}
 	errs = append(errs, cfg.Postgres.validate(), cfg.Log.validate())
 
 	if err := errors.Join(errs...); err != nil {

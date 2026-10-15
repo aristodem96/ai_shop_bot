@@ -28,6 +28,7 @@ type Messenger interface {
 	EditMessageText(ctx context.Context, chatID, messageID int64, html string, markup *telegram.InlineKeyboard) error
 	EditMessageReplyMarkup(ctx context.Context, chatID, messageID int64, markup *telegram.InlineKeyboard) error
 	AnswerCallbackQuery(ctx context.Context, id, text string, alert bool) error
+	SendChatAction(ctx context.Context, chatID int64, action string) error
 }
 
 // Catalog is what the bot needs from the catalogue service.
@@ -63,6 +64,10 @@ type Bot struct {
 	cart    Cart
 	cfg     Config
 	log     *slog.Logger
+
+	// consultant and limiter are nil until UseConsultant is called.
+	consultant Consultant
+	limiter    Limiter
 }
 
 // New wires a Bot.
@@ -189,9 +194,13 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 		b.sendCart(ctx, chat, user)
 	case "/help", btnHelp:
 		b.send(ctx, chat, msgHelp, mainMenu())
+	case "/new":
+		b.resetConversation(ctx, chat)
+	case "":
+		// A photo, a sticker, a voice note. Photo search arrives in stage 4.
+		b.send(ctx, chat, msgTextOnly, nil)
 	default:
-		b.send(ctx, chat, msgFreeTextSoon, nil)
-		b.sendCategories(ctx, chat)
+		b.consult(ctx, chat, user, m.Text)
 	}
 }
 

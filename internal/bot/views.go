@@ -169,6 +169,27 @@ func similarView(p *domain.Product, similar []domain.Product) (string, *telegram
 	return fmt.Sprintf("Схоже на <b>%s</b>:", esc(p.Name)), kb
 }
 
+// maxReplyRunes keeps a model reply inside Telegram's 4096-character message
+// limit with room for escaping.
+const maxReplyRunes = 3500
+
+// consultantView is the consultant's answer: the model's text, escaped -- it
+// is model output, so it is never trusted as markup -- and a button per
+// product it chose to show, labelled from the catalogue.
+func consultantView(text string, products []domain.Product, cartChanged bool) (string, *telegram.InlineKeyboard) {
+	if r := []rune(text); len(r) > maxReplyRunes {
+		text = string(r[:maxReplyRunes]) + "…"
+	}
+	kb := &telegram.InlineKeyboard{}
+	for _, p := range products {
+		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(productLabel(p), actProduct, p.ID)})
+	}
+	if cartChanged {
+		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(btnCart, actCart)})
+	}
+	return esc(text), kb
+}
+
 func cartView(c *domain.Cart) (string, *telegram.InlineKeyboard) {
 	if len(c.Lines) == 0 {
 		return msgCartEmpty, &telegram.InlineKeyboard{Rows: [][]telegram.InlineButton{
