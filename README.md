@@ -441,16 +441,34 @@ cars the catalogue knows:
 
 ```bash
 make import-vehicles                    # data/vehicles.csv: ~200 cars common in Ukraine
-make import PROFILE=supplier.json FILE=price.xlsx DRY_RUN=1
-make import PROFILE=supplier.json FILE=price.xlsx
+make import PROFILE=profiles/supplier.json FILE=price.xlsx DRY_RUN=1
+make import PROFILE=profiles/supplier.json FILE=price.xlsx
 ```
+
+**Or from Telegram**, which is how a shop's staff would do it: send the file
+to the managers' chat (`ADMIN_CHAT_ID`), with the profile's name as the
+caption — or `авто` for the vehicle directory, or nothing when there is one
+profile. The bot runs the dry run and answers with its report and two
+buttons, *Apply* and *Cancel*. Profiles are the files in
+[profiles/](profiles/), mounted into the container, so adding a supplier
+needs no rebuild. Only the managers' chat can upload, and its buttons are
+checked against it like the order buttons are.
 
 A **profile** is a JSON file per supplier: which column is the name, price,
 brand, part number and vehicle, the words that sort rows into categories, the
 delivery time for parts on order, and a map for vehicle names the directory
 does not use verbatim (`"Chevrolet Aveo": ["Chevrolet Aveo T200", "Chevrolet
-Aveo T250"]`). A new supplier is a new JSON file, not a release. The example
-in [docs/import/](docs/import/) is also what the integration test imports.
+Aveo T250"]`). A new supplier is a new JSON file, not a release.
+[profiles/demo-stock.json](profiles/demo-stock.json) with
+[docs/import/example-price.csv](docs/import/example-price.csv) is a working
+example, and what the integration test imports.
+
+Files arrive in whatever shape the supplier's software writes. Columns are
+found by name, in any order, under any preamble, on any sheet. A CSV in
+Windows-1251 (Excel on Windows, 1C) is recognised, and so is its delimiter.
+When a supplier renames a column, the error names the missing column and
+shows the row that came closest — where the new name is usually plain to
+see.
 
 The **dry run** applies everything in a transaction and rolls it back, so its
 numbers are exact: how many products would be added, updated and taken off
@@ -467,12 +485,18 @@ shelf, and units held by open orders are still on it, so they are subtracted:
 otherwise an order that expires later would give its units back twice. Every
 run is logged in `import_runs`.
 
+A truncated file — one sheet of six, an export cut off halfway — looks
+exactly like a supplier dropping most of its range. An import that would
+take more than 20% of the supplier's products off sale (adjustable per
+profile) stops and changes nothing; applying it anyway is a second,
+deliberate step (`-force`, or the button in the chat).
+
 On a server the command is in the image:
 
 ```bash
 docker compose run --rm --entrypoint /import bot -vehicles /data/vehicles.csv
 docker compose run --rm -v $PWD/imports:/imports --entrypoint /import bot \
-  -profile /imports/supplier.json -file /imports/price.xlsx -dry-run
+  -profile /profiles/supplier.json -file /imports/price.xlsx -dry-run
 ```
 
 ---
@@ -523,5 +547,6 @@ internal/
   config/              environment configuration
 migrations/            goose migrations, embedded in the binary
 data/vehicles.csv      the vehicle directory
-docs/import/           an example price list and its profile
+profiles/              supplier profiles the managers' chat imports with
+docs/import/           an example price list
 ```

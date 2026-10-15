@@ -36,6 +36,9 @@ const (
 	actEditContacts   action = "ce"   // type the contacts again
 	actCancelCheckout action = "cq"   // leave the checkout
 	actManage         action = "om"   // om:<order>:<move> a manager's button
+	actImportProfile  action = "ip"   // ip:<job>:<choice> what an uploaded file is
+	actImportApply    action = "ia"   // ia:<job>:<force> apply a checked file
+	actImportCancel   action = "ix"   // ix:<job> drop an uploaded file
 	actNoop           action = "x"    // a label that only looks like a button
 )
 
@@ -46,6 +49,7 @@ var arity = map[action]int{
 	actAdd: 1, actAnalogues: 1, actCart: 0, actInc: 1, actDec: 1, actDel: 1,
 	actClear: 0, actForgetCar: 0, actKit: 0, actKitAdd: 0, actNoop: 0,
 	actCheckout: 0, actPay: 0, actEditContacts: 0, actCancelCheckout: 0, actManage: 2,
+	actImportProfile: 2, actImportApply: 2, actImportCancel: 1,
 }
 
 // maxCallbackData is Telegram's limit on callback_data, in bytes.

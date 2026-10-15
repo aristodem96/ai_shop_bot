@@ -76,6 +76,16 @@ type Message struct {
 	Caption string `json:"caption"`
 	// Contact is a phone number shared with the "share contact" button.
 	Contact *Contact `json:"contact"`
+	// Document is a file sent as a file, not as a photo.
+	Document *Document `json:"document"`
+}
+
+// Document is a file attached to a message.
+type Document struct {
+	FileID   string `json:"file_id"`
+	FileName string `json:"file_name"`
+	// FileSize is in bytes; Telegram may omit it.
+	FileSize int64 `json:"file_size"`
 }
 
 // Contact is a shared phone number. UserID is set when the contact is a

@@ -91,6 +91,12 @@ type Bot struct {
 	consultant Consultant
 	limiter    Limiter
 	files      Files
+
+	// imports is nil until UseImports is called.
+	imports     Imports
+	importFiles Files
+	importDir   string
+	importJobs  *importJobs
 }
 
 // New wires a Bot.
@@ -203,6 +209,13 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 	// ADMIN_CHAT_ID. In a group, commands may carry the bot's name: /id@bot.
 	if m.Text == "/id" || strings.HasPrefix(m.Text, "/id@") {
 		b.send(ctx, m.Chat.ID, fmt.Sprintf("ID цього чату: <code>%d</code>", m.Chat.ID), nil)
+		return
+	}
+	// A file in the managers' chat is a price list or the vehicle
+	// directory. Checked before the private-only rule: that chat is often
+	// a group.
+	if m.Document != nil && b.imports != nil && b.isAdmin(m.Chat.ID) {
+		b.receiveImport(ctx, m)
 		return
 	}
 	// A cart is personal. In a group every member would share the buttons of
@@ -331,6 +344,18 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 		return "", b.cancelCheckout(ctx, cc)
 	case actManage:
 		return b.manage(ctx, cc, a[0], a[1])
+	case actImportProfile, actImportApply, actImportCancel:
+		if b.imports == nil {
+			return "", errBadCallback
+		}
+		switch cb.act {
+		case actImportProfile:
+			return b.chooseImport(ctx, cc, a[0], a[1])
+		case actImportApply:
+			return b.applyImport(ctx, cc, a[0], a[1])
+		default:
+			return b.cancelImport(ctx, cc, a[0])
+		}
 	case actForgetCar:
 		return "", b.forgetCar(ctx, cc)
 	case actNoop:

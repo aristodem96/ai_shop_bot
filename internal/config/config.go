@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -111,6 +112,12 @@ type Bot struct {
 	CartReminderEvery time.Duration
 	// Timezone decides the hours reminders may be sent in.
 	Timezone string
+
+	// ImportProfilesDir holds the supplier profiles the managers' chat can
+	// import price lists with. ImportDir keeps uploaded files until they
+	// are applied; it is emptied on start.
+	ImportProfilesDir string
+	ImportDir         string
 }
 
 // LoadBot reads the bot configuration.
@@ -135,6 +142,8 @@ func LoadBot() (*Bot, error) {
 		CartReminderAfter: envDuration("CART_REMINDER_AFTER", 24*time.Hour, collect),
 		CartReminderEvery: envDuration("CART_REMINDER_EVERY", 10*time.Minute, collect),
 		Timezone:          envString("BOT_TIMEZONE", "Europe/Kyiv"),
+		ImportProfilesDir: envString("IMPORT_PROFILES_DIR", "profiles"),
+		ImportDir:         envString("IMPORT_DIR", filepath.Join(os.TempDir(), "ai_shop_bot-imports")),
 		Redis: Redis{
 			Addr:     envString("REDIS_ADDR", "localhost:6380"),
 			Password: envString("REDIS_PASSWORD", ""),

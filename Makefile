@@ -37,7 +37,7 @@ seed: ## Migrate and load (or reset) the demo catalogue
 # The example stock file by default; a real one with
 #   make import PROFILE=supplier.json FILE=price.xlsx
 # and always with DRY_RUN=1 first.
-PROFILE ?= docs/import/example-profile.json
+PROFILE ?= profiles/demo-stock.json
 FILE    ?= docs/import/example-price.csv
 DRY_RUN ?=
 

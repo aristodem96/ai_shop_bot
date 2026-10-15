@@ -87,3 +87,15 @@ const (
 	msgBadTransition      = "Цей статус уже неможливо змінити."
 	msgNoOrders           = "У вас ще немає замовлень."
 )
+
+// Catalogue imports, in the managers' chat.
+const (
+	msgImportBadType        = "Я завантажую прайси у форматі .xlsx або .csv. Файл .xls пересохраніть в Excel як .xlsx."
+	msgImportTooBig         = "Файл більший за 20 МБ — стільки Telegram дозволяє боту завантажити. Розбийте прайс на частини або збережіть як .csv."
+	msgImportUnknownProfile = "Не знаю профілю «%s». Напишіть у підписі до файлу один з: %s."
+	msgImportChoose         = "Що це за файл?"
+	msgImportChecking       = "⏳ Перевіряю <b>%s</b> як %s…"
+	msgImportExpired        = "Файл застарів — надішліть його ще раз."
+	msgImportGone           = "Цей файл уже застосовано або скасовано."
+	msgImportCancelled      = "Скасовано, каталог не змінено."
+)

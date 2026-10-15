@@ -17,7 +17,7 @@ import (
 // The example in docs/import is the test input, so the file a reader of the
 // README tries is the file CI proves works.
 const (
-	exampleProfile = "../../../docs/import/example-profile.json"
+	exampleProfile = "../../../profiles/demo-stock.json"
 	exampleFile    = "../../../docs/import/example-price.csv"
 )
 

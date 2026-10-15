@@ -23,6 +23,7 @@ import (
 	"github.com/aristodem96/ai_shop_bot/internal/agent"
 	"github.com/aristodem96/ai_shop_bot/internal/bot"
 	"github.com/aristodem96/ai_shop_bot/internal/config"
+	"github.com/aristodem96/ai_shop_bot/internal/importer"
 	"github.com/aristodem96/ai_shop_bot/internal/llm/claude"
 	"github.com/aristodem96/ai_shop_bot/internal/observability"
 	"github.com/aristodem96/ai_shop_bot/internal/payment/monobank"
@@ -158,6 +159,17 @@ func run() error {
 			return err
 		}
 		b.UseConsultant(consultant, redisstore.NewRateLimiter(rdb, cfg.Agent.RateLimit, cfg.Agent.RateWindow), tg)
+	}
+
+	// --- catalogue imports from the managers' chat ----------------------------
+	if cfg.Payments.AdminChatID != 0 {
+		importRepo := postgres.NewImportRepository(pool)
+		imports := importer.NewService(importRepo, importRepo, cfg.ImportProfilesDir)
+		if err := b.UseImports(imports, tg, cfg.ImportDir, cfg.Payments.AdminChatID); err != nil {
+			return err
+		}
+	} else {
+		log.Warn("ADMIN_CHAT_ID is not set: price lists cannot be uploaded in Telegram")
 	}
 
 	// --- run -----------------------------------------------------------------
