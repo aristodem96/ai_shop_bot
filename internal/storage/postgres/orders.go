@@ -57,7 +57,7 @@ func scanOrder(row pgx.Row) (*domain.Order, error) {
 func (r *OrderRepository) loadItems(ctx context.Context, q pgx.Tx, o *domain.Order) error {
 	var rows pgx.Rows
 	var err error
-	sql := `SELECT product_id, name, brand, price, qty FROM order_items WHERE order_id = $1 ORDER BY product_id`
+	sql := `SELECT product_id, name, brand, price, qty, from_stock FROM order_items WHERE order_id = $1 ORDER BY product_id`
 	if q != nil {
 		rows, err = q.Query(ctx, sql, o.ID)
 	} else {
@@ -71,7 +71,7 @@ func (r *OrderRepository) loadItems(ctx context.Context, q pgx.Tx, o *domain.Ord
 			i     domain.OrderItem
 			price int64
 		)
-		err := row.Scan(&i.ProductID, &i.Name, &i.Brand, &price, &i.Qty)
+		err := row.Scan(&i.ProductID, &i.Name, &i.Brand, &price, &i.Qty, &i.FromStock)
 		i.Price = domain.Money(price)
 		return i, err
 	})
@@ -85,7 +85,8 @@ func (r *OrderRepository) loadItems(ctx context.Context, q pgx.Tx, o *domain.Ord
 // stock, all in one transaction. It is the guarantee that a unit is sold
 // once: the product rows are locked, the stock is checked under the lock and
 // decremented before the lock is released, so of two buyers racing for the
-// last unit exactly one gets it -- the other sees ErrOutOfStock.
+// last unit exactly one gets it -- the other sees ErrOutOfStock. Parts on
+// order take nothing off the shelf: the supplier delivers them.
 //
 // A buyer who already has an unpaid order gets that order back, created
 // false, instead of a second reservation.
@@ -109,7 +110,8 @@ func (r *OrderRepository) PlaceOrder(ctx context.Context, userID int64, c domain
 
 		// Lock the products in the cart, in id order.
 		rows, err := tx.Query(ctx, `
-			SELECT p.id, p.name, p.brand, p.price, ci.qty, p.stock, p.is_active
+			SELECT p.id, p.name, p.brand, p.price, ci.qty, p.stock, p.is_active,
+				p.lead_time_days IS NULL
 			FROM cart_items ci
 			JOIN products p ON p.id = ci.product_id
 			WHERE ci.user_id = $1
@@ -128,7 +130,7 @@ func (r *OrderRepository) PlaceOrder(ctx context.Context, userID int64, c domain
 				l     line
 				price int64
 			)
-			err := row.Scan(&l.item.ProductID, &l.item.Name, &l.item.Brand, &price, &l.item.Qty, &l.stock, &l.active)
+			err := row.Scan(&l.item.ProductID, &l.item.Name, &l.item.Brand, &price, &l.item.Qty, &l.stock, &l.active, &l.item.FromStock)
 			l.item.Price = domain.Money(price)
 			return l, err
 		})
@@ -140,15 +142,12 @@ func (r *OrderRepository) PlaceOrder(ctx context.Context, userID int64, c domain
 		}
 
 		o := &domain.Order{UserID: userID, Status: domain.OrderAwaitingPayment, Contacts: c, ReservedUntil: reservedUntil}
-		ids := make([]int64, len(lines))
-		qtys := make([]int32, len(lines))
-		for i, l := range lines {
-			if !l.active || l.item.Qty > l.stock {
+		for _, l := range lines {
+			if !l.active || (l.item.FromStock && l.item.Qty > l.stock) {
 				return fmt.Errorf("%w: %s (%s)", domain.ErrOutOfStock, l.item.Name, l.item.Brand)
 			}
 			o.Items = append(o.Items, l.item)
 			o.Total += l.item.Subtotal()
-			ids[i], qtys[i] = l.item.ProductID, int32(l.item.Qty) //nolint:gosec // qty is capped at MaxQtyPerLine
 		}
 
 		order, err = scanOrder(tx.QueryRow(ctx, `
@@ -163,12 +162,13 @@ func (r *OrderRepository) PlaceOrder(ctx context.Context, userID int64, c domain
 		order.Items = o.Items
 
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO order_items (order_id, product_id, name, brand, price, qty)
-			SELECT $1, c.product_id, p.name, p.brand, p.price, c.qty
+			INSERT INTO order_items (order_id, product_id, name, brand, price, qty, from_stock)
+			SELECT $1, c.product_id, p.name, p.brand, p.price, c.qty, p.lead_time_days IS NULL
 			FROM cart_items c JOIN products p ON p.id = c.product_id
 			WHERE c.user_id = $2`, order.ID, userID); err != nil {
 			return fmt.Errorf("postgres: insert order items: %w", err)
 		}
+		ids, qtys := shelfLines(o.Items)
 		if err := moveStock(ctx, tx, ids, qtys, -1); err != nil {
 			return err
 		}
@@ -191,6 +191,22 @@ func (r *OrderRepository) PlaceOrder(ctx context.Context, userID int64, c domain
 	return order, created, nil
 }
 
+// shelfLines lists the products and quantities of the lines that take units
+// off the shelf, in the arrays moveStock wants.
+func shelfLines(items []domain.OrderItem) ([]int64, []int32) {
+	var (
+		ids  []int64
+		qtys []int32
+	)
+	for _, it := range items {
+		if it.FromStock {
+			ids = append(ids, it.ProductID)
+			qtys = append(qtys, int32(it.Qty)) //nolint:gosec // qty is capped at MaxQtyPerLine
+		}
+	}
+	return ids, qtys
+}
+
 // moveStock adds sign*qty to each product's stock. The CHECK (stock >= 0) on
 // products backs the check made under the lock: a bug here fails loudly
 // instead of selling a unit twice.
@@ -209,11 +225,7 @@ func moveStock(ctx context.Context, tx pgx.Tx, ids []int64, qtys []int32, sign i
 // paid, puts them back in the buyer's cart: a buyer whose payment failed
 // should be able to try again without filling the cart from scratch.
 func releaseStock(ctx context.Context, tx pgx.Tx, o *domain.Order, refillCart bool) error {
-	ids := make([]int64, len(o.Items))
-	qtys := make([]int32, len(o.Items))
-	for i, it := range o.Items {
-		ids[i], qtys[i] = it.ProductID, int32(it.Qty) //nolint:gosec // qty is capped at MaxQtyPerLine
-	}
+	ids, qtys := shelfLines(o.Items)
 	// Lock in id order, like PlaceOrder, before touching stock.
 	if _, err := tx.Exec(ctx, `SELECT 1 FROM products WHERE id = ANY($1) ORDER BY id FOR UPDATE`, ids); err != nil {
 		return fmt.Errorf("postgres: lock products: %w", err)
@@ -224,6 +236,12 @@ func releaseStock(ctx context.Context, tx pgx.Tx, o *domain.Order, refillCart bo
 	if !refillCart {
 		return nil
 	}
+	// Every line goes back to the cart, those on order included.
+	all := make([]int64, len(o.Items))
+	allQtys := make([]int32, len(o.Items))
+	for i, it := range o.Items {
+		all[i], allQtys[i] = it.ProductID, int32(it.Qty) //nolint:gosec // qty is capped at MaxQtyPerLine
+	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO carts (user_id) VALUES ($1)
 		ON CONFLICT (user_id) DO UPDATE SET updated_at = now(), reminded_at = NULL`, o.UserID); err != nil {
@@ -233,7 +251,7 @@ func releaseStock(ctx context.Context, tx pgx.Tx, o *domain.Order, refillCart bo
 		INSERT INTO cart_items (user_id, product_id, qty)
 		SELECT $1, x.id, x.qty FROM unnest($2::bigint[], $3::int[]) AS x(id, qty)
 		ON CONFLICT (user_id, product_id) DO UPDATE SET qty = cart_items.qty + EXCLUDED.qty`,
-		o.UserID, ids, qtys); err != nil {
+		o.UserID, all, allQtys); err != nil {
 		return fmt.Errorf("postgres: restore cart lines: %w", err)
 	}
 	return nil
@@ -241,10 +259,9 @@ func releaseStock(ctx context.Context, tx pgx.Tx, o *domain.Order, refillCart bo
 
 // takeStock re-reserves a lapsed order's units, if they are all still there.
 func takeStock(ctx context.Context, tx pgx.Tx, o *domain.Order) (bool, error) {
-	ids := make([]int64, len(o.Items))
-	qtys := make([]int32, len(o.Items))
-	for i, it := range o.Items {
-		ids[i], qtys[i] = it.ProductID, int32(it.Qty) //nolint:gosec // qty is capped at MaxQtyPerLine
+	ids, qtys := shelfLines(o.Items)
+	if len(ids) == 0 {
+		return true, nil
 	}
 	var short int
 	err := tx.QueryRow(ctx, `

@@ -101,6 +101,9 @@ func adminOrderView(o *domain.Order) (string, *telegram.InlineKeyboard) {
 	}
 	for _, i := range o.Items {
 		fmt.Fprintf(&b, "• %s (%s) — %d × %s\n", esc(i.Name), esc(i.Brand), i.Qty, i.Price)
+		if !i.FromStock {
+			b.WriteString("   🚚 під замовлення: замовте у постачальника\n")
+		}
 	}
 	b.WriteString("\n" + contactsBlock(o.Contacts))
 	if o.InvoiceID != "" {

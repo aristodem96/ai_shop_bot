@@ -28,13 +28,21 @@ type CartLine struct {
 	// Stock is the current stock. It may have dropped below Qty since the
 	// line was added; the cart shows that instead of hiding it.
 	Stock int
+	// OnOrder lines come from a supplier in about LeadDays days; their stock
+	// is not tracked, so they are never short.
+	OnOrder  bool
+	LeadDays int
 }
 
 // Subtotal is the line's price times its quantity.
 func (l CartLine) Subtotal() Money { return l.Price * Money(l.Qty) }
 
 // Short reports whether stock no longer covers the quantity.
-func (l CartLine) Short() bool { return l.Qty > l.Stock }
+func (l CartLine) Short() bool { return !l.OnOrder && l.Qty > l.Stock }
+
+// Unavailable reports whether the line cannot be bought at all: the product
+// is sold out or off sale.
+func (l CartLine) Unavailable() bool { return !l.OnOrder && l.Stock == 0 }
 
 // Total is the sum of all lines.
 func (c *Cart) Total() Money {

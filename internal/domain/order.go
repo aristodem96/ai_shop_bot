@@ -85,6 +85,9 @@ type OrderItem struct {
 	Brand     string
 	Price     Money
 	Qty       int
+	// FromStock lines took their units off the shelf and give them back if
+	// the order falls through; lines on order took none.
+	FromStock bool
 }
 
 // Subtotal is the line's price times its quantity.

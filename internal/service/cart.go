@@ -50,7 +50,7 @@ func (s *CartService) Add(ctx context.Context, userID, productID int64) (*domain
 		return nil, domain.ErrCartFull
 	case qty > domain.MaxQtyPerLine:
 		return nil, domain.ErrQtyLimit
-	case qty > p.Stock:
+	case !p.OnOrder && qty > p.Stock:
 		return nil, domain.ErrOutOfStock
 	}
 

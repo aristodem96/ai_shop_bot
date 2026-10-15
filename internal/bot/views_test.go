@@ -75,3 +75,21 @@ func TestCartViewFlagsShortLines(t *testing.T) {
 	assert.Contains(t, callbacks(kb), encode(actDec, 1))
 	assert.Contains(t, callbacks(kb), encode(actClear))
 }
+
+func TestProductCaptionOnOrder(t *testing.T) {
+	p := &domain.Product{ID: 9, Name: "Амортизатор", Price: domain.UAH(2390), OnOrder: true, LeadDays: 3,
+		Fits: []domain.Vehicle{octavia}, FitNotes: map[int64]string{octavia.ID: "передня вісь"}}
+
+	got := productCaption(p, &octavia)
+	assert.Contains(t, got, "🚚 під замовлення, 3 дні")
+	assert.Contains(t, got, "Підходить до вашого Skoda Octavia A7 1.4 TSI (передня вісь)", "the note tells two fitting parts apart")
+	assert.Contains(t, callbacks(productKeyboard(p)), encode(actAdd, 9), "a part on order can be bought")
+}
+
+func TestPlural(t *testing.T) {
+	for n, want := range map[int]string{
+		1: "1 день", 2: "2 дні", 4: "4 дні", 5: "5 днів", 11: "11 днів", 14: "14 днів", 21: "21 день", 22: "22 дні",
+	} {
+		assert.Equal(t, want, plural(n, "день", "дні", "днів"))
+	}
+}

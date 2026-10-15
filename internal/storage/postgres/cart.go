@@ -30,7 +30,8 @@ func NewCartRepository(pool *pgxpool.Pool) *CartRepository {
 func (r *CartRepository) Cart(ctx context.Context, userID int64) (*domain.Cart, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT p.id, p.name, p.brand, p.price, ci.qty,
-		       CASE WHEN p.is_active THEN p.stock ELSE 0 END
+		       CASE WHEN p.is_active THEN p.stock ELSE 0 END,
+		       p.is_active AND p.lead_time_days IS NOT NULL, coalesce(p.lead_time_days, 0)
 		FROM cart_items ci
 		JOIN products p ON p.id = ci.product_id
 		WHERE ci.user_id = $1
@@ -43,7 +44,7 @@ func (r *CartRepository) Cart(ctx context.Context, userID int64) (*domain.Cart, 
 			l     domain.CartLine
 			price int64
 		)
-		err := row.Scan(&l.ProductID, &l.ProductName, &l.Brand, &price, &l.Qty, &l.Stock)
+		err := row.Scan(&l.ProductID, &l.ProductName, &l.Brand, &price, &l.Qty, &l.Stock, &l.OnOrder, &l.LeadDays)
 		l.Price = domain.Money(price)
 		return l, err
 	})

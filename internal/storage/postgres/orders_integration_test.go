@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
+	"github.com/aristodem96/ai_shop_bot/internal/service"
 )
 
 var buyer = domain.Contacts{Name: "Тарас Шевченко", Phone: "+380671234567", Delivery: "Київ, відділення 25"}
@@ -311,4 +312,72 @@ func TestManagerTransitions(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, orders, 1)
 	assert.Len(t, orders[0].Items, 1)
+}
+
+// onOrder switches a product to "supplier delivers in days" for one test.
+func onOrder(t *testing.T, sku string, days int) *domain.Product {
+	t.Helper()
+	ctx := context.Background()
+	p := withStock(t, sku, 0)
+	_, err := testPool.Exec(ctx, `UPDATE products SET lead_time_days = $2 WHERE id = $1`, p.ID, days)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(ctx, `UPDATE products SET lead_time_days = NULL WHERE id = $1`, p.ID)
+	})
+	p.OnOrder, p.LeadDays = true, days
+	return p
+}
+
+func TestOnOrderSellsWithoutStock(t *testing.T) {
+	skipShort(t)
+	ctx := context.Background()
+	const user = int64(5401)
+	shock := onOrder(t, "SUS-001", 3)
+	pads := withStock(t, "BRK-002", 5)
+
+	card := productBySKU(t, "SUS-001")
+	assert.True(t, card.OnOrder)
+	assert.Equal(t, 3, card.LeadDays)
+	found, err := NewCatalogRepository(testPool).Search(ctx, service.SearchFilter{PartNumber: card.OEMNumbers[0], Limit: 5})
+	require.NoError(t, err)
+	assert.Contains(t, ids(found), shock.ID, "a part on order is for sale, though none is on the shelf")
+
+	buyerCart(t, user, shock.ID, 2)
+	require.NoError(t, NewCartRepository(testPool).SetQty(ctx, user, pads.ID, 1))
+	cart, err := NewCartRepository(testPool).Cart(ctx, user)
+	require.NoError(t, err)
+	line, _ := cart.Line(shock.ID)
+	assert.True(t, line.OnOrder)
+	assert.False(t, line.Short(), "a line on order is never short")
+
+	o := place(t, user)
+	byID := map[int64]domain.OrderItem{}
+	for _, it := range o.Items {
+		byID[it.ProductID] = it
+	}
+	assert.False(t, byID[shock.ID].FromStock)
+	assert.True(t, byID[pads.ID].FromStock)
+	assert.Equal(t, 0, stockOf(t, shock.ID), "nothing is taken off a shelf the part is not on")
+	assert.Equal(t, 4, stockOf(t, pads.ID))
+
+	// The product goes back to the shelf while the order is open, as a
+	// re-import may do. Cancelling must not give back units never taken.
+	_, err = testPool.Exec(ctx, `UPDATE products SET lead_time_days = NULL WHERE id = $1`, shock.ID)
+	require.NoError(t, err)
+	_, err = NewOrderRepository(testPool).Expire(ctx, o.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 0, stockOf(t, shock.ID), "no stock is created out of nothing")
+	assert.Equal(t, 5, stockOf(t, pads.ID))
+
+	cart, err = NewCartRepository(testPool).Cart(ctx, user)
+	require.NoError(t, err)
+	assert.Len(t, cart.Lines, 2, "both lines are back in the cart")
+}
+
+func ids(ps []domain.Product) []int64 {
+	out := make([]int64, len(ps))
+	for i, p := range ps {
+		out[i] = p.ID
+	}
+	return out
 }

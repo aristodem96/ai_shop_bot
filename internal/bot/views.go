@@ -103,7 +103,11 @@ func productPageView(pg *service.ProductPage) (string, *telegram.InlineKeyboard)
 // not escaped.
 func productLabel(p domain.Product) string {
 	label := fmt.Sprintf("%s · %s — %s", p.Name, p.Brand, p.Price)
-	if !p.InStock() {
+	switch {
+	case p.Stock > 0:
+	case p.OnOrder:
+		label += " · 🚚"
+	default:
 		label += " · немає"
 	}
 	return label
@@ -118,7 +122,7 @@ func productCaption(p *domain.Product, car *domain.Vehicle) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "<b>%s</b>\n", esc(p.Name))
 	fmt.Fprintf(&b, "%s · арт. %s\n", esc(p.Brand), esc(p.SKU))
-	fmt.Fprintf(&b, "<b>%s</b> · %s\n\n", p.Price, stockLabel(p.Stock))
+	fmt.Fprintf(&b, "<b>%s</b> · %s\n\n", p.Price, stockLabel(p))
 	if p.Description != "" {
 		fmt.Fprintf(&b, "%s\n\n", esc(p.Description))
 	}
@@ -137,15 +141,39 @@ func productCaption(p *domain.Product, car *domain.Vehicle) string {
 	return b.String()
 }
 
-func stockLabel(stock int) string {
+func stockLabel(p *domain.Product) string {
 	switch {
-	case stock == 0:
+	case p.OnOrder:
+		return "🚚 " + leadTime(p.LeadDays)
+	case p.Stock == 0:
 		return "❌ немає в наявності"
-	case stock <= domain.LowStock:
-		return fmt.Sprintf("⚠️ останні %d шт.", stock)
+	case p.Stock <= domain.LowStock:
+		return fmt.Sprintf("⚠️ останні %d шт.", p.Stock)
 	default:
 		return "✅ в наявності"
 	}
+}
+
+// leadTime says when a part on order arrives.
+func leadTime(days int) string {
+	if days == 0 {
+		return "під замовлення"
+	}
+	return fmt.Sprintf("під замовлення, %s", plural(days, "день", "дні", "днів"))
+}
+
+// plural picks the Ukrainian form of a counted noun: 1 день, 2 дні, 5 днів,
+// 11 днів, 21 день.
+func plural(n int, one, few, many string) string {
+	form := many
+	switch {
+	case n%100 >= 11 && n%100 <= 14:
+	case n%10 == 1:
+		form = one
+	case n%10 >= 2 && n%10 <= 4:
+		form = few
+	}
+	return fmt.Sprintf("%d %s", n, form)
 }
 
 func fitmentLine(p *domain.Product, car *domain.Vehicle) string {
@@ -176,7 +204,7 @@ func fitmentLine(p *domain.Product, car *domain.Vehicle) string {
 
 func productKeyboard(p *domain.Product) *telegram.InlineKeyboard {
 	first := []telegram.InlineButton{button("🔁 Аналоги", actAnalogues, p.ID)}
-	if p.InStock() {
+	if p.Available() {
 		first = append([]telegram.InlineButton{button("🛒 У кошик", actAdd, p.ID)}, first...)
 	}
 	return &telegram.InlineKeyboard{Rows: [][]telegram.InlineButton{
@@ -312,7 +340,9 @@ func cartView(c *domain.Cart) (string, *telegram.InlineKeyboard) {
 		fmt.Fprintf(&b, "\n%s. %s (%s)\n", n, esc(l.ProductName), esc(l.Brand))
 		fmt.Fprintf(&b, "    %d × %s = <b>%s</b>\n", l.Qty, l.Price, l.Subtotal())
 		switch {
-		case l.Stock == 0:
+		case l.OnOrder:
+			fmt.Fprintf(&b, "    🚚 %s\n", leadTime(l.LeadDays))
+		case l.Unavailable():
 			b.WriteString("    ⚠️ більше немає в наявності\n")
 		case l.Short():
 			fmt.Fprintf(&b, "    ⚠️ залишилось лише %d шт.\n", l.Stock)

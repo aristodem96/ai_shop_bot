@@ -74,8 +74,14 @@ type Product struct {
 	// Universal parts fit every vehicle and have no Fits list.
 	Universal bool
 	Price     Money
-	Stock     int
-	ImageURL  string
+	// Stock is the units on the shelf. It is not tracked for a part on
+	// order.
+	Stock int
+	// OnOrder parts are delivered by a supplier in about LeadDays days and
+	// can be bought in any quantity.
+	OnOrder  bool
+	LeadDays int
+	ImageURL string
 	// Fits lists the vehicles the part fits. Listing queries leave it empty;
 	// the product card query fills it.
 	Fits []Vehicle
@@ -85,8 +91,9 @@ type Product struct {
 	FitNotes map[int64]string
 }
 
-// InStock reports whether the part can be bought.
-func (p *Product) InStock() bool { return p.Stock > 0 }
+// Available reports whether the part can be bought: it is on the shelf, or
+// the supplier delivers it.
+func (p *Product) Available() bool { return p.OnOrder || p.Stock > 0 }
 
 // FitsVehicle reports whether the part fits the vehicle. It relies on Fits
 // being loaded, which the card query does.

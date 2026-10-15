@@ -27,12 +27,12 @@ func (w *whereBuilder) arg(v any) string {
 
 func (w *whereBuilder) add(cond string) { w.conds = append(w.conds, cond) }
 
-// Search finds active, in-stock products that match every set field of the
-// filter.
+// Search finds active products that can be bought and match every set field
+// of the filter.
 func (r *CatalogRepository) Search(ctx context.Context, f service.SearchFilter) ([]domain.Product, error) {
 	var w whereBuilder
 	w.add("p.is_active")
-	w.add("p.stock > 0")
+	w.add(available)
 
 	if f.Category != "" {
 		w.add("p.category_id = (SELECT id FROM categories WHERE slug = " + w.arg(f.Category) + ")")

@@ -61,7 +61,11 @@ func (r *CatalogRepository) Category(ctx context.Context, id int64) (*domain.Cat
 // all the same way.
 const productColumns = `
 	p.id, p.category_id, p.sku, p.name, p.brand, p.description,
-	p.oem_numbers, p.specs, p.universal, p.price, p.stock, p.image_url, p.part_type`
+	p.oem_numbers, p.specs, p.universal, p.price, p.stock, p.lead_time_days IS NOT NULL,
+	coalesce(p.lead_time_days, 0), p.image_url, p.part_type`
+
+// available is the condition "p can be bought": on the shelf, or on order.
+const available = `(p.stock > 0 OR p.lead_time_days IS NOT NULL)`
 
 // fitsVehicle is the condition "p fits the vehicle in placeholder ph": a
 // universal part, or one fitted to it directly or through its model. Zero
@@ -78,7 +82,7 @@ func scanProduct(row pgx.Row) (domain.Product, error) {
 		specs []byte
 	)
 	err := row.Scan(&p.ID, &p.CategoryID, &p.SKU, &p.Name, &p.Brand, &p.Description,
-		&p.OEMNumbers, &specs, &p.Universal, &price, &p.Stock, &p.ImageURL, &p.PartType)
+		&p.OEMNumbers, &specs, &p.Universal, &price, &p.Stock, &p.OnOrder, &p.LeadDays, &p.ImageURL, &p.PartType)
 	if err != nil {
 		return p, err
 	}
@@ -95,9 +99,10 @@ func collectProducts(rows pgx.Rows) ([]domain.Product, error) {
 	})
 }
 
-// ProductsByCategory returns one page of a category, in-stock products first
-// and cheapest first within that. A sold-out part at the top of the list is a
-// dead end; at the bottom it still tells the buyer the part exists.
+// ProductsByCategory returns one page of a category: in-stock products first,
+// then those on order, then sold-out ones, cheapest first within each. A
+// sold-out part at the top of the list is a dead end; at the bottom it still
+// tells the buyer the part exists.
 func (r *CatalogRepository) ProductsByCategory(ctx context.Context, categoryID, vehicleID int64, limit, offset int) ([]domain.Product, int, error) {
 	var total int
 	err := r.pool.QueryRow(ctx, `
@@ -112,7 +117,7 @@ func (r *CatalogRepository) ProductsByCategory(ctx context.Context, categoryID, 
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+productColumns+` FROM products p
 		WHERE p.category_id = $1 AND p.is_active AND `+fitsVehicle("$2")+`
-		ORDER BY (p.stock > 0) DESC, p.price, p.id
+		ORDER BY (p.stock > 0) DESC, `+available+` DESC, p.price, p.id
 		LIMIT $3 OFFSET $4`,
 		categoryID, vehicleID, limit, offset)
 	if err != nil {
@@ -180,7 +185,7 @@ func (r *CatalogRepository) Product(ctx context.Context, id int64) (*domain.Prod
 	return &p, nil
 }
 
-// Analogues ranks in-stock interchangeable parts: those sharing an OEM number
+// Analogues ranks available interchangeable parts: those sharing an OEM number
 // with p first -- the same part from another brand -- then the same kind of
 // part for any of the same vehicles, closest in price first. No model is
 // involved: "analogues" from a button is a deterministic query, which is
@@ -188,7 +193,7 @@ func (r *CatalogRepository) Product(ctx context.Context, id int64) (*domain.Prod
 func (r *CatalogRepository) Analogues(ctx context.Context, p *domain.Product, vehicleID int64, limit int) ([]domain.Product, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+productColumns+` FROM products p
-		WHERE p.id <> $1 AND p.is_active AND p.stock > 0 AND `+fitsVehicle("$5")+` AND (
+		WHERE p.id <> $1 AND p.is_active AND `+available+` AND `+fitsVehicle("$5")+` AND (
 			p.oem_numbers && $2::text[]
 			OR (p.category_id = $3 AND (
 				($6 AND p.universal)
@@ -197,7 +202,7 @@ func (r *CatalogRepository) Analogues(ctx context.Context, p *domain.Product, ve
 					JOIN vehicle_fitments b ON b.vehicle_id = a.vehicle_id
 					WHERE a.product_id = p.id AND b.product_id = $1)))
 		)
-		ORDER BY (p.oem_numbers && $2::text[]) DESC, abs(p.price - $4), p.id
+		ORDER BY (p.oem_numbers && $2::text[]) DESC, (p.stock > 0) DESC, abs(p.price - $4), p.id
 		LIMIT $7`,
 		p.ID, p.OEMNumbers, p.CategoryID, int64(p.Price), vehicleID, p.Universal, limit)
 	if err != nil {
@@ -210,8 +215,8 @@ func (r *CatalogRepository) Analogues(ctx context.Context, p *domain.Product, ve
 	return products, nil
 }
 
-// KitParts returns in-stock parts of one type that fit the vehicle, cheapest
-// first. Oils are universal, so for them the grade is what decides: it is
+// KitParts returns available parts of one type that fit the vehicle, those
+// on the shelf first, cheapest first. Oils are universal, so for them the grade is what decides: it is
 // matched against the specs with jsonb containment. The part_type index
 // narrows the rows first, so the specs need no index of their own.
 func (r *CatalogRepository) KitParts(ctx context.Context, vehicleID int64, partType, viscosity string, limit int) ([]domain.Product, error) {
@@ -225,9 +230,9 @@ func (r *CatalogRepository) KitParts(ctx context.Context, vehicleID int64, partT
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+productColumns+` FROM products p
-		WHERE p.is_active AND p.stock > 0 AND p.part_type = $2 AND `+fitsVehicle("$1")+`
+		WHERE p.is_active AND `+available+` AND p.part_type = $2 AND `+fitsVehicle("$1")+`
 		  AND p.specs @> $3::jsonb
-		ORDER BY p.price, p.id
+		ORDER BY (p.stock > 0) DESC, p.price, p.id
 		LIMIT $4`,
 		vehicleID, partType, grade, limit)
 	if err != nil {

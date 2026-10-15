@@ -98,7 +98,7 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, ord
 		},
 		{
 			Name: "search_parts",
-			Description: "Search the catalogue. Returns only parts in stock, cheapest first, or best keyword match " +
+			Description: "Search the catalogue. Returns only parts that can be bought (in stock or on order), cheapest first, or best keyword match " +
 				"first when query is set. Categories: " + strings.Join(catalogue, ", ") + ".",
 			Schema: object(map[string]any{
 				"vehicle_id":    integer("Only parts that fit this vehicle; universal products always match."),
@@ -243,12 +243,14 @@ func viewVehicle(v domain.Vehicle) vehicleView {
 }
 
 type productView struct {
-	ID         int64    `json:"id"`
-	Name       string   `json:"name"`
-	Brand      string   `json:"brand"`
-	Category   string   `json:"category"`
-	PriceUAH   int64    `json:"price_uah"`
-	Stock      string   `json:"stock"`
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Brand    string `json:"brand"`
+	Category string `json:"category"`
+	PriceUAH int64  `json:"price_uah"`
+	Stock    string `json:"stock"`
+	// LeadDays is how long a part on order takes to arrive.
+	LeadDays   int      `json:"lead_days,omitempty"`
 	Universal  bool     `json:"universal,omitempty"`
 	OEMNumbers []string `json:"oem_numbers,omitempty"`
 	Specs      []string `json:"specs,omitempty"`
@@ -267,6 +269,8 @@ func (tb *toolbox) view(p *domain.Product) productView {
 		PriceUAH: int64(p.Price) / 100, Universal: p.Universal, OEMNumbers: p.OEMNumbers,
 	}
 	switch {
+	case p.OnOrder:
+		v.Stock, v.LeadDays = "on_order", p.LeadDays
 	case p.Stock == 0:
 		v.Stock = "out_of_stock"
 	case p.Stock <= domain.LowStock:
