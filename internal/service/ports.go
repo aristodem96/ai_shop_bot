@@ -28,10 +28,13 @@ type CatalogRepository interface {
 	Search(ctx context.Context, f SearchFilter) ([]domain.Product, error)
 }
 
-// VehicleRepository reads the vehicle list.
+// VehicleRepository reads the vehicle list. It never returns the whole list:
+// a real parts catalogue covers tens of thousands of vehicle types.
 type VehicleRepository interface {
-	// Vehicles returns all vehicles ordered by make, model and year.
-	Vehicles(ctx context.Context) ([]domain.Vehicle, error)
+	// FindVehicles returns at most limit vehicles matching q.
+	FindVehicles(ctx context.Context, q VehicleQuery, limit int) ([]domain.Vehicle, error)
+	// Makes returns the distinct makes covered.
+	Makes(ctx context.Context) ([]string, error)
 	Vehicle(ctx context.Context, id int64) (*domain.Vehicle, error)
 }
 

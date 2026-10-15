@@ -27,20 +27,14 @@ func (b *Bot) car(ctx context.Context, user int64) *domain.Vehicle {
 	return v
 }
 
-// start follows the greeting: a buyer without a car is asked for it first,
+// start follows the greeting: a buyer without a car is asked to name it,
 // because nearly every part depends on it.
 func (b *Bot) start(ctx context.Context, chat, user int64) {
 	if b.car(ctx, user) != nil {
 		b.sendCategories(ctx, chat, user)
 		return
 	}
-	makes, err := b.garage.Makes(ctx)
-	if err != nil {
-		b.fail(ctx, chat, "list makes", err)
-		return
-	}
-	text, kb := makesView(makes, nil)
-	b.send(ctx, chat, msgPickCarFirst+"\n\n"+text, kb)
+	b.send(ctx, chat, msgAskCar, nil)
 }
 
 func (b *Bot) sendCategories(ctx context.Context, chat, user int64) {
@@ -151,44 +145,11 @@ func (b *Bot) changeCart(ctx context.Context, cc callbackCtx, change func() (*do
 
 func (b *Bot) sendCar(ctx context.Context, chat, user int64) {
 	if car := b.car(ctx, user); car != nil {
-		text, kb := carSavedView(car)
+		text, kb := carView(car)
 		b.send(ctx, chat, text, kb)
 		return
 	}
-	makes, err := b.garage.Makes(ctx)
-	if err != nil {
-		b.fail(ctx, chat, "list makes", err)
-		return
-	}
-	text, kb := makesView(makes, nil)
-	b.send(ctx, chat, text, kb)
-}
-
-func (b *Bot) editMakes(ctx context.Context, cc callbackCtx) error {
-	makes, err := b.garage.Makes(ctx)
-	if err != nil {
-		return err
-	}
-	text, kb := makesView(makes, b.car(ctx, cc.user))
-	return b.editText(ctx, cc, text, kb)
-}
-
-func (b *Bot) editVehicles(ctx context.Context, cc callbackCtx, vehicleID int64) error {
-	vehicles, err := b.garage.SameMake(ctx, vehicleID)
-	if err != nil {
-		return err
-	}
-	text, kb := vehiclesView(vehicles)
-	return b.editText(ctx, cc, text, kb)
-}
-
-func (b *Bot) setCar(ctx context.Context, cc callbackCtx, vehicleID int64) error {
-	car, err := b.garage.Set(ctx, cc.user, vehicleID)
-	if err != nil {
-		return err
-	}
-	text, kb := carSavedView(car)
-	return b.editText(ctx, cc, text, kb)
+	b.send(ctx, chat, msgAskCar, nil)
 }
 
 func (b *Bot) forgetCar(ctx context.Context, cc callbackCtx) error {

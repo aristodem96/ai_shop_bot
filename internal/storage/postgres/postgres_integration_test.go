@@ -294,13 +294,42 @@ func TestGarage(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, v)
 
-	all, err := repo.Vehicles(ctx)
-	require.NoError(t, err)
-	assert.Len(t, all, 12)
-	assert.Equal(t, "Daewoo", all[0].Make, "ordered by make")
 	corolla, err := repo.Vehicle(ctx, vehicleByCode(t, "corolla-e210-16"))
 	require.NoError(t, err)
 	assert.Zero(t, corolla.YearTo, "still produced")
+}
+
+func TestFindVehicles(t *testing.T) {
+	skipShort(t)
+	repo := NewVehicleRepository(testPool)
+	ctx := context.Background()
+
+	got, err := repo.FindVehicles(ctx, service.VehicleQuery{Make: "skoda", Model: "octavia", Year: 2015, Engine: "1.4"}, 10)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "1.4 TSI", got[0].Engine)
+
+	got, err = repo.FindVehicles(ctx, service.VehicleQuery{Model: "Octavia"}, 10)
+	require.NoError(t, err)
+	assert.Len(t, got, 2, "both engines when the engine is not given")
+
+	got, err = repo.FindVehicles(ctx, service.VehicleQuery{Make: "Toyota", Year: 2026}, 10)
+	require.NoError(t, err)
+	require.Len(t, got, 1, "a model still in production matches any later year")
+	assert.Equal(t, "Corolla E210", got[0].Model)
+
+	got, err = repo.FindVehicles(ctx, service.VehicleQuery{}, 3)
+	require.NoError(t, err)
+	assert.Len(t, got, 3, "never the whole list")
+
+	got, err = repo.FindVehicles(ctx, service.VehicleQuery{Make: "%"}, 10)
+	require.NoError(t, err)
+	assert.Empty(t, got, "a wildcard from the buyer is a literal character")
+
+	makes, err := repo.Makes(ctx)
+	require.NoError(t, err)
+	assert.Len(t, makes, 8)
+	assert.Equal(t, "Daewoo", makes[0])
 }
 
 func TestCartLifecycle(t *testing.T) {

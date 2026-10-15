@@ -88,7 +88,7 @@ func (b *Bot) consult(ctx context.Context, chat, user int64, text string) {
 		}
 		products = append(products, *p)
 	}
-	msg, kb := consultantView(reply.Text, products, reply.CartChanged)
+	msg, kb := consultantView(reply.Text, products, reply.CartChanged, reply.CarSaved)
 	b.send(ctx, chat, msg, kb)
 }
 

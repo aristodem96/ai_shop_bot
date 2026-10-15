@@ -170,30 +170,7 @@ type fakeGarage struct {
 	car *domain.Vehicle
 }
 
-func (f *fakeGarage) Makes(context.Context) ([]domain.Vehicle, error) {
-	return []domain.Vehicle{lanos, octavia}, nil
-}
-
-func (f *fakeGarage) SameMake(_ context.Context, id int64) ([]domain.Vehicle, error) {
-	for _, v := range []domain.Vehicle{lanos, octavia} {
-		if v.ID == id {
-			return []domain.Vehicle{v}, nil
-		}
-	}
-	return nil, domain.ErrNotFound
-}
-
 func (f *fakeGarage) Get(context.Context, int64) (*domain.Vehicle, error) { return f.car, nil }
-
-func (f *fakeGarage) Set(_ context.Context, _, id int64) (*domain.Vehicle, error) {
-	for _, v := range []domain.Vehicle{lanos, octavia} {
-		if v.ID == id {
-			f.car = &v
-			return &v, nil
-		}
-	}
-	return nil, domain.ErrNotFound
-}
 
 func (f *fakeGarage) Clear(context.Context, int64) error {
 	f.car = nil
@@ -253,14 +230,13 @@ func callbacks(m telegram.ReplyMarkup) []string {
 	return out
 }
 
-func TestStartAsksForTheCarFirst(t *testing.T) {
+func TestStartAsksForTheCarInWords(t *testing.T) {
 	b := newTestBot()
 	b.Handle(context.Background(), text("/start"))
 
 	require.Equal(t, []string{"sendMessage", "sendMessage"}, b.tg.methods())
 	assert.IsType(t, &telegram.ReplyKeyboard{}, b.tg.calls[0].markup, "the main menu goes with the greeting")
-	assert.Contains(t, b.tg.calls[1].text, msgPickCarFirst)
-	assert.Contains(t, callbacks(b.tg.calls[1].markup), encode(actMake, octavia.ID))
+	assert.Equal(t, msgAskCar, b.tg.calls[1].text, "no menu of every make: the buyer writes the car")
 }
 
 func TestStartWithACarGoesToTheCatalogue(t *testing.T) {
@@ -272,17 +248,18 @@ func TestStartWithACarGoesToTheCatalogue(t *testing.T) {
 	assert.Contains(t, callbacks(b.tg.calls[1].markup), encode(actCategory, 1, 0))
 }
 
-func TestChoosingACar(t *testing.T) {
+func TestMyCar(t *testing.T) {
 	b := newTestBot()
 	ctx := context.Background()
 
-	b.Handle(ctx, press(encode(actMake, octavia.ID)))
-	assert.Contains(t, callbacks(b.tg.last("editMessageText").markup), encode(actSetCar, octavia.ID))
+	b.Handle(ctx, text(btnCar))
+	assert.Equal(t, msgAskCar, b.tg.last("sendMessage").text)
 
-	b.Handle(ctx, press(encode(actSetCar, octavia.ID)))
-	assert.Equal(t, &octavia, b.garage.car)
-	assert.Contains(t, b.tg.last("editMessageText").text, "Ваше авто")
-	assert.Equal(t, msgCarSaved, b.tg.last("answerCallbackQuery").text)
+	b.garage.car = &octavia
+	b.Handle(ctx, text(btnCar))
+	msg := b.tg.last("sendMessage")
+	assert.Contains(t, msg.text, "Skoda Octavia A7 1.4 TSI")
+	assert.Contains(t, callbacks(msg.markup), encode(actForgetCar))
 
 	b.Handle(ctx, press(encode(actForgetCar)))
 	assert.Nil(t, b.garage.car)
@@ -380,8 +357,8 @@ func TestEveryCallbackIsAnsweredOnce(t *testing.T) {
 	for _, data := range []string{
 		encode(actCategories), encode(actCategory, 1, 0), encode(actCategory, 99, 0),
 		encode(actProduct, padsID), encode(actProduct, 404), encode(actAnalogues, padsID),
-		encode(actCart), encode(actDec, padsID), encode(actMakes), encode(actMake, 404),
-		encode(actSetCar, 404), encode(actNoop), "garbage", "p:999999999999999999999",
+		encode(actCart), encode(actDec, padsID), encode(actForgetCar),
+		encode(actNoop), "garbage", "gs:5", "p:999999999999999999999",
 	} {
 		b := newTestBot()
 		b.Handle(context.Background(), press(data))

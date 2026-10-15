@@ -27,6 +27,7 @@ type runState struct {
 	userID      int64
 	shown       []int64
 	cartChanged bool
+	carSaved    bool
 }
 
 type handler func(ctx context.Context, run *runState, input json.RawMessage) (any, error)
@@ -81,7 +82,7 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, cats []domain.Categor
 		},
 		{
 			Name:        "set_my_vehicle",
-			Description: "Save a vehicle as the buyer's car. Only when the buyer says the car is theirs.",
+			Description: "Save a vehicle as the buyer's car, so the catalogue filters by it. Use it whenever the buyer names their car.",
 			Schema:      object(map[string]any{"vehicle_id": integer("Vehicle id from find_vehicle.")}, "vehicle_id"),
 		},
 		{
@@ -275,15 +276,9 @@ func (tb *toolbox) findVehicle(ctx context.Context, _ *runState, input json.RawM
 	// Nothing matched: tell the model what the shop does cover, so it can
 	// spot a misspelt make or say plainly which cars are served.
 	if len(found) == 0 {
-		all, err := tb.garage.Find(ctx, service.VehicleQuery{})
+		makes, err := tb.garage.Makes(ctx)
 		if err != nil {
 			return nil, err
-		}
-		var makes []string
-		for _, v := range all {
-			if !slices.Contains(makes, v.Make) {
-				makes = append(makes, v.Make)
-			}
 		}
 		out["makes_covered"] = makes
 	}
@@ -315,6 +310,7 @@ func (tb *toolbox) setMyVehicle(ctx context.Context, run *runState, input json.R
 	if err != nil {
 		return nil, err
 	}
+	run.carSaved = true
 	return map[string]any{"saved": viewVehicle(*car)}, nil
 }
 

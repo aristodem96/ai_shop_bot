@@ -63,6 +63,14 @@ func TestConsultantAnswerWithCards(t *testing.T) {
 	assert.Contains(t, tg.methods(), "sendChatAction", "the buyer sees typing while the model works")
 }
 
+func TestConsultantCatalogueButtonAfterSavingTheCar(t *testing.T) {
+	c := &fakeConsultant{reply: &agent.Reply{Text: "Запам'ятав вашу Octavia.", CarSaved: true}}
+	b, tg := withConsultant(c, fakeLimiter{allow: true})
+
+	b.Handle(context.Background(), text("у мене октавія 2015 1.4"))
+	assert.Contains(t, callbacks(tg.last("sendMessage").markup), encode(actCategories))
+}
+
 func TestConsultantCartButtonAfterAdding(t *testing.T) {
 	c := &fakeConsultant{reply: &agent.Reply{Text: "Додав.", CartChanged: true}}
 	b, tg := withConsultant(c, fakeLimiter{allow: true})

@@ -37,6 +37,7 @@ type Cart interface {
 // Garage is what the tools need to find vehicles and know the buyer's car.
 type Garage interface {
 	Find(ctx context.Context, q service.VehicleQuery) ([]domain.Vehicle, error)
+	Makes(ctx context.Context) ([]string, error)
 	Get(ctx context.Context, userID int64) (*domain.Vehicle, error)
 	Set(ctx context.Context, userID, vehicleID int64) (*domain.Vehicle, error)
 }
@@ -68,6 +69,8 @@ type Reply struct {
 	ProductIDs []int64
 	// CartChanged is set when a tool added something to the cart.
 	CartChanged bool
+	// CarSaved is set when the buyer's car was saved during this turn.
+	CarSaved bool
 }
 
 // Agent runs the conversation loop.
@@ -155,7 +158,7 @@ func (a *Agent) Reply(ctx context.Context, userID, chatID int64, text string) (*
 
 		// An answer, possibly cut off by max_tokens; a cut answer still
 		// beats none, and the prompt keeps answers far below the limit.
-		reply := &Reply{Text: lastText(turn), ProductIDs: run.shown, CartChanged: run.cartChanged}
+		reply := &Reply{Text: lastText(turn), ProductIDs: run.shown, CartChanged: run.cartChanged, CarSaved: run.carSaved}
 		if reply.Text == "" && len(reply.ProductIDs) == 0 {
 			reply.Text = replyStuck
 		}
@@ -179,7 +182,7 @@ func (a *Agent) Reply(ctx context.Context, userID, chatID int64, text string) (*
 		{Role: llm.RoleAssistant, Text: replyStuck},
 	})
 	a.logTurn(ctx, chatID, a.cfg.MaxSteps, usage, start, "max_steps")
-	return &Reply{Text: replyStuck, ProductIDs: run.shown, CartChanged: run.cartChanged}, nil
+	return &Reply{Text: replyStuck, ProductIDs: run.shown, CartChanged: run.cartChanged, CarSaved: run.carSaved}, nil
 }
 
 // Reset forgets the conversation.

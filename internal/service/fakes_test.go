@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
@@ -143,8 +144,28 @@ type fakeVehicles struct {
 	garages map[int64]int64
 }
 
-func (f *fakeVehicles) Vehicles(context.Context) ([]domain.Vehicle, error) {
-	return slices.Clone(f.list), nil
+func (f *fakeVehicles) FindVehicles(_ context.Context, q VehicleQuery, limit int) ([]domain.Vehicle, error) {
+	has := func(field, want string) bool {
+		return want == "" || strings.Contains(strings.ToLower(field), strings.ToLower(want))
+	}
+	var out []domain.Vehicle
+	for _, v := range f.list {
+		inYears := q.Year == 0 || (q.Year >= v.YearFrom && (v.YearTo == 0 || q.Year <= v.YearTo))
+		if has(v.Make, q.Make) && has(v.Model, q.Model) && has(v.Engine, q.Engine) && inYears && len(out) < limit {
+			out = append(out, v)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeVehicles) Makes(context.Context) ([]string, error) {
+	var makes []string
+	for _, v := range f.list {
+		if !slices.Contains(makes, v.Make) {
+			makes = append(makes, v.Make)
+		}
+	}
+	return makes, nil
 }
 
 func (f *fakeVehicles) Vehicle(_ context.Context, id int64) (*domain.Vehicle, error) {

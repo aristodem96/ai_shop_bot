@@ -20,25 +20,6 @@ func newGarageFixture() *GarageService {
 	return NewGarageService(f, f)
 }
 
-func TestMakesOnePerMake(t *testing.T) {
-	makes, err := newGarageFixture().Makes(context.Background())
-	require.NoError(t, err)
-	names := make([]string, 0, len(makes))
-	for _, m := range makes {
-		names = append(names, m.Make)
-	}
-	assert.Equal(t, []string{"Daewoo", "Skoda", "Toyota"}, names)
-}
-
-func TestSameMake(t *testing.T) {
-	got, err := newGarageFixture().SameMake(context.Background(), 3)
-	require.NoError(t, err)
-	assert.Len(t, got, 2)
-	for _, v := range got {
-		assert.Equal(t, "Skoda", v.Make)
-	}
-}
-
 func TestFind(t *testing.T) {
 	svc := newGarageFixture()
 	ctx := context.Background()
@@ -55,6 +36,13 @@ func TestFind(t *testing.T) {
 	got, err = svc.Find(ctx, VehicleQuery{Make: "Toyota", Year: 2026})
 	require.NoError(t, err)
 	assert.Len(t, got, 1, "a model still in production matches any later year")
+}
+
+func TestFindTrimsInput(t *testing.T) {
+	got, err := newGarageFixture().Find(context.Background(), VehicleQuery{Make: "  Skoda ", Engine: " 2.0 "})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, int64(3), got[0].ID)
 }
 
 func TestGarage(t *testing.T) {

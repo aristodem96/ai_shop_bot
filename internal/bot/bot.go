@@ -48,12 +48,11 @@ type Cart interface {
 	Clear(ctx context.Context, userID int64) error
 }
 
-// Garage is what the bot needs to know and change the buyer's car.
+// Garage is what the bot needs to know the buyer's car. The car is chosen by
+// writing it to the consultant -- a menu of every make, model and engine does
+// not scale past a demo -- so the bot only reads it and can forget it.
 type Garage interface {
-	Makes(ctx context.Context) ([]domain.Vehicle, error)
-	SameMake(ctx context.Context, vehicleID int64) ([]domain.Vehicle, error)
 	Get(ctx context.Context, userID int64) (*domain.Vehicle, error)
-	Set(ctx context.Context, userID, vehicleID int64) (*domain.Vehicle, error)
 	Clear(ctx context.Context, userID int64) error
 }
 
@@ -279,12 +278,6 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 			return &domain.Cart{UserID: cc.user}, nil
 		})
 		return msgCartCleared, err
-	case actMakes:
-		return "", b.editMakes(ctx, cc)
-	case actMake:
-		return "", b.editVehicles(ctx, cc, a[0])
-	case actSetCar:
-		return msgCarSaved, b.setCar(ctx, cc, a[0])
 	case actForgetCar:
 		return "", b.forgetCar(ctx, cc)
 	case actNoop:

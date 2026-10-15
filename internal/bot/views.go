@@ -36,12 +36,10 @@ func mainMenu() *telegram.ReplyKeyboard {
 
 func categoriesView(cats []domain.Category, car *domain.Vehicle) (string, *telegram.InlineKeyboard) {
 	text := "<b>Каталог</b>\n"
-	carButton := button("🚗 Обрати авто", actMakes)
 	if car != nil {
 		text += "🚗 Для: " + esc(car.Label()) + "\n"
-		carButton = button("🚗 Змінити авто", actMakes)
 	} else {
-		text += "Показую всі деталі.\n"
+		text += "Показую всі деталі. Напишіть свою машину, щоб бачити лише сумісні.\n"
 	}
 	text += "\nОберіть категорію:"
 
@@ -54,7 +52,11 @@ func categoriesView(cats []domain.Category, car *domain.Vehicle) (string, *teleg
 		}
 		kb.Rows = append(kb.Rows, row)
 	}
-	kb.Rows = append(kb.Rows, []telegram.InlineButton{carButton, button(btnCart, actCart)})
+	last := []telegram.InlineButton{button(btnCart, actCart)}
+	if car != nil {
+		last = append([]telegram.InlineButton{button("Показувати всі деталі", actForgetCar)}, last...)
+	}
+	kb.Rows = append(kb.Rows, last)
 	return text, kb
 }
 
@@ -191,57 +193,18 @@ func analoguesView(p *domain.Product, analogues []domain.Product) (string, *tele
 	return fmt.Sprintf("Аналоги: <b>%s</b> (%s):", esc(p.Name), esc(p.Brand)), kb
 }
 
-// makesView is the first step of choosing a car. Each make's button carries
-// the id of one of its vehicles, which stands for the make.
-func makesView(makes []domain.Vehicle, car *domain.Vehicle) (string, *telegram.InlineKeyboard) {
-	text := msgMakes
-	if car != nil {
-		text = "🚗 Зараз: " + esc(car.Label()) + "\n\n" + msgMakes
-	}
-	kb := &telegram.InlineKeyboard{}
-	const perRow = 3
-	row := make([]telegram.InlineButton, 0, perRow)
-	for _, m := range makes {
-		row = append(row, button(m.Make, actMake, m.ID))
-		if len(row) == perRow {
-			kb.Rows = append(kb.Rows, row)
-			row = make([]telegram.InlineButton, 0, perRow)
-		}
-	}
-	if len(row) > 0 {
-		kb.Rows = append(kb.Rows, row)
-	}
-	if car != nil {
-		kb.Rows = append(kb.Rows, []telegram.InlineButton{button("Показувати всі деталі", actForgetCar)})
-	}
-	return text, kb
-}
-
-func vehiclesView(vehicles []domain.Vehicle) (string, *telegram.InlineKeyboard) {
-	text := "🚗 <b>Оберіть модель і двигун</b>"
-	if len(vehicles) > 0 {
-		text = fmt.Sprintf("🚗 <b>%s</b>: оберіть модель і двигун", esc(vehicles[0].Make))
-	}
-	kb := &telegram.InlineKeyboard{}
-	for _, v := range vehicles {
-		label := fmt.Sprintf("%s %s · %s", v.Model, v.Engine, v.Years())
-		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(label, actSetCar, v.ID)})
-	}
-	kb.Rows = append(kb.Rows, []telegram.InlineButton{button("⬅️ Марки", actMakes)})
-	return text, kb
-}
-
-func carSavedView(car *domain.Vehicle) (string, *telegram.InlineKeyboard) {
-	return "✅ Ваше авто: <b>" + esc(car.Label()) + "</b>\n\nКаталог і консультант тепер підбирають деталі саме під нього.",
+// carView answers "🚗 My car" when one is saved.
+func carView(car *domain.Vehicle) (string, *telegram.InlineKeyboard) {
+	return "🚗 Ваше авто: <b>" + esc(car.Label()) + "</b>\n\nКаталог і консультант підбирають деталі під нього. Щоб змінити — просто напишіть іншу машину.",
 		&telegram.InlineKeyboard{Rows: [][]telegram.InlineButton{
 			{button("🛍 Каталог для цього авто", actCategories)},
-			{button("🚗 Змінити авто", actMakes)},
+			{button("Показувати всі деталі", actForgetCar)},
 		}}
 }
 
 func carForgottenView() (string, *telegram.InlineKeyboard) {
 	return msgCarForgotten, &telegram.InlineKeyboard{Rows: [][]telegram.InlineButton{
-		{button("🚗 Обрати авто", actMakes), button(btnCatalog, actCategories)},
+		{button(btnCatalog, actCategories)},
 	}}
 }
 
@@ -252,7 +215,7 @@ const maxReplyRunes = 3500
 // consultantView is the consultant's answer: the model's text, escaped -- it
 // is model output, so it is never trusted as markup -- and a button per
 // product it chose to show, labelled from the catalogue.
-func consultantView(text string, products []domain.Product, cartChanged bool) (string, telegram.ReplyMarkup) {
+func consultantView(text string, products []domain.Product, cartChanged, carSaved bool) (string, telegram.ReplyMarkup) {
 	// Telegram refuses an empty message, and the buyer would get nothing at
 	// all. Cards without words still need a line above them.
 	if strings.TrimSpace(text) == "" {
@@ -264,6 +227,9 @@ func consultantView(text string, products []domain.Product, cartChanged bool) (s
 	kb := &telegram.InlineKeyboard{}
 	for _, p := range products {
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(productLabel(p), actProduct, p.ID)})
+	}
+	if carSaved {
+		kb.Rows = append(kb.Rows, []telegram.InlineButton{button("🛍 Каталог для вашого авто", actCategories)})
 	}
 	if cartChanged {
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(btnCart, actCart)})

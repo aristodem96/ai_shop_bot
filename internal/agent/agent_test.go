@@ -71,11 +71,13 @@ type fakeGarage struct {
 
 func (f *fakeGarage) Find(_ context.Context, q service.VehicleQuery) ([]domain.Vehicle, error) {
 	f.queries = append(f.queries, q)
-	if q.Make == "" || strings.EqualFold(q.Make, octavia.Make) {
+	if strings.EqualFold(q.Make, octavia.Make) {
 		return []domain.Vehicle{octavia}, nil
 	}
 	return nil, nil
 }
+
+func (f *fakeGarage) Makes(context.Context) ([]string, error) { return []string{octavia.Make}, nil }
 
 func (f *fakeGarage) Get(_ context.Context, user int64) (*domain.Vehicle, error) {
 	if _, ok := f.saved[user]; ok {
@@ -217,8 +219,9 @@ func TestSaveMyCarAndCheckFit(t *testing.T) {
 	)
 	f := newAgent(t, model)
 
-	_, err := f.agent.Reply(context.Background(), chat, chat, "у мене октавія 1.4, ці колодки підійдуть?")
+	reply, err := f.agent.Reply(context.Background(), chat, chat, "у мене октавія 1.4, ці колодки підійдуть?")
 	require.NoError(t, err)
+	assert.True(t, reply.CarSaved, "the bot offers the catalogue for the saved car")
 
 	assert.Equal(t, `{"vehicle":null}`, result(model, 1).Content)
 	assert.Equal(t, int64(5), f.garage.saved[chat], "the car is saved for the catalogue too")

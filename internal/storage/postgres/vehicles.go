@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -41,19 +42,45 @@ func collectVehicles(rows pgx.Rows) ([]domain.Vehicle, error) {
 	})
 }
 
-// Vehicles returns every vehicle ordered by make, model and year.
-func (r *VehicleRepository) Vehicles(ctx context.Context) ([]domain.Vehicle, error) {
+// FindVehicles matches make, model and engine as case-insensitive substrings
+// and a year against the production span. LIKE wildcards in the input are
+// escaped, so "%" from a buyer matches a literal percent sign, not everything.
+func (r *VehicleRepository) FindVehicles(ctx context.Context, q service.VehicleQuery, limit int) ([]domain.Vehicle, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+vehicleColumns+` FROM vehicles v
-		ORDER BY v.make, v.model, v.year_from, v.engine`)
+		WHERE v.make ILIKE '%' || $1 || '%'
+		  AND v.model ILIKE '%' || $2 || '%'
+		  AND v.engine ILIKE '%' || $3 || '%'
+		  AND ($4 = 0 OR ($4 >= v.year_from AND (v.year_to IS NULL OR $4 <= v.year_to)))
+		ORDER BY v.make, v.model, v.year_from, v.engine
+		LIMIT $5`,
+		escapeLike(q.Make), escapeLike(q.Model), escapeLike(q.Engine), q.Year, limit)
 	if err != nil {
-		return nil, fmt.Errorf("postgres: list vehicles: %w", err)
+		return nil, fmt.Errorf("postgres: find vehicles: %w", err)
 	}
 	vs, err := collectVehicles(rows)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: scan vehicles: %w", err)
 	}
 	return vs, nil
+}
+
+// Makes returns the distinct makes, alphabetically.
+func (r *VehicleRepository) Makes(ctx context.Context) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `SELECT DISTINCT make FROM vehicles ORDER BY make`)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: list makes: %w", err)
+	}
+	makes, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("postgres: scan makes: %w", err)
+	}
+	return makes, nil
+}
+
+// escapeLike makes LIKE treat %, _ and the escape character itself literally.
+func escapeLike(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }
 
 // Vehicle finds one vehicle.
