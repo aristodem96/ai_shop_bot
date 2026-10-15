@@ -23,6 +23,9 @@ type CatalogRepository interface {
 	Similar(ctx context.Context, p *domain.Product, limit int) ([]domain.Product, error)
 	// Variant returns one size of an active product.
 	Variant(ctx context.Context, id int64) (*domain.Variant, error)
+	// Search returns in-stock products matching every set field of f, with
+	// their variants, best match first.
+	Search(ctx context.Context, f SearchFilter) ([]domain.Product, error)
 }
 
 // CartRepository stores carts.

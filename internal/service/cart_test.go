@@ -155,3 +155,18 @@ func TestCartRemoveAndClear(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, cart.Lines)
 }
+
+func TestCartAddSize(t *testing.T) {
+	svc, _, _ := newCartFixture()
+	ctx := context.Background()
+
+	cart, err := svc.AddSize(ctx, user, 1, "m")
+	require.NoError(t, err, "size labels match case-insensitively")
+	assert.Equal(t, int64(vJacketM), cart.Lines[0].VariantID)
+
+	_, err = svc.AddSize(ctx, user, 1, "XXXL")
+	require.ErrorIs(t, err, domain.ErrNoSuchSize)
+
+	_, err = svc.AddSize(ctx, user, 1, "XL")
+	require.ErrorIs(t, err, domain.ErrOutOfStock)
+}

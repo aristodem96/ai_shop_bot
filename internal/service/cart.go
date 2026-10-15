@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
 )
@@ -58,6 +59,22 @@ func (s *CartService) Add(ctx context.Context, userID, variantID int64) (*domain
 		return nil, err
 	}
 	return s.carts.Cart(ctx, userID)
+}
+
+// AddSize adds one unit of a product in a size given by its label. It is how
+// the agent adds to the cart: the model knows "M", not variant ids, and the
+// size is checked against the product here rather than trusted.
+func (s *CartService) AddSize(ctx context.Context, userID, productID int64, size string) (*domain.Cart, error) {
+	p, err := s.variants.Product(ctx, productID)
+	if err != nil {
+		return nil, err
+	}
+	for _, v := range p.Variants {
+		if strings.EqualFold(v.Size, size) {
+			return s.Add(ctx, userID, v.ID)
+		}
+	}
+	return nil, domain.ErrNoSuchSize
 }
 
 // Decrement takes one unit away, removing the line at zero.

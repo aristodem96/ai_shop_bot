@@ -16,6 +16,17 @@ import (
 type fakeCatalog struct {
 	categories []domain.Category
 	products   []domain.Product
+	// search, when set, answers Search; filters records every call.
+	search  func(SearchFilter) []domain.Product
+	filters []SearchFilter
+}
+
+func (f *fakeCatalog) Search(_ context.Context, sf SearchFilter) ([]domain.Product, error) {
+	f.filters = append(f.filters, sf)
+	if f.search != nil {
+		return f.search(sf), nil
+	}
+	return f.products[:min(sf.Limit, len(f.products))], nil
 }
 
 func (f *fakeCatalog) Categories(context.Context) ([]domain.Category, error) {

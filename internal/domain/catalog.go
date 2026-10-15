@@ -1,5 +1,7 @@
 package domain
 
+import "slices"
+
 // Category groups products in the catalogue menu.
 type Category struct {
 	ID    int64
@@ -66,6 +68,18 @@ var colorLabels = map[string]string{
 	"khaki": "хакі",
 	"olive": "оливковий",
 	"red":   "червоний",
+}
+
+// Colors lists the colour codes in a stable order. Tool schemas are built from
+// it, and a schema that reordered itself between runs would defeat the
+// model provider's prompt cache.
+func Colors() []string {
+	codes := make([]string, 0, len(colorLabels))
+	for c := range colorLabels {
+		codes = append(codes, c)
+	}
+	slices.Sort(codes)
+	return codes
 }
 
 // ColorLabel returns the Ukrainian name of a colour code.
