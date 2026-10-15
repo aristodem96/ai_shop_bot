@@ -1,0 +1,100 @@
+# Production overlay. It never replaces docker-compose.yml -- it is layered on
+# top of it, so the local workflow keeps working untouched:
+#
+#   local:      make up
+#   production: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#               (or set COMPOSE_FILE in .env, as .env.prod.example does)
+#
+# What it changes, and why each change matters on a machine with a public IP:
+#
+#   * Postgres and Redis stop publishing ports. Locally they are published so
+#     `make run` can reach them from the host; on a public server that is an
+#     open invitation, and an unauthenticated Redis is one of the most
+#     reliably exploited services on the internet. The bot reaches both over
+#     the private compose network, which needs no published port at all.
+#   * The bot stops publishing its port too: Caddy is the only way in, and it
+#     terminates TLS with a certificate it obtains and renews on its own.
+#     Monobank delivers webhooks over HTTPS only, so this is what makes the
+#     webhook work at all.
+#   * Every secret becomes required. `${VAR:?message}` makes compose refuse to
+#     start rather than fall back to a development default that is published
+#     in this repository.
+#
+# `!reset` empties a list the base file set instead of appending to it, which is
+# what compose does by default when merging.
+
+services:
+  postgres:
+    ports: !reset []
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-shop}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-shop}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    # Container logs are unbounded by default and will eventually fill the disk.
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    ports: !reset []
+    # A password on top of network isolation: defence in depth, and it costs
+    # nothing. Redis holds conversations, checkout forms and rate limits --
+    # all fine to lose on a restart -- so it stays in memory only.
+    command: ["redis-server", "--save", "", "--appendonly", "no",
+              "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    logging: *logging
+
+  # In production the bot is the product, so it leaves its profile and starts
+  # with everything else.
+  bot:
+    profiles: !reset []
+    ports: !reset []
+    environment:
+      POSTGRES_DSN: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-shop}?sslmode=disable
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN in .env}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env}
+      MONOBANK_TOKEN: ${MONOBANK_TOKEN:?set MONOBANK_TOKEN in .env}
+      ADMIN_CHAT_ID: ${ADMIN_CHAT_ID:?set ADMIN_CHAT_ID in .env (send /id to the bot)}
+      # The webhook address Monobank posts to. Caddy routes it to the bot.
+      PUBLIC_URL: https://${BOT_DOMAIN:?set BOT_DOMAIN in .env}
+      LOG_FORMAT: json
+    restart: unless-stopped
+    logging: *logging
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on:
+      - bot
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      BOT_DOMAIN: ${BOT_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates live here. Losing this volume means re-issuing them, and
+      # Let's Encrypt rate-limits that, so keep it.
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  caddy_data:
+  caddy_config:

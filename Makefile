@@ -69,6 +69,10 @@ deps-up: ## Start Postgres and Redis (for `make run`)
 up: ## Start Postgres, Redis and the bot in Docker
 	docker compose --profile bot up --build -d
 
+.PHONY: docker-seed
+docker-seed: ## Load (or reset) the demo catalogue from inside the bot image
+	docker compose --profile bot run --rm --no-deps --entrypoint /seed bot
+
 .PHONY: down
 down: ## Stop the stack and drop volumes
 	docker compose --profile bot down -v

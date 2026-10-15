@@ -1,0 +1,25 @@
+# Caddy obtains and renews the Let's Encrypt certificate for BOT_DOMAIN on its
+# own; there is no certbot step and no cron job to forget.
+#
+# The bot talks to Telegram by long polling, so nothing about the chat needs
+# to be reachable from outside. Exactly two paths are: the payment webhook,
+# because Monobank has to reach it, and the health check, because an uptime
+# monitor needs somewhere to knock. Everything else is 404 -- a public server
+# should expose what it must and nothing it merely can.
+{$BOT_DOMAIN} {
+	encode zstd gzip
+
+	# Every delivery is checked against Monobank's ECDSA signature before
+	# anything happens, so the endpoint being public is safe.
+	handle /webhooks/monobank {
+		reverse_proxy bot:8090
+	}
+
+	handle /healthz {
+		reverse_proxy bot:8090
+	}
+
+	handle {
+		respond 404
+	}
+}
