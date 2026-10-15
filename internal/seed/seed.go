@@ -51,14 +51,15 @@ func Run(ctx context.Context, pool *pgxpool.Pool) (Stats, error) {
 		for _, v := range vehicles {
 			var id int64
 			err := tx.QueryRow(ctx, `
-				INSERT INTO vehicles (code, make, model, year_from, year_to, engine, fuel)
-				VALUES ($1, $2, $3, $4, $5, $6, $7)
+				INSERT INTO vehicles (code, make, model, year_from, year_to, engine, fuel, oil_viscosity, oil_volume_l)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 				ON CONFLICT (code) DO UPDATE SET
 					make = EXCLUDED.make, model = EXCLUDED.model,
 					year_from = EXCLUDED.year_from, year_to = EXCLUDED.year_to,
-					engine = EXCLUDED.engine, fuel = EXCLUDED.fuel
+					engine = EXCLUDED.engine, fuel = EXCLUDED.fuel,
+					oil_viscosity = EXCLUDED.oil_viscosity, oil_volume_l = EXCLUDED.oil_volume_l
 				RETURNING id`,
-				v.code, v.make, v.model, v.yearFrom, nullable(v.yearTo), v.engine, v.fuel,
+				v.code, v.make, v.model, v.yearFrom, nullable(v.yearTo), v.engine, v.fuel, v.oilViscosity, v.oilVolume,
 			).Scan(&id)
 			if err != nil {
 				return fmt.Errorf("seed: vehicle %s: %w", v.code, err)
@@ -97,17 +98,17 @@ func upsertProduct(ctx context.Context, tx pgx.Tx, p product, categoryID int64, 
 	var id int64
 	err = tx.QueryRow(ctx, `
 		INSERT INTO products (sku, category_id, name, brand, description, oem_numbers, specs,
-			universal, price, stock, image_url)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			universal, price, stock, image_url, part_type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		ON CONFLICT (sku) DO UPDATE SET
 			category_id = EXCLUDED.category_id, name = EXCLUDED.name, brand = EXCLUDED.brand,
 			description = EXCLUDED.description, oem_numbers = EXCLUDED.oem_numbers,
 			specs = EXCLUDED.specs, universal = EXCLUDED.universal, price = EXCLUDED.price,
-			stock = EXCLUDED.stock, image_url = EXCLUDED.image_url,
+			stock = EXCLUDED.stock, image_url = EXCLUDED.image_url, part_type = EXCLUDED.part_type,
 			is_active = true, updated_at = now()
 		RETURNING id`,
 		p.sku, categoryID, p.name, p.brand, p.description, oem, specsJSON,
-		p.universal, p.price*100, stockFor(p), imageURL(p, color),
+		p.universal, p.price*100, stockFor(p), imageURL(p, color), p.partType,
 	).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("seed: product %s: %w", p.sku, err)

@@ -61,7 +61,7 @@ func (r *CatalogRepository) Category(ctx context.Context, id int64) (*domain.Cat
 // all the same way.
 const productColumns = `
 	p.id, p.category_id, p.sku, p.name, p.brand, p.description,
-	p.oem_numbers, p.specs, p.universal, p.price, p.stock, p.image_url`
+	p.oem_numbers, p.specs, p.universal, p.price, p.stock, p.image_url, p.part_type`
 
 // fitsVehicle is the condition "p fits the vehicle in placeholder ph": a
 // universal part, or one with a fitment row for it. Zero means any vehicle.
@@ -77,7 +77,7 @@ func scanProduct(row pgx.Row) (domain.Product, error) {
 		specs []byte
 	)
 	err := row.Scan(&p.ID, &p.CategoryID, &p.SKU, &p.Name, &p.Brand, &p.Description,
-		&p.OEMNumbers, &specs, &p.Universal, &price, &p.Stock, &p.ImageURL)
+		&p.OEMNumbers, &specs, &p.Universal, &price, &p.Stock, &p.ImageURL, &p.PartType)
 	if err != nil {
 		return p, err
 	}
@@ -177,6 +177,36 @@ func (r *CatalogRepository) Analogues(ctx context.Context, p *domain.Product, ve
 	products, err := collectProducts(rows)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: scan analogues: %w", err)
+	}
+	return products, nil
+}
+
+// KitParts returns in-stock parts of one type that fit the vehicle, cheapest
+// first. Oils are universal, so for them the grade is what decides: it is
+// matched against the specs with jsonb containment. The part_type index
+// narrows the rows first, so the specs need no index of their own.
+func (r *CatalogRepository) KitParts(ctx context.Context, vehicleID int64, partType, viscosity string, limit int) ([]domain.Product, error) {
+	grade := []byte("[]")
+	if viscosity != "" {
+		var err error
+		grade, err = json.Marshal([]domain.Spec{{Name: "В'язкість", Value: viscosity}})
+		if err != nil {
+			return nil, fmt.Errorf("postgres: encode viscosity: %w", err)
+		}
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT `+productColumns+` FROM products p
+		WHERE p.is_active AND p.stock > 0 AND p.part_type = $2 AND `+fitsVehicle("$1")+`
+		  AND p.specs @> $3::jsonb
+		ORDER BY p.price, p.id
+		LIMIT $4`,
+		vehicleID, partType, grade, limit)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: kit parts %s for vehicle %d: %w", partType, vehicleID, err)
+	}
+	products, err := collectProducts(rows)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: scan kit parts: %w", err)
 	}
 	return products, nil
 }

@@ -48,6 +48,11 @@ type Cart interface {
 	Clear(ctx context.Context, userID int64) error
 }
 
+// Maintenance assembles service kits.
+type Maintenance interface {
+	Kit(ctx context.Context, vehicleID int64) (*service.Kit, error)
+}
+
 // Garage is what the bot needs to know the buyer's car. The car is chosen by
 // writing it to the consultant -- a menu of every make, model and engine does
 // not scale past a demo -- so the bot only reads it and can forget it.
@@ -71,6 +76,7 @@ type Bot struct {
 	catalog Catalog
 	cart    Cart
 	garage  Garage
+	kits    Maintenance
 	cfg     Config
 	log     *slog.Logger
 
@@ -81,8 +87,8 @@ type Bot struct {
 }
 
 // New wires a Bot.
-func New(updates UpdateSource, tg Messenger, catalog Catalog, cart Cart, garage Garage, cfg Config, log *slog.Logger) *Bot {
-	return &Bot{updates: updates, tg: tg, catalog: catalog, cart: cart, garage: garage, cfg: cfg, log: log}
+func New(updates UpdateSource, tg Messenger, catalog Catalog, cart Cart, garage Garage, kits Maintenance, cfg Config, log *slog.Logger) *Bot {
+	return &Bot{updates: updates, tg: tg, catalog: catalog, cart: cart, garage: garage, kits: kits, cfg: cfg, log: log}
 }
 
 // Run long-polls for updates until ctx is cancelled, then finishes the updates
@@ -284,6 +290,10 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 			return &domain.Cart{UserID: cc.user}, nil
 		})
 		return msgCartCleared, err
+	case actKit:
+		return "", b.sendKit(ctx, cc)
+	case actKitAdd:
+		return b.addKit(ctx, cc)
 	case actForgetCar:
 		return "", b.forgetCar(ctx, cc)
 	case actNoop:
@@ -306,6 +316,8 @@ func (b *Bot) explain(ctx context.Context, err error, data string) string {
 		return msgQtyLimit
 	case errors.Is(err, domain.ErrCartFull):
 		return msgCartFull
+	case errors.Is(err, errNoCar):
+		return msgNoCarForKit
 	case errors.Is(err, domain.ErrNotFound):
 		return msgGone
 	}

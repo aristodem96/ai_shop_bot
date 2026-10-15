@@ -332,6 +332,46 @@ func TestFindVehicles(t *testing.T) {
 	assert.Equal(t, "Daewoo", makes[0])
 }
 
+func TestMaintenanceKit(t *testing.T) {
+	skipShort(t)
+	ctx := context.Background()
+	vehicles := NewVehicleRepository(testPool)
+	kits := service.NewMaintenanceService(NewCatalogRepository(testPool), vehicles)
+
+	kit, err := kits.Kit(ctx, vehicleByCode(t, "octavia-a7-14tsi"))
+	require.NoError(t, err)
+	assert.Equal(t, "5W-30", kit.Vehicle.OilViscosity)
+	assert.InDelta(t, 3.6, kit.Vehicle.OilVolume, 0.001)
+
+	got := map[string][]string{}
+	for _, i := range kit.Items {
+		got[i.PartType] = append(got[i.PartType], fmt.Sprintf("%s x%d", i.Product.SKU, i.Qty))
+	}
+	assert.Equal(t, map[string][]string{
+		domain.PartEngineOil:   {"OIL-001 x1"}, // 3.6 l: one 4 l can of 5W-30
+		domain.PartOilFilter:   {"FLT-002 x1"}, // the cheaper of two with the same OEM number
+		domain.PartAirFilter:   {"FLT-007 x1"},
+		domain.PartCabinFilter: {"FLT-009 x1"},
+		domain.PartSparkPlug:   {"ENG-002 x4"},
+	}, got)
+	assert.Empty(t, kit.Missing)
+
+	diesel, err := kits.Kit(ctx, vehicleByCode(t, "passat-b8-20tdi"))
+	require.NoError(t, err)
+	for _, i := range diesel.Items {
+		assert.NotEqual(t, domain.PartSparkPlug, i.PartType, "a diesel has no spark plugs")
+	}
+
+	camry, err := kits.Kit(ctx, vehicleByCode(t, "camry-xv70-25"))
+	require.NoError(t, err)
+	for _, i := range camry.Items {
+		if i.PartType == domain.PartEngineOil {
+			assert.Equal(t, "OIL-003", i.Product.SKU, "0W-20 for the Camry, not the cheaper 10W-40")
+		}
+	}
+	assert.Contains(t, camry.Missing, domain.PartAirFilter, "the shop lists no Camry air filter")
+}
+
 func TestCartLifecycle(t *testing.T) {
 	skipShort(t)
 	ctx := context.Background()

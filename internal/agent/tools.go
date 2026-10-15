@@ -18,9 +18,9 @@ import (
 // the conversation.
 const maxShown = 5
 
-// maxAddQty caps one add_to_cart call: a set of four plugs or two discs, not
-// a trade order.
-const maxAddQty = 4
+// maxAddQty caps one add_to_cart call: a set of plugs or a few cans of oil,
+// not a trade order.
+const maxAddQty = 6
 
 // runState is what the tools accumulate during one buyer message.
 type runState struct {
@@ -39,12 +39,13 @@ type toolbox struct {
 	catalog  Catalog
 	cart     Cart
 	garage   Garage
+	kits     Maintenance
 	// catSlug maps category ids to the slugs the model knows them by.
 	catSlug map[int64]string
 }
 
-func newToolbox(catalog Catalog, cart Cart, garage Garage, cats []domain.Category) *toolbox {
-	tb := &toolbox{catalog: catalog, cart: cart, garage: garage, catSlug: make(map[int64]string, len(cats))}
+func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, cats []domain.Category) *toolbox {
+	tb := &toolbox{catalog: catalog, cart: cart, garage: garage, kits: kits, catSlug: make(map[int64]string, len(cats))}
 	slugs := make([]string, 0, len(cats))
 	catalogue := make([]string, 0, len(cats))
 	for _, c := range cats {
@@ -106,6 +107,13 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, cats []domain.Categor
 			Schema:      object(map[string]any{"product_id": integer("Product id from search results.")}, "product_id"),
 		},
 		{
+			Name: "service_kit",
+			Description: "Get the routine maintenance kit for a vehicle: engine oil of the right grade and amount, " +
+				"oil, air and cabin filters, and spark plugs for a petrol engine, with quantities and the total. " +
+				"Use it for questions about a service, an oil change or \"ТО\".",
+			Schema: object(map[string]any{"vehicle_id": integer("Vehicle id.")}, "vehicle_id"),
+		},
+		{
 			Name: "show_products",
 			Description: "Show parts to the buyer as cards with photo, price, stock and fit, under your reply. " +
 				"Use it whenever you recommend parts. At most 5 per reply.",
@@ -132,6 +140,7 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, cats []domain.Categor
 		"set_my_vehicle": tb.setMyVehicle,
 		"search_parts":   tb.searchParts,
 		"get_part":       tb.getPart,
+		"service_kit":    tb.serviceKit,
 		"show_products":  tb.showProducts,
 		"add_to_cart":    tb.addToCart,
 	}
@@ -447,5 +456,41 @@ func (tb *toolbox) addToCart(ctx context.Context, run *runState, input json.RawM
 		"requested":      in.Quantity,
 		"cart_items":     cart.Items(),
 		"cart_total_uah": int64(cart.Total()) / 100,
+	}, nil
+}
+
+// serviceKit returns the kit the shop's rules assemble. The model presents it
+// and can add it to the cart; it does not choose what goes in.
+func (tb *toolbox) serviceKit(ctx context.Context, _ *runState, input json.RawMessage) (any, error) {
+	var in struct {
+		VehicleID int64 `json:"vehicle_id"`
+	}
+	if err := decode(input, &in); err != nil {
+		return nil, err
+	}
+	kit, err := tb.kits.Kit(ctx, in.VehicleID)
+	if err != nil {
+		return nil, err
+	}
+
+	type item struct {
+		PartType     string        `json:"part_type"`
+		Qty          int           `json:"qty"`
+		Product      productView   `json:"product"`
+		Alternatives []productView `json:"alternatives,omitempty"`
+	}
+	items := make([]item, len(kit.Items))
+	for i, it := range kit.Items {
+		items[i] = item{PartType: it.PartType, Qty: it.Qty, Product: tb.view(&it.Product)}
+		for _, alt := range it.Alternatives {
+			items[i].Alternatives = append(items[i].Alternatives, tb.view(&alt))
+		}
+	}
+	return map[string]any{
+		"vehicle":          viewVehicle(kit.Vehicle),
+		"oil":              map[string]any{"viscosity": kit.Vehicle.OilViscosity, "litres": kit.Vehicle.OilVolume},
+		"items":            items,
+		"missing_in_stock": kit.Missing,
+		"total_uah":        int64(kit.Total()) / 100,
 	}, nil
 }

@@ -198,8 +198,54 @@ func carView(car *domain.Vehicle) (string, *telegram.InlineKeyboard) {
 	return "🚗 Ваше авто: <b>" + esc(car.Label()) + "</b>\n\nКаталог і консультант підбирають деталі під нього. Щоб змінити — просто напишіть іншу машину.",
 		&telegram.InlineKeyboard{Rows: [][]telegram.InlineButton{
 			{button("🛍 Каталог для цього авто", actCategories)},
+			{button("🔧 Комплект для ТО", actKit)},
 			{button("Показувати всі деталі", actForgetCar)},
 		}}
+}
+
+var partTypeLabels = map[string]string{
+	domain.PartEngineOil:   "моторна олива",
+	domain.PartOilFilter:   "масляний фільтр",
+	domain.PartAirFilter:   "повітряний фільтр",
+	domain.PartCabinFilter: "салонний фільтр",
+	domain.PartSparkPlug:   "свічки запалювання",
+}
+
+// kitView lists a maintenance kit with a button per part and one to buy it
+// all.
+func kitView(kit *service.Kit) (string, *telegram.InlineKeyboard) {
+	var b strings.Builder
+	b.WriteString("🔧 <b>Комплект для ТО</b>\n")
+	b.WriteString(esc(kit.Vehicle.Label()) + "\n")
+	if kit.Vehicle.OilViscosity != "" {
+		fmt.Fprintf(&b, "Олива %s, %.1f л\n", esc(kit.Vehicle.OilViscosity), kit.Vehicle.OilVolume)
+	}
+	b.WriteString("\n")
+
+	kb := &telegram.InlineKeyboard{}
+	for _, i := range kit.Items {
+		fmt.Fprintf(&b, "• %s (%s) — %d × %s\n", esc(i.Product.Name), esc(i.Product.Brand), i.Qty, i.Product.Price)
+		kb.Rows = append(kb.Rows, []telegram.InlineButton{
+			button(fmt.Sprintf("%s · %s", i.Product.Name, i.Product.Brand), actProduct, i.Product.ID),
+		})
+	}
+	if len(kit.Missing) > 0 {
+		missing := make([]string, len(kit.Missing))
+		for i, t := range kit.Missing {
+			missing[i] = partTypeLabels[t]
+		}
+		b.WriteString("\n⚠️ Немає в наявності для вашого авто: " + strings.Join(missing, ", ") + "\n")
+	}
+
+	if len(kit.Items) == 0 {
+		b.WriteString("Для вашого авто зараз нічого з комплекту немає в наявності.")
+		return b.String(), kb
+	}
+	fmt.Fprintf(&b, "\nРазом: <b>%s</b>", kit.Total())
+	kb.Rows = append(kb.Rows, []telegram.InlineButton{
+		button(fmt.Sprintf("🛒 Додати весь комплект — %s", kit.Total()), actKitAdd),
+	})
+	return b.String(), kb
 }
 
 func carForgottenView() (string, *telegram.InlineKeyboard) {
@@ -229,7 +275,10 @@ func consultantView(text string, products []domain.Product, cartChanged, carSave
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(productLabel(p), actProduct, p.ID)})
 	}
 	if carSaved {
-		kb.Rows = append(kb.Rows, []telegram.InlineButton{button("🛍 Каталог для вашого авто", actCategories)})
+		kb.Rows = append(kb.Rows, []telegram.InlineButton{
+			button("🛍 Каталог для вашого авто", actCategories),
+			button("🔧 Комплект для ТО", actKit),
+		})
 	}
 	if cartChanged {
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(btnCart, actCart)})

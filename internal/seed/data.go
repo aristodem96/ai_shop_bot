@@ -27,21 +27,25 @@ type vehicle struct {
 	make, model      string
 	yearFrom, yearTo int // yearTo 0: still produced
 	engine, fuel     string
+	// Service data. Illustrative, like the rest of the catalogue: close to
+	// the real figures, not a workshop reference.
+	oilViscosity string
+	oilVolume    float64
 }
 
 var vehicles = []vehicle{
-	{"octavia-a7-14tsi", "Skoda", "Octavia A7", 2013, 2020, "1.4 TSI", "petrol"},
-	{"octavia-a7-20tdi", "Skoda", "Octavia A7", 2013, 2020, "2.0 TDI", "diesel"},
-	{"golf-7-16tdi", "Volkswagen", "Golf VII", 2012, 2019, "1.6 TDI", "diesel"},
-	{"passat-b8-20tdi", "Volkswagen", "Passat B8", 2014, 2022, "2.0 TDI", "diesel"},
-	{"camry-xv70-25", "Toyota", "Camry XV70", 2017, 2023, "2.5", "petrol"},
-	{"corolla-e210-16", "Toyota", "Corolla E210", 2019, 0, "1.6", "petrol"},
-	{"logan-2-15dci", "Renault", "Logan II", 2012, 2020, "1.5 dCi", "diesel"},
-	{"logan-2-16", "Renault", "Logan II", 2012, 2020, "1.6 8V", "petrol"},
-	{"tucson-tl-20", "Hyundai", "Tucson TL", 2015, 2020, "2.0 MPI", "petrol"},
-	{"sportage-ql-20", "Kia", "Sportage QL", 2015, 2021, "2.0 MPI", "petrol"},
-	{"focus-3-16", "Ford", "Focus III", 2011, 2018, "1.6 Ti-VCT", "petrol"},
-	{"lanos-15", "Daewoo", "Lanos", 1997, 2009, "1.5", "petrol"},
+	{"octavia-a7-14tsi", "Skoda", "Octavia A7", 2013, 2020, "1.4 TSI", "petrol", "5W-30", 3.6},
+	{"octavia-a7-20tdi", "Skoda", "Octavia A7", 2013, 2020, "2.0 TDI", "diesel", "5W-30", 4.6},
+	{"golf-7-16tdi", "Volkswagen", "Golf VII", 2012, 2019, "1.6 TDI", "diesel", "5W-30", 4.3},
+	{"passat-b8-20tdi", "Volkswagen", "Passat B8", 2014, 2022, "2.0 TDI", "diesel", "5W-30", 4.6},
+	{"camry-xv70-25", "Toyota", "Camry XV70", 2017, 2023, "2.5", "petrol", "0W-20", 4.4},
+	{"corolla-e210-16", "Toyota", "Corolla E210", 2019, 0, "1.6", "petrol", "0W-20", 4.2},
+	{"logan-2-15dci", "Renault", "Logan II", 2012, 2020, "1.5 dCi", "diesel", "10W-40", 4.5},
+	{"logan-2-16", "Renault", "Logan II", 2012, 2020, "1.6 8V", "petrol", "10W-40", 3.3},
+	{"tucson-tl-20", "Hyundai", "Tucson TL", 2015, 2020, "2.0 MPI", "petrol", "0W-20", 4.0},
+	{"sportage-ql-20", "Kia", "Sportage QL", 2015, 2021, "2.0 MPI", "petrol", "0W-20", 4.0},
+	{"focus-3-16", "Ford", "Focus III", 2011, 2018, "1.6 Ti-VCT", "petrol", "5W-30", 4.1},
+	{"lanos-15", "Daewoo", "Lanos", 1997, 2009, "1.5", "petrol", "10W-40", 3.8},
 }
 
 // Fitment groups: vehicles that share a platform share many parts.
@@ -62,6 +66,7 @@ type spec = [2]string
 
 type product struct {
 	sku, category string
+	partType      string
 	name, brand   string
 	price         int64 // whole hryvnias
 	fits          []string
@@ -123,64 +128,64 @@ var products = []product{
 		description: "Колодки для Lanos і Sens.", imageLabel: "Brake pads", stock: stockSoldOut},
 
 	// --- Filters -------------------------------------------------------------
-	{sku: "FLT-001", category: "filters", name: "Фільтр масляний", brand: "FiltroMax", price: 290,
+	{sku: "FLT-001", partType: "oil_filter", category: "filters", name: "Фільтр масляний", brand: "FiltroMax", price: 290,
 		fits: one("octavia-a7-14tsi"), oem: []string{"04E 115 561 H"},
 		specs:       []spec{{"Тип", "накручуваний"}},
 		description: "Фільтр з антидренажним клапаном.", imageLabel: "Oil filter"},
 	// The same OEM number from another brand: an analogue of FLT-001.
-	{sku: "FLT-002", category: "filters", name: "Фільтр масляний", brand: "AutoLine", price: 240,
+	{sku: "FLT-002", partType: "oil_filter", category: "filters", name: "Фільтр масляний", brand: "AutoLine", price: 240,
 		fits: one("octavia-a7-14tsi"), oem: []string{"04E 115 561 H"},
 		specs:       []spec{{"Тип", "накручуваний"}},
 		description: "Бюджетний аналог оригінального фільтра.", imageLabel: "Oil filter"},
-	{sku: "FLT-003", category: "filters", name: "Фільтр масляний (картридж)", brand: "FiltroMax", price: 340,
+	{sku: "FLT-003", partType: "oil_filter", category: "filters", name: "Фільтр масляний (картридж)", brand: "FiltroMax", price: 340,
 		fits: vagDiesel, oem: []string{"03N 115 562"},
 		specs:       []spec{{"Тип", "картридж"}},
 		description: "Фільтруючий елемент з ущільнювальними кільцями.", imageLabel: "Oil filter"},
-	{sku: "FLT-004", category: "filters", name: "Фільтр масляний", brand: "FiltroMax", price: 260,
+	{sku: "FLT-004", partType: "oil_filter", category: "filters", name: "Фільтр масляний", brand: "FiltroMax", price: 260,
 		fits: toyota, oem: []string{"90915-10003"},
 		specs:       []spec{{"Тип", "накручуваний"}},
 		description: "Фільтр для бензинових двигунів Toyota.", imageLabel: "Oil filter"},
-	{sku: "FLT-005", category: "filters", name: "Фільтр масляний", brand: "FiltroMax", price: 230,
+	{sku: "FLT-005", partType: "oil_filter", category: "filters", name: "Фільтр масляний", brand: "FiltroMax", price: 230,
 		fits: logan, oem: []string{"82 00 768 913"},
 		specs:       []spec{{"Тип", "накручуваний"}},
 		description: "Підходить до бензинових і дизельних Logan.", imageLabel: "Oil filter"},
-	{sku: "FLT-006", category: "filters", name: "Фільтр масляний", brand: "FiltroMax", price: 220,
+	{sku: "FLT-006", partType: "oil_filter", category: "filters", name: "Фільтр масляний", brand: "FiltroMax", price: 220,
 		fits: hyundaiKia, oem: []string{"26300-35505"},
 		specs:       []spec{{"Тип", "накручуваний"}},
 		description: "Фільтр для двигунів 2.0 MPI.", imageLabel: "Oil filter"},
-	{sku: "FLT-007", category: "filters", name: "Фільтр повітряний", brand: "FiltroMax", price: 480,
+	{sku: "FLT-007", partType: "air_filter", category: "filters", name: "Фільтр повітряний", brand: "FiltroMax", price: 480,
 		fits: vag, oem: []string{"5Q0 129 620 B"},
 		specs:       []spec{{"Форма", "прямокутний"}},
 		description: "Багатошаровий фільтруючий матеріал.", imageLabel: "Air filter"},
-	{sku: "FLT-008", category: "filters", name: "Фільтр повітряний", brand: "FiltroMax", price: 420,
+	{sku: "FLT-008", partType: "air_filter", category: "filters", name: "Фільтр повітряний", brand: "FiltroMax", price: 420,
 		fits: hyundaiKia, oem: []string{"28113-D3300"},
 		specs:       []spec{{"Форма", "прямокутний"}},
 		description: "Фільтр повітряний двигуна.", imageLabel: "Air filter"},
-	{sku: "FLT-009", category: "filters", name: "Фільтр салону вугільний", brand: "FiltroMax", price: 520,
+	{sku: "FLT-009", partType: "cabin_filter", category: "filters", name: "Фільтр салону вугільний", brand: "FiltroMax", price: 520,
 		fits: vag, oem: []string{"5Q0 819 653"},
 		specs:       []spec{{"Тип", "вугільний"}},
 		description: "Затримує пил, пилок і запахи з вулиці.", imageLabel: "Cabin filter"},
-	{sku: "FLT-010", category: "filters", name: "Фільтр масляний", brand: "Pivden Parts", price: 120,
+	{sku: "FLT-010", partType: "oil_filter", category: "filters", name: "Фільтр масляний", brand: "Pivden Parts", price: 120,
 		fits: lanos, oem: []string{"25183779"},
 		specs:       []spec{{"Тип", "накручуваний"}},
 		description: "Фільтр для Lanos 1.5.", imageLabel: "Oil filter"},
 
 	// --- Oils and fluids: universal, the specs decide ------------------------
-	{sku: "OIL-001", category: "oils", name: "Моторна олива 5W-30 синтетична, 4 л", brand: "LubriTech", price: 1290,
+	{sku: "OIL-001", partType: "engine_oil", category: "oils", name: "Моторна олива 5W-30 синтетична, 4 л", brand: "LubriTech", price: 1290,
 		universal:   true,
 		specs:       []spec{{"В'язкість", "5W-30"}, {"Об'єм", "4 л"}, {"Допуски", "VW 504.00 / 507.00"}},
 		description: "Синтетика з низьким вмістом золи для двигунів з сажовим фільтром.",
 		imageLabel:  "Oil 5W-30"},
-	{sku: "OIL-002", category: "oils", name: "Моторна олива 5W-30 синтетична, 1 л", brand: "LubriTech", price: 380,
+	{sku: "OIL-002", partType: "engine_oil", category: "oils", name: "Моторна олива 5W-30 синтетична, 1 л", brand: "LubriTech", price: 380,
 		universal:   true,
 		specs:       []spec{{"В'язкість", "5W-30"}, {"Об'єм", "1 л"}, {"Допуски", "VW 504.00 / 507.00"}},
 		description: "Та сама олива в літровій каністрі — для доливання.", imageLabel: "Oil 5W-30"},
-	{sku: "OIL-003", category: "oils", name: "Моторна олива 0W-20 синтетична, 4 л", brand: "LubriTech", price: 1490,
+	{sku: "OIL-003", partType: "engine_oil", category: "oils", name: "Моторна олива 0W-20 синтетична, 4 л", brand: "LubriTech", price: 1490,
 		universal:   true,
 		specs:       []spec{{"В'язкість", "0W-20"}, {"Об'єм", "4 л"}, {"Стандарт", "API SP, ILSAC GF-6"}},
 		description: "Енергозберігаюча олива для сучасних японських і корейських двигунів.",
 		imageLabel:  "Oil 0W-20"},
-	{sku: "OIL-004", category: "oils", name: "Моторна олива 10W-40 напівсинтетична, 4 л", brand: "LubriTech", price: 890,
+	{sku: "OIL-004", partType: "engine_oil", category: "oils", name: "Моторна олива 10W-40 напівсинтетична, 4 л", brand: "LubriTech", price: 890,
 		universal:   true,
 		specs:       []spec{{"В'язкість", "10W-40"}, {"Об'єм", "4 л"}, {"Стандарт", "API SL/CF"}},
 		description: "Для двигунів з пробігом і старших авто.", imageLabel: "Oil 10W-40"},
@@ -242,11 +247,11 @@ var products = []product{
 		specs:       []spec{{"Склад", "ремінь, натяжний і обвідний ролики"}, {"Інтервал заміни", "120 тис. км"}},
 		description: "Повний комплект для заміни ременя ГРМ на дизелях 1.6 і 2.0 TDI.",
 		imageLabel:  "Timing kit"},
-	{sku: "ENG-002", category: "engine", name: "Свічка запалювання", brand: "Iskra", price: 260,
+	{sku: "ENG-002", partType: "spark_plug", category: "engine", name: "Свічка запалювання", brand: "Iskra", price: 260,
 		fits: one("octavia-a7-14tsi"), oem: []string{"04E 905 612"},
 		specs:       []spec{{"Тип", "нікелева"}, {"Ціна за", "1 шт."}, {"Потрібно", "4 шт."}},
 		description: "Свічка для турбованих двигунів 1.4 TSI.", imageLabel: "Spark plug"},
-	{sku: "ENG-003", category: "engine", name: "Свічка запалювання іридієва", brand: "Iskra", price: 520,
+	{sku: "ENG-003", partType: "spark_plug", category: "engine", name: "Свічка запалювання іридієва", brand: "Iskra", price: 520,
 		fits: toyota, oem: []string{"90919-01289"},
 		specs:       []spec{{"Тип", "іридієва"}, {"Ціна за", "1 шт."}, {"Потрібно", "4 шт."}},
 		description: "Ресурс до 100 тис. км.", imageLabel: "Iridium plug"},
@@ -258,7 +263,7 @@ var products = []product{
 		fits: one("logan-2-16"), oem: []string{"13 0C 174 80R"},
 		specs:       []spec{{"Склад", "ремінь, натяжний ролик"}, {"Інтервал заміни", "60 тис. км"}},
 		description: "Комплект ГРМ для 1.6 8V.", imageLabel: "Timing kit"},
-	{sku: "ENG-006", category: "engine", name: "Свічка запалювання", brand: "Iskra", price: 230,
+	{sku: "ENG-006", partType: "spark_plug", category: "engine", name: "Свічка запалювання", brand: "Iskra", price: 230,
 		fits: hyundaiKia, oem: []string{"18849-11051"},
 		specs:       []spec{{"Тип", "нікелева"}, {"Ціна за", "1 шт."}, {"Потрібно", "4 шт."}},
 		description: "Свічка для 2.0 MPI.", imageLabel: "Spark plug"},

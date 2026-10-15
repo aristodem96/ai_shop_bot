@@ -177,6 +177,24 @@ func (f *fakeGarage) Clear(context.Context, int64) error {
 	return nil
 }
 
+// fakeKits builds a two-line kit from the pads: two units of them, and a
+// line the cart will refuse.
+type fakeKits struct{ catalog *fakeCatalog }
+
+func (f fakeKits) Kit(_ context.Context, vehicleID int64) (*service.Kit, error) {
+	if vehicleID != octavia.ID {
+		return nil, domain.ErrNotFound
+	}
+	return &service.Kit{
+		Vehicle: octavia,
+		Items: []service.KitItem{
+			{PartType: domain.PartOilFilter, Product: f.catalog.pads, Qty: 2},
+			{PartType: domain.PartSparkPlug, Product: domain.Product{ID: 404, Name: "Свічка", Brand: "Iskra", Price: domain.UAH(260)}, Qty: 4},
+		},
+		Missing: []string{domain.PartCabinFilter},
+	}, nil
+}
+
 const (
 	chat   = int64(77)
 	padsID = int64(5)
@@ -199,7 +217,7 @@ func newTestBot() testBot {
 	garage := &fakeGarage{}
 	tg := &fakeTelegram{}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return testBot{Bot: New(nil, tg, catalog, cart, garage, Config{}, log), tg: tg, cart: cart, garage: garage}
+	return testBot{Bot: New(nil, tg, catalog, cart, garage, fakeKits{catalog}, Config{}, log), tg: tg, cart: cart, garage: garage}
 }
 
 func text(s string) telegram.Update {
@@ -264,6 +282,38 @@ func TestMyCar(t *testing.T) {
 	b.Handle(ctx, press(encode(actForgetCar)))
 	assert.Nil(t, b.garage.car)
 	assert.Equal(t, msgCarForgotten, b.tg.last("editMessageText").text)
+}
+
+func TestMaintenanceKitButton(t *testing.T) {
+	b := newTestBot()
+	b.garage.car = &octavia
+	b.Handle(context.Background(), press(encode(actKit)))
+
+	msg := b.tg.last("sendMessage")
+	assert.Contains(t, msg.text, "Комплект для ТО")
+	assert.Contains(t, msg.text, "2 × 1\u202f450 грн")
+	assert.Contains(t, msg.text, "Немає в наявності для вашого авто: салонний фільтр")
+	assert.Contains(t, callbacks(msg.markup), encode(actKitAdd))
+}
+
+func TestAddWholeKit(t *testing.T) {
+	b := newTestBot()
+	b.garage.car = &octavia
+	b.Handle(context.Background(), press(encode(actKitAdd)))
+
+	assert.Equal(t, 2, b.cart.qty[padsID], "both units of the first line")
+	assert.Equal(t, "Додано 2 з 6 шт. — решти немає в наявності або досягнуто ліміту.",
+		b.tg.last("answerCallbackQuery").text, "the buyer is told what did not go in")
+	assert.Contains(t, b.tg.last("sendMessage").text, "Кошик", "and sees the cart")
+}
+
+func TestKitWithoutACar(t *testing.T) {
+	b := newTestBot()
+	b.Handle(context.Background(), press(encode(actKit)))
+
+	answer := b.tg.last("answerCallbackQuery")
+	assert.Equal(t, msgNoCarForKit, answer.text)
+	assert.True(t, answer.alert)
 }
 
 func TestGroupChatsAreRefused(t *testing.T) {
@@ -357,7 +407,7 @@ func TestEveryCallbackIsAnsweredOnce(t *testing.T) {
 	for _, data := range []string{
 		encode(actCategories), encode(actCategory, 1, 0), encode(actCategory, 99, 0),
 		encode(actProduct, padsID), encode(actProduct, 404), encode(actAnalogues, padsID),
-		encode(actCart), encode(actDec, padsID), encode(actForgetCar),
+		encode(actCart), encode(actDec, padsID), encode(actForgetCar), encode(actKit), encode(actKitAdd),
 		encode(actNoop), "garbage", "gs:5", "p:999999999999999999999",
 	} {
 		b := newTestBot()

@@ -96,6 +96,20 @@ func (f *fakeGarage) Set(_ context.Context, user, vehicleID int64) (*domain.Vehi
 	return &v, nil
 }
 
+type fakeKits struct{}
+
+func (fakeKits) Kit(_ context.Context, vehicleID int64) (*service.Kit, error) {
+	if vehicleID != octavia.ID {
+		return nil, domain.ErrNotFound
+	}
+	return &service.Kit{
+		Vehicle: domain.Vehicle{ID: octavia.ID, Make: "Skoda", Model: "Octavia A7", Engine: "1.4 TSI",
+			YearFrom: 2013, YearTo: 2020, OilViscosity: "5W-30", OilVolume: 3.6},
+		Items:   []service.KitItem{{PartType: domain.PartEngineOil, Product: frontPads, Qty: 1}},
+		Missing: []string{domain.PartCabinFilter},
+	}, nil
+}
+
 type fakeHistory struct {
 	mu   sync.Mutex
 	msgs map[int64][]llm.Message
@@ -146,7 +160,7 @@ type fixture struct {
 func newAgent(t *testing.T, model *llm.Fake) fixture {
 	t.Helper()
 	f := fixture{catalog: &fakeCatalog{}, cart: &fakeCart{}, garage: &fakeGarage{saved: map[int64]int64{}}, history: newFakeHistory()}
-	a, err := New(context.Background(), model, f.catalog, f.cart, f.garage, f.history,
+	a, err := New(context.Background(), model, f.catalog, f.cart, f.garage, fakeKits{}, f.history,
 		Config{MaxSteps: 5, MaxHistory: 30, Timeout: 5 * time.Second},
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.NoError(t, err)
@@ -461,4 +475,19 @@ func TestPhotoWithoutCaption(t *testing.T) {
 	_, err := f.agent.Reply(context.Background(), chat, chat, "", llm.Image{MediaType: "image/jpeg", Data: []byte{1}})
 	require.NoError(t, err)
 	assert.Equal(t, photoNote, model.Requests[0].Messages[0].Text)
+}
+
+func TestServiceKit(t *testing.T) {
+	model := llm.NewFake(
+		llm.Call("c1", "service_kit", map[string]any{"vehicle_id": 5}),
+		llm.Say("Ось комплект для ТО."),
+	)
+	f := newAgent(t, model)
+
+	_, err := f.agent.Reply(context.Background(), chat, chat, "що треба на ТО?")
+	require.NoError(t, err)
+	got := result(model, 1).Content
+	assert.Contains(t, got, `"oil":{"litres":3.6,"viscosity":"5W-30"}`)
+	assert.Contains(t, got, `"missing_in_stock":["cabin_filter"]`)
+	assert.Contains(t, got, `"total_uah":1450`)
 }

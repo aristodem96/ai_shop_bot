@@ -42,6 +42,11 @@ type Garage interface {
 	Set(ctx context.Context, userID, vehicleID int64) (*domain.Vehicle, error)
 }
 
+// Maintenance assembles service kits.
+type Maintenance interface {
+	Kit(ctx context.Context, vehicleID int64) (*service.Kit, error)
+}
+
 // History stores conversations between turns.
 type History interface {
 	Load(ctx context.Context, chatID int64) ([]llm.Message, error)
@@ -85,7 +90,7 @@ type Agent struct {
 // New builds an Agent. The categories are read once here, because they go
 // into a tool schema that must stay byte-identical between requests for the
 // provider's prompt cache to hit.
-func New(ctx context.Context, client llm.Client, catalog Catalog, cart Cart, garage Garage, history History, cfg Config, log *slog.Logger) (*Agent, error) {
+func New(ctx context.Context, client llm.Client, catalog Catalog, cart Cart, garage Garage, kits Maintenance, history History, cfg Config, log *slog.Logger) (*Agent, error) {
 	cats, err := catalog.Categories(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("agent: load categories: %w", err)
@@ -93,7 +98,7 @@ func New(ctx context.Context, client llm.Client, catalog Catalog, cart Cart, gar
 	return &Agent{
 		llm:     client,
 		history: history,
-		tools:   newToolbox(catalog, cart, garage, cats),
+		tools:   newToolbox(catalog, cart, garage, kits, cats),
 		cfg:     cfg,
 		log:     log,
 	}, nil

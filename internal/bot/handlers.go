@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
+	"github.com/aristodem96/ai_shop_bot/internal/service"
 	"github.com/aristodem96/ai_shop_bot/internal/telegram"
 )
 
@@ -150,6 +151,62 @@ func (b *Bot) sendCar(ctx context.Context, chat, user int64) {
 		return
 	}
 	b.send(ctx, chat, msgAskCar, nil)
+}
+
+// errNoCar is a kit asked for before the buyer named a car.
+var errNoCar = errors.New("bot: no car chosen")
+
+func (b *Bot) buyerKit(ctx context.Context, user int64) (*service.Kit, error) {
+	car := b.car(ctx, user)
+	if car == nil {
+		return nil, errNoCar
+	}
+	return b.kits.Kit(ctx, car.ID)
+}
+
+func (b *Bot) sendKit(ctx context.Context, cc callbackCtx) error {
+	kit, err := b.buyerKit(ctx, cc.user)
+	if err != nil {
+		return err
+	}
+	text, kb := kitView(kit)
+	return b.tg.SendMessage(ctx, cc.chat, text, kb)
+}
+
+// addKit puts the whole kit in the cart, unit by unit through the same rules
+// as any other add. The kit is assembled again rather than taken from the
+// message: prices and stock may have moved since it was shown.
+func (b *Bot) addKit(ctx context.Context, cc callbackCtx) (string, error) {
+	kit, err := b.buyerKit(ctx, cc.user)
+	if err != nil {
+		return "", err
+	}
+	added, wanted := 0, 0
+	for _, item := range kit.Items {
+		wanted += item.Qty
+		for range item.Qty {
+			if _, err := b.cart.Add(ctx, cc.user, item.Product.ID); err != nil {
+				if !isRefusal(err) {
+					return "", err
+				}
+				break // out of stock or at the limit: the rest of this line too
+			}
+			added++
+		}
+	}
+	b.sendCart(ctx, cc.chat, cc.user)
+	if added < wanted {
+		return fmt.Sprintf("Додано %d з %d шт. — решти немає в наявності або досягнуто ліміту.", added, wanted), nil
+	}
+	return fmt.Sprintf("✅ Комплект у кошику: %d шт.", added), nil
+}
+
+// isRefusal reports whether a cart error is a business refusal rather than a
+// failure. A part taken off sale between assembling the kit and adding it
+// counts too: the rest of the kit should still go in.
+func isRefusal(err error) bool {
+	return errors.Is(err, domain.ErrOutOfStock) || errors.Is(err, domain.ErrQtyLimit) ||
+		errors.Is(err, domain.ErrCartFull) || errors.Is(err, domain.ErrNotFound)
 }
 
 func (b *Bot) forgetCar(ctx context.Context, cc callbackCtx) error {

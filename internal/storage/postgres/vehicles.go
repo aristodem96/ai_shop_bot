@@ -28,11 +28,13 @@ func NewVehicleRepository(pool *pgxpool.Pool) *VehicleRepository {
 	return &VehicleRepository{pool: pool}
 }
 
-const vehicleColumns = `v.id, v.make, v.model, v.year_from, coalesce(v.year_to, 0), v.engine, v.fuel`
+const vehicleColumns = `v.id, v.make, v.model, v.year_from, coalesce(v.year_to, 0), v.engine, v.fuel,
+	coalesce(v.oil_viscosity, ''), coalesce(v.oil_volume_l, 0)::float8, v.cylinders`
 
 func scanVehicle(row pgx.Row) (domain.Vehicle, error) {
 	var v domain.Vehicle
-	err := row.Scan(&v.ID, &v.Make, &v.Model, &v.YearFrom, &v.YearTo, &v.Engine, &v.Fuel)
+	err := row.Scan(&v.ID, &v.Make, &v.Model, &v.YearFrom, &v.YearTo, &v.Engine, &v.Fuel,
+		&v.OilViscosity, &v.OilVolume, &v.Cylinders)
 	return v, err
 }
 

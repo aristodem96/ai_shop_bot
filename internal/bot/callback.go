@@ -29,6 +29,8 @@ const (
 	actDel        action = "cr"   // cr:<product> remove the line
 	actClear      action = "cx"   // empty the cart
 	actForgetCar  action = "gx"   // forget the car
+	actKit        action = "tk"   // send the maintenance kit for the buyer's car
+	actKitAdd     action = "ta"   // add the whole kit to the cart
 	actNoop       action = "x"    // a label that only looks like a button
 )
 
@@ -37,7 +39,7 @@ const (
 var arity = map[action]int{
 	actCategories: 0, actCategory: 2, actCategoryN: 1, actProduct: 1,
 	actAdd: 1, actAnalogues: 1, actCart: 0, actInc: 1, actDec: 1, actDel: 1,
-	actClear: 0, actForgetCar: 0, actNoop: 0,
+	actClear: 0, actForgetCar: 0, actKit: 0, actKitAdd: 0, actNoop: 0,
 }
 
 // maxCallbackData is Telegram's limit on callback_data, in bytes.

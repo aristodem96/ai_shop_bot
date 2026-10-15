@@ -26,6 +26,9 @@ type CatalogRepository interface {
 	// Search returns in-stock products matching every set field of f, best
 	// match first.
 	Search(ctx context.Context, f SearchFilter) ([]domain.Product, error)
+	// KitParts returns in-stock parts of one type that fit the vehicle,
+	// cheapest first. A non-empty viscosity keeps only oils of that grade.
+	KitParts(ctx context.Context, vehicleID int64, partType, viscosity string, limit int) ([]domain.Product, error)
 }
 
 // VehicleRepository reads the vehicle list. It never returns the whole list:

@@ -71,7 +71,9 @@ func run() error {
 		log.Warn("could not register the command menu", slog.Any("error", err))
 	}
 
-	b := bot.New(tg, tg, catalog, cart, garage, bot.Config{
+	kits := service.NewMaintenanceService(catalogRepo, vehicleRepo)
+
+	b := bot.New(tg, tg, catalog, cart, garage, kits, bot.Config{
 		MaxPending:     cfg.MaxPending,
 		HandlerTimeout: cfg.HandlerTimeout,
 	}, log)
@@ -85,7 +87,7 @@ func run() error {
 
 		consultant, err := agent.New(startupCtx,
 			claude.New(claude.Config{APIKey: cfg.LLM.APIKey, Model: cfg.LLM.Model, Effort: cfg.LLM.Effort}),
-			catalog, cart, garage,
+			catalog, cart, garage, kits,
 			redisstore.NewHistory(rdb, cfg.Agent.HistoryTTL),
 			agent.Config{MaxSteps: cfg.Agent.MaxSteps, MaxHistory: cfg.Agent.MaxHistory, Timeout: cfg.Agent.Timeout},
 			log)

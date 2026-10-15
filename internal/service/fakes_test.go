@@ -78,6 +78,19 @@ func (f *fakeCatalog) Search(_ context.Context, sf SearchFilter) ([]domain.Produ
 	return f.products[:min(sf.Limit, len(f.products))], nil
 }
 
+func (f *fakeCatalog) KitParts(_ context.Context, vehicleID int64, partType, viscosity string, limit int) ([]domain.Product, error) {
+	var out []domain.Product
+	for _, p := range f.products {
+		grade, _ := p.Spec("В'язкість")
+		if p.PartType != partType || p.Stock == 0 || !p.FitsVehicle(vehicleID) || (viscosity != "" && grade != viscosity) {
+			continue
+		}
+		out = append(out, p)
+	}
+	slices.SortFunc(out, func(a, b domain.Product) int { return int(a.Price - b.Price) })
+	return out[:min(limit, len(out))], nil
+}
+
 // fakeCarts is an in-memory CartRepository that joins against a fakeCatalog,
 // the way the real one joins against the products table.
 type fakeCarts struct {

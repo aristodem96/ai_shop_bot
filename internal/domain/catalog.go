@@ -24,7 +24,14 @@ type Vehicle struct {
 	YearTo int
 	Engine string
 	Fuel   string
+	// Service data; OilViscosity is empty and OilVolume zero when unknown.
+	OilViscosity string
+	OilVolume    float64 // litres
+	Cylinders    int
 }
+
+// NeedsSparkPlugs reports whether the engine has spark plugs to service.
+func (v Vehicle) NeedsSparkPlugs() bool { return v.Fuel == "petrol" || v.Fuel == "hybrid" }
 
 // Label names the vehicle the way a buyer would recognise it:
 // "Skoda Octavia A7 1.4 TSI (2013–2020)".
@@ -60,7 +67,10 @@ type Product struct {
 	Brand       string
 	Description string
 	OEMNumbers  []string
-	Specs       []Spec
+	// PartType is the kind of part in a fixed vocabulary, see the PartType
+	// constants; empty for parts no maintenance kit needs.
+	PartType string
+	Specs    []Spec
 	// Universal parts fit every vehicle and have no Fits list.
 	Universal bool
 	Price     Money
@@ -86,6 +96,25 @@ func (p *Product) FitsVehicle(vehicleID int64) bool {
 		}
 	}
 	return false
+}
+
+// Part types the maintenance kit is built from.
+const (
+	PartEngineOil   = "engine_oil"
+	PartOilFilter   = "oil_filter"
+	PartAirFilter   = "air_filter"
+	PartCabinFilter = "cabin_filter"
+	PartSparkPlug   = "spark_plug"
+)
+
+// Spec returns the value of a named characteristic.
+func (p *Product) Spec(name string) (string, bool) {
+	for _, s := range p.Specs {
+		if s.Name == name {
+			return s.Value, true
+		}
+	}
+	return "", false
 }
 
 // LowStock is the level at which stock is flagged as almost gone. Showing it
