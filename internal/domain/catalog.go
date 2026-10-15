@@ -79,6 +79,10 @@ type Product struct {
 	// Fits lists the vehicles the part fits. Listing queries leave it empty;
 	// the product card query fills it.
 	Fits []Vehicle
+	// FitNotes holds where and under what conditions the part fits a
+	// vehicle ("передня вісь, з ABS"), by vehicle id, for the fitments that
+	// have a note.
+	FitNotes map[int64]string
 }
 
 // InStock reports whether the part can be bought.

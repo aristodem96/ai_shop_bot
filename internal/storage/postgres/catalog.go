@@ -64,10 +64,11 @@ const productColumns = `
 	p.oem_numbers, p.specs, p.universal, p.price, p.stock, p.image_url, p.part_type`
 
 // fitsVehicle is the condition "p fits the vehicle in placeholder ph": a
-// universal part, or one with a fitment row for it. Zero means any vehicle.
+// universal part, or one fitted to it directly or through its model. Zero
+// means any vehicle.
 func fitsVehicle(ph string) string {
 	return `(` + ph + ` = 0 OR p.universal OR EXISTS (
-		SELECT 1 FROM product_fitments f WHERE f.product_id = p.id AND f.vehicle_id = ` + ph + `))`
+		SELECT 1 FROM vehicle_fitments f WHERE f.product_id = p.id AND f.vehicle_id = ` + ph + `))`
 }
 
 func scanProduct(row pgx.Row) (domain.Product, error) {
@@ -124,7 +125,8 @@ func (r *CatalogRepository) ProductsByCategory(ctx context.Context, categoryID, 
 	return products, total, nil
 }
 
-// Product returns an active product with the vehicles it fits.
+// Product returns an active product with the vehicles it fits and the notes
+// on each fitment.
 func (r *CatalogRepository) Product(ctx context.Context, id int64) (*domain.Product, error) {
 	p, err := scanProduct(r.pool.QueryRow(ctx, `
 		SELECT `+productColumns+` FROM products p
@@ -136,17 +138,44 @@ func (r *CatalogRepository) Product(ctx context.Context, id int64) (*domain.Prod
 		return nil, fmt.Errorf("postgres: get product %d: %w", id, err)
 	}
 
+	// One row per vehicle: a part fitted to a car both directly and through
+	// its model would otherwise list it twice. The direct fitment is the
+	// more specific, so its note wins.
 	rows, err := r.pool.Query(ctx, `
-		SELECT `+vehicleColumns+` FROM vehicles v
-		JOIN product_fitments f ON f.vehicle_id = v.id
-		WHERE f.product_id = $1
-		ORDER BY v.make, v.model, v.year_from, v.engine`, id)
+		SELECT * FROM (
+			SELECT DISTINCT ON (v.id) `+vehicleColumns+`,
+				concat_ws(', ', nullif(f.position, ''), nullif(f.note, ''))
+			FROM vehicle_fitments f
+			JOIN vehicles v ON v.id = f.vehicle_id
+			WHERE f.product_id = $1
+			ORDER BY v.id, f.direct DESC
+		) fits
+		ORDER BY make, model, year_from, engine`, id)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: list fitments of product %d: %w", id, err)
 	}
-	p.Fits, err = collectVehicles(rows)
+	type fit struct {
+		vehicle domain.Vehicle
+		note    string
+	}
+	fits, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (fit, error) {
+		var f fit
+		v := &f.vehicle
+		err := row.Scan(&v.ID, &v.Make, &v.Model, &v.YearFrom, &v.YearTo, &v.Engine, &v.Fuel,
+			&v.OilViscosity, &v.OilVolume, &v.Cylinders, &f.note)
+		return f, err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("postgres: scan fitments: %w", err)
+	}
+	for _, f := range fits {
+		p.Fits = append(p.Fits, f.vehicle)
+		if f.note != "" {
+			if p.FitNotes == nil {
+				p.FitNotes = make(map[int64]string)
+			}
+			p.FitNotes[f.vehicle.ID] = f.note
+		}
 	}
 	return &p, nil
 }
@@ -164,8 +193,8 @@ func (r *CatalogRepository) Analogues(ctx context.Context, p *domain.Product, ve
 			OR (p.category_id = $3 AND (
 				($6 AND p.universal)
 				OR EXISTS (
-					SELECT 1 FROM product_fitments a
-					JOIN product_fitments b ON b.vehicle_id = a.vehicle_id
+					SELECT 1 FROM vehicle_fitments a
+					JOIN vehicle_fitments b ON b.vehicle_id = a.vehicle_id
 					WHERE a.product_id = p.id AND b.product_id = $1)))
 		)
 		ORDER BY (p.oem_numbers && $2::text[]) DESC, abs(p.price - $4), p.id

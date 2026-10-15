@@ -153,7 +153,11 @@ func fitmentLine(p *domain.Product, car *domain.Vehicle) string {
 	case p.Universal:
 		return "🌐 Універсальний товар — перевірте характеристики під своє авто."
 	case car != nil && p.FitsVehicle(car.ID):
-		return "✅ Підходить до вашого " + esc(car.Short())
+		line := "✅ Підходить до вашого " + esc(car.Short())
+		if note := p.FitNotes[car.ID]; note != "" {
+			line += " (" + esc(note) + ")"
+		}
+		return line
 	case car != nil:
 		return "⚠️ Не підходить до вашого " + esc(car.Short())
 	case len(p.Fits) == 0:

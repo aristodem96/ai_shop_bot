@@ -202,22 +202,27 @@ const (
 
 type testBot struct {
 	*Bot
-	tg     *fakeTelegram
-	cart   *fakeCart
-	garage *fakeGarage
+	catalog *fakeCatalog
+	tg      *fakeTelegram
+	cart    *fakeCart
+	garage  *fakeGarage
 }
 
 func newTestBot() testBot {
 	catalog := &fakeCatalog{pads: domain.Product{
 		ID: padsID, CategoryID: 1, SKU: "BRK-001", Name: "Колодки гальмівні передні", Brand: "AutoLine",
 		Price: domain.UAH(1450), Stock: 2, OEMNumbers: []string{"5Q0698151"},
-		Fits: []domain.Vehicle{octavia},
+		ImageURL: "https://example.com/pads.png",
+		Fits:     []domain.Vehicle{octavia},
 	}}
 	cart := &fakeCart{catalog: catalog, qty: map[int64]int{}}
 	garage := &fakeGarage{}
 	tg := &fakeTelegram{}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return testBot{Bot: New(nil, tg, catalog, cart, garage, fakeKits{catalog}, Config{}, log), tg: tg, cart: cart, garage: garage}
+	return testBot{
+		Bot:     New(nil, tg, catalog, cart, garage, fakeKits{catalog}, Config{}, log),
+		catalog: catalog, tg: tg, cart: cart, garage: garage,
+	}
 }
 
 func text(s string) telegram.Update {
@@ -347,7 +352,7 @@ func TestProductCardShowsFit(t *testing.T) {
 	assert.Contains(t, callbacks(card.markup), encode(actAdd, padsID))
 }
 
-func TestProductCardFallsBackToTextWithoutPhoto(t *testing.T) {
+func TestProductCardFallsBackToTextWhenPhotoFails(t *testing.T) {
 	b := newTestBot()
 	b.tg.photoErr = errors.New("telegram: sendPhoto failed (400): wrong file identifier")
 
@@ -356,6 +361,16 @@ func TestProductCardFallsBackToTextWithoutPhoto(t *testing.T) {
 	require.Equal(t, []string{"sendMessage", "answerCallbackQuery"}, b.tg.methods())
 	assert.Contains(t, b.tg.calls[0].text, "Колодки")
 	assert.Contains(t, callbacks(b.tg.calls[0].markup), encode(actAdd, padsID))
+}
+
+func TestProductCardWithoutPhotoIsText(t *testing.T) {
+	b := newTestBot()
+	b.catalog.pads.ImageURL = "" // imported from a price list without photos
+
+	b.Handle(context.Background(), press(encode(actProduct, padsID)))
+
+	require.Equal(t, []string{"sendMessage", "answerCallbackQuery"}, b.tg.methods(), "no doomed sendPhoto first")
+	assert.Contains(t, b.tg.calls[0].text, "Колодки")
 }
 
 func TestAddToCart(t *testing.T) {

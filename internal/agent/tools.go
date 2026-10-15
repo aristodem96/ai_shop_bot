@@ -256,6 +256,9 @@ type productView struct {
 	Description   string   `json:"description,omitempty"`
 	Fits          []string `json:"fits,omitempty"`
 	FitsMyVehicle *bool    `json:"fits_my_vehicle,omitempty"`
+	// FitNote is where and when the part fits the buyer's car ("front axle,
+	// with ABS"): the detail that tells two fitting parts apart.
+	FitNote string `json:"fit_note,omitempty"`
 }
 
 func (tb *toolbox) view(p *domain.Product) productView {
@@ -413,13 +416,18 @@ func (tb *toolbox) getPart(ctx context.Context, run *runState, input json.RawMes
 	v := tb.view(p)
 	v.Description = p.Description
 	for _, f := range p.Fits {
-		v.Fits = append(v.Fits, f.Label())
+		label := f.Label()
+		if note := p.FitNotes[f.ID]; note != "" {
+			label += " — " + note
+		}
+		v.Fits = append(v.Fits, label)
 	}
 	// Fit is decided here, from the fitment table, not left for the model to
 	// infer from a list of names.
 	if car, err := tb.garage.Get(ctx, run.userID); err == nil && car != nil {
 		fits := p.FitsVehicle(car.ID)
 		v.FitsMyVehicle = &fits
+		v.FitNote = p.FitNotes[car.ID]
 	}
 	return v, nil
 }

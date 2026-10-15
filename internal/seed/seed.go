@@ -49,6 +49,11 @@ func Run(ctx context.Context, pool *pgxpool.Pool) (Stats, error) {
 
 		vehicleIDs := make(map[string]int64, len(vehicles))
 		for _, v := range vehicles {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO vehicle_models (make, model) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+				v.make, v.model); err != nil {
+				return fmt.Errorf("seed: model of %s: %w", v.code, err)
+			}
 			var id int64
 			err := tx.QueryRow(ctx, `
 				INSERT INTO vehicles (code, make, model, year_from, year_to, engine, fuel, oil_viscosity, oil_volume_l)

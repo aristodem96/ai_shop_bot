@@ -78,13 +78,16 @@ func (b *Bot) sendProductPage(ctx context.Context, cc callbackCtx, categoryID in
 // sendProduct sends a product card. The photo is fetched by Telegram from a
 // URL; if that fails -- the image host is down, the URL went stale -- the card
 // still goes out as text. A missing photo should cost the picture, not the
-// sale.
+// sale. A product imported without a photo goes out as text from the start.
 func (b *Bot) sendProduct(ctx context.Context, cc callbackCtx, productID int64) error {
 	p, err := b.catalog.Product(ctx, productID)
 	if err != nil {
 		return err
 	}
 	caption, kb := productCaption(p, b.car(ctx, cc.user)), productKeyboard(p)
+	if p.ImageURL == "" {
+		return b.tg.SendMessage(ctx, cc.chat, caption, kb)
+	}
 
 	err = b.tg.SendPhoto(ctx, cc.chat, p.ImageURL, caption, kb)
 	if err == nil || ctx.Err() != nil {
