@@ -1,0 +1,84 @@
+package bot
+
+import (
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+// Callback data is what an inline button sends back when pressed: a short
+// action code and its numeric arguments, joined by colons, e.g. "a:12:57".
+//
+// Telegram caps it at 64 bytes and stores it on the user's phone, so it is
+// treated as untrusted input: it names what was pressed, never a price or a
+// quantity. The handler looks everything else up again, which is also why an
+// old button still does the right thing after the catalogue has changed.
+type action string
+
+const (
+	actCategories action = "cats" // edit the message into the category menu
+	actCategory   action = "c"    // c:<category>:<page> edit into a product page
+	actCategoryN  action = "cn"   // cn:<category> send a product page as a new message
+	actProduct    action = "p"    // p:<product> send a product card
+	actPickSize   action = "b"    // b:<product> swap the card's buttons for sizes
+	actCardMenu   action = "k"    // k:<product> restore the card's buttons
+	actAdd        action = "a"    // a:<product>:<variant> add a size to the cart
+	actSimilar    action = "s"    // s:<product> send similar products
+	actCart       action = "cart" // send the cart as a new message
+	actInc        action = "ci"   // ci:<variant> one more unit
+	actDec        action = "cd"   // cd:<variant> one unit less
+	actDel        action = "cr"   // cr:<variant> remove the line
+	actClear      action = "cx"   // empty the cart
+	actNoop       action = "x"    // a label that only looks like a button
+)
+
+// arity is how many arguments each action takes. Parsing checks it, so a
+// handler can index the arguments without guarding against short input.
+var arity = map[action]int{
+	actCategories: 0, actCategory: 2, actCategoryN: 1, actProduct: 1,
+	actPickSize: 1, actCardMenu: 1, actAdd: 2, actSimilar: 1,
+	actCart: 0, actInc: 1, actDec: 1, actDel: 1, actClear: 0, actNoop: 0,
+}
+
+// maxCallbackData is Telegram's limit on callback_data, in bytes.
+const maxCallbackData = 64
+
+var errBadCallback = errors.New("bot: malformed callback data")
+
+type callback struct {
+	act  action
+	args []int64
+}
+
+func encode(act action, args ...int64) string {
+	var b strings.Builder
+	b.WriteString(string(act))
+	for _, a := range args {
+		b.WriteByte(':')
+		b.WriteString(strconv.FormatInt(a, 10))
+	}
+	return b.String()
+}
+
+func parseCallback(data string) (callback, error) {
+	if len(data) > maxCallbackData {
+		return callback{}, errBadCallback
+	}
+	parts := strings.Split(data, ":")
+	act := action(parts[0])
+	n, ok := arity[act]
+	if !ok || len(parts)-1 != n {
+		return callback{}, fmt.Errorf("%w: %q", errBadCallback, data)
+	}
+
+	cb := callback{act: act, args: make([]int64, n)}
+	for i, p := range parts[1:] {
+		v, err := strconv.ParseInt(p, 10, 64)
+		if err != nil {
+			return callback{}, fmt.Errorf("%w: %q", errBadCallback, data)
+		}
+		cb.args[i] = v
+	}
+	return cb, nil
+}
