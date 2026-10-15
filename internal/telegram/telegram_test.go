@@ -64,6 +64,12 @@ func TestSendMessageEncodesInlineKeyboard(t *testing.T) {
 	assert.Equal(t, map[string]any{"text": "Go", "callback_data": "go"}, row[0])
 }
 
+func TestEmptyInlineKeyboardIsAnArray(t *testing.T) {
+	raw, err := json.Marshal(&InlineKeyboard{})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"inline_keyboard":[]}`, string(raw), "Telegram rejects null here")
+}
+
 func TestNotModifiedIsASentinel(t *testing.T) {
 	c, _, _ := stub(t, `{"ok":false,"error_code":400,
 		"description":"Bad Request: message is not modified: specified new message content and reply markup are exactly the same"}`)

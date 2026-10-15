@@ -133,6 +133,16 @@ func TestWithoutConsultantFreeTextShowsCatalogue(t *testing.T) {
 	assert.False(t, slices.Contains(tg.methods(), "sendChatAction"))
 }
 
+func TestConsultantSmallTalkHasNoKeyboard(t *testing.T) {
+	c := &fakeConsultant{reply: &agent.Reply{Text: "Дякую, все добре! Що шукаєте?"}}
+	b, tg := withConsultant(c, fakeLimiter{allow: true})
+
+	b.Handle(context.Background(), text("як справи"))
+	msg := tg.last("sendMessage")
+	assert.Equal(t, "Дякую, все добре! Що шукаєте?", msg.text)
+	assert.Nil(t, msg.markup, "no empty keyboard for Telegram to reject")
+}
+
 func TestConsultantCardsWithoutText(t *testing.T) {
 	c := &fakeConsultant{reply: &agent.Reply{Text: "  ", ProductIDs: []int64{jacketID}}}
 	b, tg := withConsultant(c, fakeLimiter{allow: true})

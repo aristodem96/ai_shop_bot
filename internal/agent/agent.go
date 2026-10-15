@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -116,6 +117,7 @@ func (a *Agent) Reply(ctx context.Context, userID, chatID int64, text string) (*
 	if err != nil {
 		return nil, fmt.Errorf("agent: load history: %w", err)
 	}
+	history = dropEmpty(history)
 
 	turn := []llm.Message{{Role: llm.RoleUser, Text: text}}
 	run := &runState{userID: userID}
@@ -152,6 +154,13 @@ func (a *Agent) Reply(ctx context.Context, userID, chatID int64, text string) (*
 		reply := &Reply{Text: lastText(turn), ProductIDs: run.shown, CartChanged: run.cartChanged}
 		if reply.Text == "" && len(reply.ProductIDs) == 0 {
 			reply.Text = replyStuck
+		}
+		// The stored answer is the text the buyer was actually given. A final
+		// turn with no text of its own -- the model ended after show_products --
+		// would otherwise be stored empty, and the API rejects an assistant
+		// message with no content on every later request of this chat.
+		if last := &turn[len(turn)-1]; strings.TrimSpace(last.Text) == "" {
+			last.Text = reply.Text
 		}
 		a.save(ctx, chatID, history, turn)
 		a.logTurn(ctx, chatID, step+1, usage, start, string(resp.StopReason))
@@ -218,6 +227,17 @@ func trim(msgs []llm.Message, maxMsgs int) []llm.Message {
 		msgs = msgs[next:]
 	}
 	return msgs
+}
+
+// dropEmpty removes messages with nothing in them, which an older version
+// could store. One such message makes the API reject every request that
+// replays it, locking the chat out of the consultant until the history
+// expires. Without it, two user messages may end up adjacent, which the API
+// accepts and reads as one turn.
+func dropEmpty(msgs []llm.Message) []llm.Message {
+	return slices.DeleteFunc(msgs, func(m llm.Message) bool {
+		return strings.TrimSpace(m.Text) == "" && len(m.ToolCalls) == 0 && len(m.ToolResults) == 0
+	})
 }
 
 func startsTurn(m llm.Message) bool {

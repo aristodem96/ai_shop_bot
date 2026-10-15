@@ -121,6 +121,9 @@ func messages(in []llm.Message) []anthropic.MessageParam {
 			for _, tc := range m.ToolCalls {
 				blocks = append(blocks, anthropic.NewToolUseBlock(tc.ID, tc.Input, tc.Name))
 			}
+			if len(blocks) == 0 {
+				continue // the API rejects a message without content
+			}
 			out = append(out, anthropic.NewAssistantMessage(blocks...))
 		default:
 			// Tool results first, then any text: the API wants results to
@@ -131,6 +134,9 @@ func messages(in []llm.Message) []anthropic.MessageParam {
 			}
 			if m.Text != "" {
 				blocks = append(blocks, anthropic.NewTextBlock(m.Text))
+			}
+			if len(blocks) == 0 {
+				continue
 			}
 			out = append(out, anthropic.NewUserMessage(blocks...))
 		}

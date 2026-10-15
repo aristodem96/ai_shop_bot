@@ -142,3 +142,15 @@ func TestBadRequestIsNotUnavailable(t *testing.T) {
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, llm.ErrUnavailable, "a bug in our request must not read as an outage")
 }
+
+func TestEmptyMessagesAreNotSent(t *testing.T) {
+	c, got := server(t, http.StatusOK, toolUseResponse)
+
+	_, err := c.Chat(context.Background(), llm.Request{Messages: []llm.Message{
+		{Role: llm.RoleUser, Text: "куртка"},
+		{Role: llm.RoleAssistant},
+		{Role: llm.RoleUser, Text: "як справи"},
+	}})
+	require.NoError(t, err)
+	assert.Len(t, (*got)[0]["messages"], 2, "an empty message would be a 400 from the API")
+}

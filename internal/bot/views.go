@@ -176,7 +176,7 @@ const maxReplyRunes = 3500
 // consultantView is the consultant's answer: the model's text, escaped -- it
 // is model output, so it is never trusted as markup -- and a button per
 // product it chose to show, labelled from the catalogue.
-func consultantView(text string, products []domain.Product, cartChanged bool) (string, *telegram.InlineKeyboard) {
+func consultantView(text string, products []domain.Product, cartChanged bool) (string, telegram.ReplyMarkup) {
 	// Telegram refuses an empty message, and the buyer would get nothing at
 	// all. Cards without words still need a line above them.
 	if strings.TrimSpace(text) == "" {
@@ -191,6 +191,11 @@ func consultantView(text string, products []domain.Product, cartChanged bool) (s
 	}
 	if cartChanged {
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(btnCart, actCart)})
+	}
+	// A plain chat reply ("how are you") carries no buttons. A nil interface,
+	// not a nil *InlineKeyboard, so no reply_markup is sent at all.
+	if len(kb.Rows) == 0 {
+		return esc(text), nil
 	}
 	return esc(text), kb
 }

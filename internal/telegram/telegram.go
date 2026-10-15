@@ -111,6 +111,18 @@ type InlineKeyboard struct {
 
 func (*InlineKeyboard) replyMarkup() {}
 
+// MarshalJSON writes no rows as [] rather than null: Telegram rejects the whole
+// message over a null keyboard, and a nil slice is the natural zero value here.
+func (k *InlineKeyboard) MarshalJSON() ([]byte, error) {
+	rows := k.Rows
+	if rows == nil {
+		rows = [][]InlineButton{}
+	}
+	return json.Marshal(struct {
+		Rows [][]InlineButton `json:"inline_keyboard"`
+	}{rows})
+}
+
 // InlineButton sends CallbackData back to the bot when pressed, or opens URL.
 type InlineButton struct {
 	Text         string `json:"text"`

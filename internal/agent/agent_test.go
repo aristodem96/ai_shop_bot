@@ -307,3 +307,32 @@ func TestTextBeforeShowIsTheAnswer(t *testing.T) {
 	assert.Equal(t, "Ось теплий варіант.", reply.Text)
 	assert.Equal(t, []int64{2}, reply.ProductIDs)
 }
+
+func TestEmptyFinalTurnIsStoredWithTheSentText(t *testing.T) {
+	model := llm.NewFake(llm.Call("c1", "show_products", map[string]any{"product_ids": []int64{2}}), llm.Say(""))
+	a, _, _, history := newAgent(t, model)
+
+	reply, err := a.Reply(context.Background(), chat, chat, "куртка")
+	require.NoError(t, err)
+
+	saved := history.msgs[chat]
+	assert.Equal(t, reply.Text, saved[len(saved)-1].Text, "no assistant message is stored empty")
+}
+
+func TestEmptyMessagesInOldHistoryAreDropped(t *testing.T) {
+	// The shape a chat was left in by the bug this guards against.
+	model := llm.NewFake(llm.Say("Усе добре!"))
+	a, _, _, history := newAgent(t, model)
+	history.msgs[chat] = []llm.Message{
+		{Role: llm.RoleUser, Text: "куртка"},
+		{Role: llm.RoleAssistant},
+	}
+
+	_, err := a.Reply(context.Background(), chat, chat, "як справи")
+	require.NoError(t, err)
+
+	sent := model.Requests[0].Messages
+	require.Len(t, sent, 2)
+	assert.Equal(t, "куртка", sent[0].Text)
+	assert.Equal(t, "як справи", sent[1].Text)
+}
