@@ -86,3 +86,44 @@ func TestTransportErrorsDoNotLeakTheToken(t *testing.T) {
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "secret")
 }
+
+func TestDownloadFile(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/bot" + token + "/getFile":
+			_, _ = io.WriteString(w, `{"ok":true,"result":{"file_id":"f1","file_size":4,"file_path":"photos/a.jpg"}}`)
+		case "/file/bot" + token + "/photos/a.jpg":
+			_, _ = io.WriteString(w, "JPEG")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	c := NewWithBaseURL(srv.URL, token)
+	ctx := context.Background()
+
+	f, err := c.GetFile(ctx, "f1")
+	require.NoError(t, err)
+	assert.Equal(t, "photos/a.jpg", f.FilePath)
+
+	data, err := c.DownloadFile(ctx, f.FilePath, 10)
+	require.NoError(t, err)
+	assert.Equal(t, "JPEG", string(data))
+
+	_, err = c.DownloadFile(ctx, f.FilePath, 3)
+	require.ErrorIs(t, err, ErrFileTooLarge, "the limit holds while reading")
+
+	_, err = c.DownloadFile(ctx, "photos/missing.jpg", 10)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "secret", "the token is part of the file URL")
+}
+
+func TestMessageWithPhotoDecodes(t *testing.T) {
+	var u Update
+	require.NoError(t, json.Unmarshal([]byte(`{"update_id":1,"message":{"message_id":2,
+		"chat":{"id":5,"type":"private"},"caption":"що це?",
+		"photo":[{"file_id":"small","width":90,"height":67},{"file_id":"big","width":1280,"height":960}]}}`), &u))
+	require.Len(t, u.Message.Photo, 2)
+	assert.Equal(t, "big", u.Message.Photo[1].FileID)
+	assert.Equal(t, "що це?", u.Message.Caption)
+}

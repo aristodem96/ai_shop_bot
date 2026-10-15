@@ -154,3 +154,20 @@ func TestEmptyMessagesAreNotSent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, (*got)[0]["messages"], 2, "an empty message would be a 400 from the API")
 }
+
+func TestImageGoesBeforeTheText(t *testing.T) {
+	c, got := server(t, http.StatusOK, toolUseResponse)
+
+	_, err := c.Chat(context.Background(), llm.Request{Messages: []llm.Message{{
+		Role: llm.RoleUser, Text: "що це за деталь?",
+		Images: []llm.Image{{MediaType: "image/jpeg", Data: []byte{0xff, 0xd8, 0xff}}},
+	}}})
+	require.NoError(t, err)
+
+	content := (*got)[0]["messages"].([]any)[0].(map[string]any)["content"].([]any)
+	require.Len(t, content, 2)
+	img := content[0].(map[string]any)
+	assert.Equal(t, "image", img["type"])
+	assert.Equal(t, map[string]any{"type": "base64", "media_type": "image/jpeg", "data": "/9j/"}, img["source"])
+	assert.Equal(t, "text", content[1].(map[string]any)["type"])
+}

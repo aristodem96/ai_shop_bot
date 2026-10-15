@@ -33,6 +33,12 @@ type Message struct {
 	ToolCalls   []ToolCall   `json:"tool_calls,omitempty"`
 	ToolResults []ToolResult `json:"tool_results,omitempty"`
 
+	// Images go with a user turn, before its text. Like Native they are never
+	// persisted: a photo replayed on every later turn would cost its tokens
+	// again each time, so a stored conversation keeps only what was said
+	// about it.
+	Images []Image `json:"-"`
+
 	// Native is the provider's own form of an assistant turn, exactly as it
 	// came back. A provider that finds it replays it verbatim instead of
 	// rebuilding the turn from the fields above.
@@ -43,6 +49,13 @@ type Message struct {
 	// conversation holds no thinking blocks at all -- see agent.Agent for why
 	// that is the safe choice.
 	Native any `json:"-"`
+}
+
+// Image is a picture the buyer sent.
+type Image struct {
+	// MediaType is image/jpeg, image/png, image/gif or image/webp.
+	MediaType string
+	Data      []byte
 }
 
 // ToolCall is the model asking for a tool to run.

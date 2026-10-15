@@ -74,9 +74,10 @@ type Bot struct {
 	cfg     Config
 	log     *slog.Logger
 
-	// consultant and limiter are nil until UseConsultant is called.
+	// consultant, limiter and files are nil until UseConsultant is called.
 	consultant Consultant
 	limiter    Limiter
+	files      Files
 }
 
 // New wires a Bot.
@@ -193,6 +194,11 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 	}
 	chat, user := m.Chat.ID, m.From.ID
 
+	if len(m.Photo) > 0 {
+		b.consultPhoto(ctx, chat, user, m)
+		return
+	}
+
 	switch m.Text {
 	case "/start":
 		b.send(ctx, chat, msgWelcome, mainMenu())
@@ -208,7 +214,7 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 	case "/new":
 		b.resetConversation(ctx, chat)
 	case "":
-		// A photo, a sticker, a voice note. Photo search arrives in stage 4.
+		// A sticker, a voice note, a file: nothing the consultant reads.
 		b.send(ctx, chat, msgTextOnly, nil)
 	default:
 		b.consult(ctx, chat, user, m.Text)

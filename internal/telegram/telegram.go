@@ -70,6 +70,18 @@ type Message struct {
 	From      *User  `json:"from"`
 	Chat      Chat   `json:"chat"`
 	Text      string `json:"text"`
+	// Photo is the same picture in several sizes, smallest first.
+	Photo []PhotoSize `json:"photo"`
+	// Caption is the text sent with a photo.
+	Caption string `json:"caption"`
+}
+
+// PhotoSize is one size of a photo.
+type PhotoSize struct {
+	FileID   string `json:"file_id"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	FileSize int64  `json:"file_size"`
 }
 
 // CallbackQuery is a press of an inline button.
@@ -236,6 +248,54 @@ const ChatActionTyping = "typing"
 // until the bot's next message, whichever comes first.
 func (c *Client) SendChatAction(ctx context.Context, chatID int64, action string) error {
 	return c.call(ctx, "sendChatAction", map[string]any{"chat_id": chatID, "action": action}, nil)
+}
+
+// File is a file stored on Telegram's servers, ready to download.
+type File struct {
+	FileID   string `json:"file_id"`
+	FileSize int64  `json:"file_size"`
+	FilePath string `json:"file_path"`
+}
+
+// GetFile resolves a file id to a path DownloadFile can fetch. The path is
+// valid for at least an hour.
+func (c *Client) GetFile(ctx context.Context, fileID string) (*File, error) {
+	var f File
+	if err := c.call(ctx, "getFile", map[string]any{"file_id": fileID}, &f); err != nil {
+		return nil, err
+	}
+	return &f, nil
+}
+
+// ErrFileTooLarge is returned by DownloadFile for a file over the limit.
+var ErrFileTooLarge = errors.New("telegram: file too large")
+
+// DownloadFile fetches a file by the path from GetFile, refusing anything
+// larger than maxBytes. The limit is enforced while reading, not trusted from
+// a header, so a lying server cannot make the bot buffer more than it allows.
+func (c *Client) DownloadFile(ctx context.Context, filePath string, maxBytes int64) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		c.baseURL+"/file/bot"+c.token+"/"+filePath, nil)
+	if err != nil {
+		return nil, fmt.Errorf("telegram: build download request: %w", redact(err))
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("telegram: download file: %w", redact(err))
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("telegram: download file: HTTP %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("telegram: read file: %w", err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, ErrFileTooLarge
+	}
+	return data, nil
 }
 
 // Command is one entry of the menu Telegram shows under the message box.

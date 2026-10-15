@@ -4,6 +4,7 @@ package claude
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -128,9 +129,14 @@ func messages(in []llm.Message) []anthropic.MessageParam {
 		default:
 			// Tool results first, then any text: the API wants results to
 			// open the turn, and the model treats text after them as the
-			// user's own words rather than as tool output.
+			// user's own words rather than as tool output. Images go before
+			// the text that asks about them, which is the order the model
+			// reads best.
 			for _, r := range m.ToolResults {
 				blocks = append(blocks, anthropic.NewToolResultBlock(r.CallID, r.Content, r.IsError))
+			}
+			for _, img := range m.Images {
+				blocks = append(blocks, anthropic.NewImageBlockBase64(img.MediaType, base64.StdEncoding.EncodeToString(img.Data)))
 			}
 			if m.Text != "" {
 				blocks = append(blocks, anthropic.NewTextBlock(m.Text))

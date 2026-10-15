@@ -8,22 +8,59 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/aristodem96/ai_shop_bot/internal/agent"
 	"github.com/aristodem96/ai_shop_bot/internal/llm"
+	"github.com/aristodem96/ai_shop_bot/internal/telegram"
 )
 
 type fakeConsultant struct {
 	reply  *agent.Reply
 	err    error
 	asked  []string
+	images []llm.Image
 	resets int
 }
 
-func (f *fakeConsultant) Reply(_ context.Context, _, _ int64, text string) (*agent.Reply, error) {
+func (f *fakeConsultant) Reply(_ context.Context, _, _ int64, text string, images ...llm.Image) (*agent.Reply, error) {
 	f.asked = append(f.asked, text)
+	f.images = append(f.images, images...)
+	if f.reply == nil {
+		return &agent.Reply{Text: "ok"}, f.err
+	}
 	return f.reply, f.err
+}
+
+// fakeFiles serves one downloadable photo per file id.
+type fakeFiles struct {
+	data       map[string][]byte
+	downloaded []string
+}
+
+func (f *fakeFiles) GetFile(_ context.Context, id string) (*telegram.File, error) {
+	if _, ok := f.data[id]; !ok {
+		return nil, errors.New("telegram: getFile failed (400): file not found")
+	}
+	return &telegram.File{FileID: id, FilePath: "photos/" + id}, nil
+}
+
+func (f *fakeFiles) DownloadFile(_ context.Context, path string, _ int64) ([]byte, error) {
+	id := strings.TrimPrefix(path, "photos/")
+	f.downloaded = append(f.downloaded, id)
+	return f.data[id], nil
+}
+
+// jpeg is enough of a JPEG for content sniffing.
+var jpeg = []byte{0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 'J', 'F', 'I', 'F', 0}
+
+func photo(caption string, sizes ...telegram.PhotoSize) telegram.Update {
+	u := text("")
+	u.Message.Caption = caption
+	u.Message.Photo = sizes
+	return u
 }
 
 func (f *fakeConsultant) Reset(context.Context, int64) error {
@@ -42,7 +79,7 @@ func (f fakeLimiter) Allow(context.Context, int64) (bool, time.Duration, error) 
 
 func withConsultant(c *fakeConsultant, l Limiter) (testBot, *fakeTelegram) {
 	b := newTestBot()
-	b.UseConsultant(c, l)
+	b.UseConsultant(c, l, &fakeFiles{})
 	return b, b.tg
 }
 
@@ -113,6 +150,60 @@ func TestConsultantRejectsLongMessages(t *testing.T) {
 	b.Handle(context.Background(), text(strings.Repeat("я", maxQuestionRunes+1)))
 	assert.Empty(t, c.asked)
 	assert.Equal(t, msgTooLong, tg.last("sendMessage").text)
+}
+
+func TestPhotoSearch(t *testing.T) {
+	c := &fakeConsultant{}
+	files := &fakeFiles{data: map[string][]byte{"small": jpeg, "big": jpeg}}
+	b := newTestBot()
+	b.UseConsultant(c, fakeLimiter{allow: true}, files)
+
+	b.Handle(context.Background(), photo("",
+		telegram.PhotoSize{FileID: "small", Width: 90, Height: 67},
+		telegram.PhotoSize{FileID: "big", Width: 1280, Height: 960},
+		telegram.PhotoSize{FileID: "huge", Width: 4000, Height: 3000, FileSize: maxPhotoBytes + 1},
+	))
+
+	assert.Equal(t, []string{"big"}, files.downloaded, "the largest size within the limit")
+	assert.Equal(t, []string{photoQuestion}, c.asked, "a photo without a caption gets a default question")
+	require.Len(t, c.images, 1)
+	assert.Equal(t, "image/jpeg", c.images[0].MediaType, "the type is read from the bytes")
+}
+
+func TestPhotoCaptionIsTheQuestion(t *testing.T) {
+	c := &fakeConsultant{}
+	b := newTestBot()
+	b.UseConsultant(c, fakeLimiter{allow: true}, &fakeFiles{data: map[string][]byte{"p": jpeg}})
+
+	b.Handle(context.Background(), photo("це з передньої осі", telegram.PhotoSize{FileID: "p", Width: 800, Height: 600}))
+	assert.Equal(t, []string{"це з передньої осі"}, c.asked)
+}
+
+func TestPhotoThatIsNotAnImage(t *testing.T) {
+	c := &fakeConsultant{}
+	b := newTestBot()
+	b.UseConsultant(c, fakeLimiter{allow: true}, &fakeFiles{data: map[string][]byte{"p": []byte("%PDF-1.7")}})
+
+	b.Handle(context.Background(), photo("", telegram.PhotoSize{FileID: "p", Width: 800, Height: 600}))
+	assert.Empty(t, c.asked, "the model never sees it")
+	assert.Equal(t, msgBadPhoto, b.tg.last("sendMessage").text)
+}
+
+func TestPhotoOverTheLimitIsNotDownloaded(t *testing.T) {
+	c := &fakeConsultant{}
+	files := &fakeFiles{data: map[string][]byte{"p": jpeg}}
+	b := newTestBot()
+	b.UseConsultant(c, fakeLimiter{allow: false}, files)
+
+	b.Handle(context.Background(), photo("", telegram.PhotoSize{FileID: "p", Width: 800, Height: 600}))
+	assert.Empty(t, files.downloaded, "the rate limit is checked before the download")
+	assert.Empty(t, c.asked)
+}
+
+func TestPhotoWithoutConsultant(t *testing.T) {
+	b := newTestBot()
+	b.Handle(context.Background(), photo("", telegram.PhotoSize{FileID: "p", Width: 800, Height: 600}))
+	assert.Equal(t, msgPhotoNeedsConsultant, b.tg.last("sendMessage").text)
 }
 
 func TestNonTextMessage(t *testing.T) {

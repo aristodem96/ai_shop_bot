@@ -92,7 +92,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		b.UseConsultant(consultant, redisstore.NewRateLimiter(rdb, cfg.Agent.RateLimit, cfg.Agent.RateWindow))
+		b.UseConsultant(consultant, redisstore.NewRateLimiter(rdb, cfg.Agent.RateLimit, cfg.Agent.RateWindow), tg)
 	}
 
 	log.Info("bot started",

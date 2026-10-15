@@ -425,3 +425,40 @@ func TestTrimDropsWholeTurns(t *testing.T) {
 	assert.Equal(t, "3", got[0].Text, "a tool result is never left without its call")
 	assert.Len(t, got, 4, "one turn longer than the cap is kept whole")
 }
+
+func TestPhotoIsSentOnceAndNotStored(t *testing.T) {
+	model := llm.NewFake(
+		llm.Call("c1", "search_parts", map[string]any{"category": "brakes", "query": "колодк"}),
+		llm.Say("Схоже на передні колодки."),
+		llm.Say("Так, ті самі."),
+	)
+	f := newAgent(t, model)
+	ctx := context.Background()
+	photo := llm.Image{MediaType: "image/jpeg", Data: []byte{0xff, 0xd8, 0xff}}
+
+	_, err := f.agent.Reply(ctx, chat, chat, "що це за деталь?", photo)
+	require.NoError(t, err)
+
+	first := model.Requests[0].Messages[0]
+	assert.Equal(t, []llm.Image{photo}, first.Images)
+	assert.Equal(t, photoNote+"\nщо це за деталь?", first.Text)
+	assert.Equal(t, []llm.Image{photo}, model.Requests[1].Messages[0].Images,
+		"the photo stays in the turn while the model works on it")
+
+	// The next message replays the history without the image, but with the
+	// note and what the model said about it.
+	_, err = f.agent.Reply(ctx, chat, chat, "а на октавію є?")
+	require.NoError(t, err)
+	replayed := model.Requests[2].Messages[0]
+	assert.Empty(t, replayed.Images)
+	assert.Contains(t, replayed.Text, photoNote)
+}
+
+func TestPhotoWithoutCaption(t *testing.T) {
+	model := llm.NewFake(llm.Say("Це масляний фільтр."))
+	f := newAgent(t, model)
+
+	_, err := f.agent.Reply(context.Background(), chat, chat, "", llm.Image{MediaType: "image/jpeg", Data: []byte{1}})
+	require.NoError(t, err)
+	assert.Equal(t, photoNote, model.Requests[0].Messages[0].Text)
+}

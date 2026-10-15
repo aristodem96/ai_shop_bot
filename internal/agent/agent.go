@@ -106,7 +106,12 @@ const (
 	replyRefusal = "Я можу допомогти лише з підбором автозапчастин у нашому магазині. Що шукаєте?"
 )
 
-// Reply answers one buyer message.
+// photoNote marks a buyer message that came with a photo. It is part of the
+// stored text, so later turns -- which no longer carry the image -- still know
+// a photo was sent and that the model's description of it refers to one.
+const photoNote = "[Покупець надіслав фото]"
+
+// Reply answers one buyer message, with the photos sent along with it.
 //
 // Thinking blocks and history. Claude signs each thinking block together with
 // everything before it in the conversation, and rejects a block whose prefix
@@ -116,7 +121,7 @@ const (
 // bound to anything, so trimming old turns from the front can never
 // invalidate what is left. The model loses its reasoning from earlier turns,
 // which for a shopping chat is a fair price for a history that can be cut.
-func (a *Agent) Reply(ctx context.Context, userID, chatID int64, text string) (*Reply, error) {
+func (a *Agent) Reply(ctx context.Context, userID, chatID int64, text string, images ...llm.Image) (*Reply, error) {
 	ctx, cancel := context.WithTimeout(ctx, a.cfg.Timeout)
 	defer cancel()
 
@@ -126,7 +131,10 @@ func (a *Agent) Reply(ctx context.Context, userID, chatID int64, text string) (*
 	}
 	history = dropEmpty(history)
 
-	turn := []llm.Message{{Role: llm.RoleUser, Text: text}}
+	if len(images) > 0 {
+		text = strings.TrimSpace(photoNote + "\n" + text)
+	}
+	turn := []llm.Message{{Role: llm.RoleUser, Text: text, Images: images}}
 	run := &runState{userID: userID}
 	var usage llm.Usage
 	start := time.Now()
