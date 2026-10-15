@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
@@ -148,7 +149,7 @@ func (a *Agent) Reply(ctx context.Context, userID, chatID int64, text string) (*
 
 		// An answer, possibly cut off by max_tokens; a cut answer still
 		// beats none, and the prompt keeps answers far below the limit.
-		reply := &Reply{Text: resp.Message.Text, ProductIDs: run.shown, CartChanged: run.cartChanged}
+		reply := &Reply{Text: lastText(turn), ProductIDs: run.shown, CartChanged: run.cartChanged}
 		if reply.Text == "" && len(reply.ProductIDs) == 0 {
 			reply.Text = replyStuck
 		}
@@ -221,6 +222,18 @@ func trim(msgs []llm.Message, maxMsgs int) []llm.Message {
 
 func startsTurn(m llm.Message) bool {
 	return m.Role == llm.RoleUser && len(m.ToolResults) == 0
+}
+
+// lastText is the model's last words in this turn. The final step is usually
+// where they are, but after show_products the model often ends with no text at
+// all, having said "here are a few options" in the step before the call.
+func lastText(turn []llm.Message) string {
+	for i := len(turn) - 1; i >= 0; i-- {
+		if m := turn[i]; m.Role == llm.RoleAssistant && strings.TrimSpace(m.Text) != "" {
+			return m.Text
+		}
+	}
+	return ""
 }
 
 func concat(a, b []llm.Message) []llm.Message {

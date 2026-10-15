@@ -177,6 +177,11 @@ const maxReplyRunes = 3500
 // is model output, so it is never trusted as markup -- and a button per
 // product it chose to show, labelled from the catalogue.
 func consultantView(text string, products []domain.Product, cartChanged bool) (string, *telegram.InlineKeyboard) {
+	// Telegram refuses an empty message, and the buyer would get nothing at
+	// all. Cards without words still need a line above them.
+	if strings.TrimSpace(text) == "" {
+		text = msgHereYouGo
+	}
 	if r := []rune(text); len(r) > maxReplyRunes {
 		text = string(r[:maxReplyRunes]) + "…"
 	}

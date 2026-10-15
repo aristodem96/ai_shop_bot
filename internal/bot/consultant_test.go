@@ -132,3 +132,11 @@ func TestWithoutConsultantFreeTextShowsCatalogue(t *testing.T) {
 	assert.Equal(t, msgFreeTextSoon, tg.calls[0].text)
 	assert.False(t, slices.Contains(tg.methods(), "sendChatAction"))
 }
+
+func TestConsultantCardsWithoutText(t *testing.T) {
+	c := &fakeConsultant{reply: &agent.Reply{Text: "  ", ProductIDs: []int64{jacketID}}}
+	b, tg := withConsultant(c, fakeLimiter{allow: true})
+
+	b.Handle(context.Background(), text("куртка"))
+	assert.Equal(t, msgHereYouGo, tg.last("sendMessage").text, "Telegram rejects an empty message")
+}

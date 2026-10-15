@@ -294,3 +294,16 @@ func TestTrimDropsWholeTurns(t *testing.T) {
 	assert.Equal(t, "3", got[0].Text, "a tool result is never left without its call")
 	assert.Len(t, got, 4, "one turn longer than the cap is kept whole")
 }
+
+func TestTextBeforeShowIsTheAnswer(t *testing.T) {
+	// Seen live: the model speaks, shows products, then ends with no text.
+	talkAndShow := llm.Call("c1", "show_products", map[string]any{"product_ids": []int64{2}})
+	talkAndShow.Response.Message.Text = "Ось теплий варіант."
+	model := llm.NewFake(talkAndShow, llm.Say(""))
+	a, _, _, _ := newAgent(t, model)
+
+	reply, err := a.Reply(context.Background(), chat, chat, "куртка")
+	require.NoError(t, err)
+	assert.Equal(t, "Ось теплий варіант.", reply.Text)
+	assert.Equal(t, []int64{2}, reply.ProductIDs)
+}
