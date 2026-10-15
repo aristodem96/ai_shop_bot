@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/aristodem96/ai_shop_bot/internal/agent"
 	"github.com/aristodem96/ai_shop_bot/internal/bot"
 	"github.com/aristodem96/ai_shop_bot/internal/config"
@@ -60,7 +62,8 @@ func run() error {
 
 	catalogRepo := postgres.NewCatalogRepository(pool)
 	catalog := service.NewCatalogService(catalogRepo)
-	cart := service.NewCartService(postgres.NewCartRepository(pool), catalogRepo)
+	cartRepo := postgres.NewCartRepository(pool)
+	cart := service.NewCartService(cartRepo, catalogRepo)
 	vehicleRepo := postgres.NewVehicleRepository(pool)
 	garage := service.NewGarageService(vehicleRepo, vehicleRepo)
 
@@ -100,8 +103,25 @@ func run() error {
 	log.Info("bot started",
 		slog.Int("max_pending", cfg.MaxPending),
 		slog.String("llm_provider", cfg.LLM.Provider),
-		slog.String("llm_model", cfg.LLM.Model))
-	if err := b.Run(ctx); err != nil {
+		slog.String("llm_model", cfg.LLM.Model),
+		slog.Duration("cart_reminder_after", cfg.CartReminderAfter))
+
+	group, gctx := errgroup.WithContext(ctx)
+	group.Go(func() error { return b.Run(gctx) })
+
+	if cfg.CartReminderAfter > 0 {
+		loc, err := time.LoadLocation(cfg.Timezone)
+		if err != nil {
+			return fmt.Errorf("load time zone %q: %w", cfg.Timezone, err)
+		}
+		reminder := bot.NewReminder(cartRepo, cart, tg, bot.ReminderConfig{
+			After: cfg.CartReminderAfter, Every: cfg.CartReminderEvery,
+			Location: loc, FromHour: 9, ToHour: 21,
+		}, log)
+		group.Go(func() error { return reminder.Run(gctx) })
+	}
+
+	if err := group.Wait(); err != nil {
 		return err
 	}
 	log.Info("bot stopped")

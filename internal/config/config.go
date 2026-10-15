@@ -14,6 +14,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	// The runtime image is distroless and ships no time zone database, so
+	// LoadLocation("Europe/Kyiv") would fail there -- and only there.
+	_ "time/tzdata"
 )
 
 // defaultDSN points at the docker compose database. Its password is the
@@ -81,6 +85,14 @@ type Bot struct {
 	// HandlerTimeout bounds one update. It is what stops one hung call from
 	// blocking a chat forever, since a chat's updates run one at a time.
 	HandlerTimeout time.Duration
+
+	// CartReminderAfter is how long a cart sits untouched before the buyer is
+	// reminded; zero turns reminders off. CartReminderEvery is how often
+	// carts are checked.
+	CartReminderAfter time.Duration
+	CartReminderEvery time.Duration
+	// Timezone decides the hours reminders may be sent in.
+	Timezone string
 }
 
 // LoadBot reads the bot configuration.
@@ -98,10 +110,13 @@ func LoadBot() (*Bot, error) {
 			Level:  strings.ToLower(envString("LOG_LEVEL", "info")),
 			Format: strings.ToLower(envString("LOG_FORMAT", "text")),
 		},
-		TelegramToken:  envString("TELEGRAM_BOT_TOKEN", ""),
-		TelegramAPIURL: envString("TELEGRAM_API_URL", "https://api.telegram.org"),
-		MaxPending:     envInt("BOT_MAX_PENDING", 256, collect),
-		HandlerTimeout: envDuration("BOT_HANDLER_TIMEOUT", 60*time.Second, collect),
+		TelegramToken:     envString("TELEGRAM_BOT_TOKEN", ""),
+		TelegramAPIURL:    envString("TELEGRAM_API_URL", "https://api.telegram.org"),
+		MaxPending:        envInt("BOT_MAX_PENDING", 256, collect),
+		HandlerTimeout:    envDuration("BOT_HANDLER_TIMEOUT", 60*time.Second, collect),
+		CartReminderAfter: envDuration("CART_REMINDER_AFTER", 24*time.Hour, collect),
+		CartReminderEvery: envDuration("CART_REMINDER_EVERY", 10*time.Minute, collect),
+		Timezone:          envString("BOT_TIMEZONE", "Europe/Kyiv"),
 		Redis: Redis{
 			Addr:     envString("REDIS_ADDR", "localhost:6380"),
 			Password: envString("REDIS_PASSWORD", ""),
@@ -132,6 +147,11 @@ func LoadBot() (*Bot, error) {
 	require(cfg.TelegramAPIURL != "", "TELEGRAM_API_URL must be set")
 	require(cfg.MaxPending > 0, "BOT_MAX_PENDING must be positive")
 	require(cfg.HandlerTimeout >= time.Second, "BOT_HANDLER_TIMEOUT must be at least 1s")
+	require(cfg.CartReminderAfter >= 0, "CART_REMINDER_AFTER must not be negative")
+	require(cfg.CartReminderEvery >= time.Second, "CART_REMINDER_EVERY must be at least 1s")
+	if _, err := time.LoadLocation(cfg.Timezone); err != nil {
+		errs = append(errs, fmt.Errorf("BOT_TIMEZONE: %q is not a known time zone", cfg.Timezone))
+	}
 
 	switch cfg.LLM.Provider {
 	case "none":

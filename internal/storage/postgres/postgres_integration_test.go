@@ -7,7 +7,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
@@ -370,6 +372,90 @@ func TestMaintenanceKit(t *testing.T) {
 		}
 	}
 	assert.Contains(t, camry.Missing, domain.PartAirFilter, "the shop lists no Camry air filter")
+}
+
+func TestClaimAbandonedCarts(t *testing.T) {
+	skipShort(t)
+	ctx := context.Background()
+	carts := NewCartRepository(testPool)
+	oil := productBySKU(t, "OIL-001")
+
+	const (
+		abandoned = int64(3001)
+		recent    = int64(3002)
+		emptied   = int64(3003)
+	)
+	for _, u := range []int64{abandoned, recent, emptied} {
+		require.NoError(t, carts.SetQty(ctx, u, oil.ID, 1))
+		t.Cleanup(func() { _ = carts.Clear(ctx, u) })
+	}
+	require.NoError(t, carts.SetQty(ctx, emptied, oil.ID, 0))
+	backdate := func(u int64) {
+		_, err := testPool.Exec(ctx, `UPDATE carts SET updated_at = now() - interval '25 hours' WHERE user_id = $1`, u)
+		require.NoError(t, err)
+	}
+	backdate(abandoned)
+	backdate(emptied)
+
+	got, err := carts.ClaimAbandoned(ctx, 24*time.Hour, 100)
+	require.NoError(t, err)
+	assert.Contains(t, got, abandoned)
+	assert.NotContains(t, got, recent, "touched within the day")
+	assert.NotContains(t, got, emptied, "nothing left in it to remind about")
+
+	got, err = carts.ClaimAbandoned(ctx, 24*time.Hour, 100)
+	require.NoError(t, err)
+	assert.NotContains(t, got, abandoned, "a cart is reminded once")
+
+	// Changing the cart starts a new abandonment, worth a new reminder.
+	require.NoError(t, carts.SetQty(ctx, abandoned, oil.ID, 2))
+	backdate(abandoned)
+	got, err = carts.ClaimAbandoned(ctx, 24*time.Hour, 100)
+	require.NoError(t, err)
+	assert.Contains(t, got, abandoned)
+}
+
+func TestClaimAbandonedConcurrently(t *testing.T) {
+	skipShort(t)
+	ctx := context.Background()
+	carts := NewCartRepository(testPool)
+	oil := productBySKU(t, "OIL-002")
+
+	const n = 40
+	for i := range int64(n) {
+		u := 4000 + i
+		require.NoError(t, carts.SetQty(ctx, u, oil.ID, 1))
+		t.Cleanup(func() { _ = carts.Clear(ctx, u) })
+	}
+	_, err := testPool.Exec(ctx, `UPDATE carts SET updated_at = now() - interval '2 days' WHERE user_id BETWEEN 4000 AND 4039`)
+	require.NoError(t, err)
+
+	// Two "bot instances" claim in small batches at the same time.
+	var (
+		mu      sync.Mutex
+		claimed = map[int64]int{}
+		wg      sync.WaitGroup
+	)
+	for range 2 {
+		wg.Go(func() {
+			for {
+				got, err := carts.ClaimAbandoned(ctx, 24*time.Hour, 3)
+				if !assert.NoError(t, err) || len(got) == 0 {
+					return
+				}
+				mu.Lock()
+				for _, u := range got {
+					claimed[u]++
+				}
+				mu.Unlock()
+			}
+		})
+	}
+	wg.Wait()
+
+	for i := range int64(n) {
+		assert.Equal(t, 1, claimed[4000+i], "user %d claimed exactly once", 4000+i)
+	}
 }
 
 func TestCartLifecycle(t *testing.T) {

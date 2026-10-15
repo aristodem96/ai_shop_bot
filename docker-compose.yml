@@ -67,6 +67,9 @@ services:
       TELEGRAM_API_URL: ${TELEGRAM_API_URL:-https://api.telegram.org}
       BOT_MAX_PENDING: ${BOT_MAX_PENDING:-256}
       BOT_HANDLER_TIMEOUT: ${BOT_HANDLER_TIMEOUT:-60s}
+      CART_REMINDER_AFTER: ${CART_REMINDER_AFTER:-24h}
+      CART_REMINDER_EVERY: ${CART_REMINDER_EVERY:-10m}
+      BOT_TIMEZONE: ${BOT_TIMEZONE:-Europe/Kyiv}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LOG_FORMAT: ${LOG_FORMAT:-json}
     restart: unless-stopped

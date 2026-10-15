@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -98,4 +99,36 @@ func (r *CartRepository) Clear(ctx context.Context, userID int64) error {
 		return fmt.Errorf("postgres: clear cart of %d: %w", userID, err)
 	}
 	return nil
+}
+
+// ClaimAbandoned marks up to limit carts as reminded and returns their users:
+// carts with items, untouched for idleFor, never reminded since their last
+// change.
+//
+// Marking and selecting are one statement, and SKIP LOCKED lets two bot
+// instances run it at once without either blocking or both claiming the same
+// cart. The mark comes before the message is sent, so a reminder is sent at
+// most once: if Telegram refuses it, it is not retried, which for a nudge is
+// the right way to fail -- a duplicate annoys more than a missed one helps.
+func (r *CartRepository) ClaimAbandoned(ctx context.Context, idleFor time.Duration, limit int) ([]int64, error) {
+	rows, err := r.pool.Query(ctx, `
+		UPDATE carts SET reminded_at = now()
+		WHERE user_id IN (
+			SELECT c.user_id FROM carts c
+			WHERE c.reminded_at IS NULL
+			  AND c.updated_at < now() - make_interval(secs => $1)
+			  AND EXISTS (SELECT 1 FROM cart_items i WHERE i.user_id = c.user_id)
+			ORDER BY c.updated_at
+			LIMIT $2
+			FOR UPDATE SKIP LOCKED)
+		RETURNING user_id`,
+		idleFor.Seconds(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: claim abandoned carts: %w", err)
+	}
+	users, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		return nil, fmt.Errorf("postgres: scan abandoned carts: %w", err)
+	}
+	return users, nil
 }
