@@ -47,6 +47,23 @@ type LLM struct {
 	Effort string
 }
 
+// Payments configures Monobank acquiring and order handling.
+type Payments struct {
+	// MonobankToken turns payments on; empty leaves the bot without
+	// checkout. A test token from api.monobank.ua moves no real money.
+	MonobankToken  string
+	MonobankAPIURL string
+	// PublicURL is where Monobank can reach this bot, e.g. a tunnel on a
+	// laptop. Empty means no webhook: payments are then found by polling.
+	PublicURL string
+	// HTTPAddr serves the webhook and the health check.
+	HTTPAddr string
+	// ReconcileEvery is how often unpaid invoices are polled.
+	ReconcileEvery time.Duration
+	// AdminChatID is where managers get paid orders; zero turns it off.
+	AdminChatID int64
+}
+
 // Agent bounds the consultant.
 type Agent struct {
 	MaxSteps   int
@@ -68,6 +85,7 @@ type Log struct {
 type Bot struct {
 	Postgres Postgres
 	Redis    Redis
+	Payments Payments
 	LLM      LLM
 	Agent    Agent
 	Log      Log
@@ -128,6 +146,14 @@ func LoadBot() (*Bot, error) {
 			Model:    envString("LLM_MODEL", "claude-haiku-5-5"),
 			Effort:   strings.ToLower(envString("LLM_EFFORT", "low")),
 		},
+		Payments: Payments{
+			MonobankToken:  envString("MONOBANK_TOKEN", ""),
+			MonobankAPIURL: envString("MONOBANK_API_URL", "https://api.monobank.ua"),
+			PublicURL:      strings.TrimRight(envString("PUBLIC_URL", ""), "/"),
+			HTTPAddr:       envString("BOT_HTTP_ADDR", ":8090"),
+			ReconcileEvery: envDuration("PAYMENT_RECONCILE_EVERY", 30*time.Second, collect),
+			AdminChatID:    envInt64("ADMIN_CHAT_ID", 0, collect),
+		},
 		Agent: Agent{
 			MaxSteps:   envInt("AGENT_MAX_STEPS", 6, collect),
 			Timeout:    envDuration("AGENT_TIMEOUT", 45*time.Second, collect),
@@ -147,6 +173,10 @@ func LoadBot() (*Bot, error) {
 	require(cfg.TelegramAPIURL != "", "TELEGRAM_API_URL must be set")
 	require(cfg.MaxPending > 0, "BOT_MAX_PENDING must be positive")
 	require(cfg.HandlerTimeout >= time.Second, "BOT_HANDLER_TIMEOUT must be at least 1s")
+	require(cfg.Redis.Addr != "", "REDIS_ADDR must be set")
+	require(cfg.Payments.ReconcileEvery >= time.Second, "PAYMENT_RECONCILE_EVERY must be at least 1s")
+	require(cfg.Payments.PublicURL == "" || strings.HasPrefix(cfg.Payments.PublicURL, "https://"),
+		"PUBLIC_URL must be an https:// URL: Monobank delivers webhooks over TLS only")
 	require(cfg.CartReminderAfter >= 0, "CART_REMINDER_AFTER must not be negative")
 	require(cfg.CartReminderEvery >= time.Second, "CART_REMINDER_EVERY must be at least 1s")
 	if _, err := time.LoadLocation(cfg.Timezone); err != nil {
@@ -159,7 +189,6 @@ func LoadBot() (*Bot, error) {
 		require(cfg.LLM.APIKey != "", "ANTHROPIC_API_KEY must be set when LLM_PROVIDER=claude (or set LLM_PROVIDER=none)")
 		require(cfg.LLM.Model != "", "LLM_MODEL must be set")
 		require(slices.Contains([]string{"low", "medium", "high"}, cfg.LLM.Effort), "LLM_EFFORT must be low, medium or high")
-		require(cfg.Redis.Addr != "", "REDIS_ADDR must be set")
 		require(cfg.Agent.MaxSteps > 0, "AGENT_MAX_STEPS must be positive")
 		require(cfg.Agent.MaxHistory > 0, "AGENT_HISTORY_MESSAGES must be positive")
 		require(cfg.Agent.HistoryTTL > 0, "AGENT_HISTORY_TTL must be positive")
@@ -239,6 +268,19 @@ func envInt(key string, def int, collect func(error)) int {
 		return def
 	}
 	n, err := strconv.Atoi(v)
+	if err != nil {
+		collect(fmt.Errorf("%s: %q is not an integer", key, v))
+		return def
+	}
+	return n
+}
+
+func envInt64(key string, def int64, collect func(error)) int64 {
+	v, ok := os.LookupEnv(key)
+	if !ok || v == "" {
+		return def
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
 	if err != nil {
 		collect(fmt.Errorf("%s: %q is not an integer", key, v))
 		return def

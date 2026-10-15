@@ -41,13 +41,15 @@ type toolbox struct {
 	cart     Cart
 	garage   Garage
 	kits     Maintenance
+	orders   Orders
 	now      func() time.Time
 	// catSlug maps category ids to the slugs the model knows them by.
 	catSlug map[int64]string
 }
 
-func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, cats []domain.Category) *toolbox {
-	tb := &toolbox{catalog: catalog, cart: cart, garage: garage, kits: kits, now: time.Now, catSlug: make(map[int64]string, len(cats))}
+func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, orders Orders, cats []domain.Category) *toolbox {
+	tb := &toolbox{catalog: catalog, cart: cart, garage: garage, kits: kits, orders: orders, now: time.Now,
+		catSlug: make(map[int64]string, len(cats))}
 	slugs := make([]string, 0, len(cats))
 	catalogue := make([]string, 0, len(cats))
 	for _, c := range cats {
@@ -133,6 +135,11 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, cat
 			}, "product_ids"),
 		},
 		{
+			Name:        "order_status",
+			Description: "Get the buyer's latest orders with their status, items, total and delivery address.",
+			Schema:      object(map[string]any{}),
+		},
+		{
 			Name:        "add_to_cart",
 			Description: "Add a part to the buyer's cart. Only when the buyer asked for it.",
 			Schema: object(map[string]any{
@@ -152,6 +159,7 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, cat
 		"service_kit":    tb.serviceKit,
 		"show_products":  tb.showProducts,
 		"add_to_cart":    tb.addToCart,
+		"order_status":   tb.orderStatus,
 	}
 	return tb
 }
@@ -525,4 +533,53 @@ func (tb *toolbox) serviceKit(ctx context.Context, _ *runState, input json.RawMe
 		"missing_in_stock": kit.Missing,
 		"total_uah":        int64(kit.Total()) / 100,
 	}, nil
+}
+
+// statusMeanings tell the model what each status means for the buyer, so it
+// explains rather than recites a code.
+var statusMeanings = map[domain.OrderStatus]string{
+	domain.OrderAwaitingPayment: "placed, waiting for payment; the stock is held until reserved_until",
+	domain.OrderPaid:            "paid, waiting for a manager to confirm it",
+	domain.OrderConfirmed:       "confirmed by a manager, being prepared for shipping",
+	domain.OrderShipped:         "shipped by Nova Poshta to the delivery address",
+	domain.OrderCancelled:       "cancelled; if it was paid, the money is refunded to the card",
+	domain.OrderExpired:         "not paid in time; the items went back to the cart",
+	domain.OrderNeedsRefund:     "paid, but the stock ran out; a manager will refund the money",
+}
+
+// orderStatus lists the buyer's orders. Only the buyer's own: the user id
+// comes from the chat, never from the model.
+func (tb *toolbox) orderStatus(ctx context.Context, run *runState, input json.RawMessage) (any, error) {
+	if err := decode(input, &struct{}{}); err != nil {
+		return nil, err
+	}
+	orders, err := tb.orders.OrdersOf(ctx, run.userID, 5)
+	if err != nil {
+		return nil, err
+	}
+	type view struct {
+		ID            int64    `json:"id"`
+		Status        string   `json:"status"`
+		Meaning       string   `json:"meaning"`
+		TotalUAH      int64    `json:"total_uah"`
+		CreatedAt     string   `json:"created_at"`
+		ReservedUntil string   `json:"reserved_until,omitempty"`
+		Items         []string `json:"items"`
+		Delivery      string   `json:"delivery"`
+	}
+	views := make([]view, len(orders))
+	for i, o := range orders {
+		v := view{
+			ID: o.ID, Status: string(o.Status), Meaning: statusMeanings[o.Status],
+			TotalUAH: int64(o.Total) / 100, CreatedAt: o.CreatedAt.Format(time.RFC3339), Delivery: o.Contacts.Delivery,
+		}
+		if o.Status == domain.OrderAwaitingPayment {
+			v.ReservedUntil = o.ReservedUntil.Format(time.RFC3339)
+		}
+		for _, it := range o.Items {
+			v.Items = append(v.Items, fmt.Sprintf("%s (%s) x%d", it.Name, it.Brand, it.Qty))
+		}
+		views[i] = v
+	}
+	return map[string]any{"orders": views}, nil
 }

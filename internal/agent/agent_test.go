@@ -110,6 +110,15 @@ func (fakeKits) Kit(_ context.Context, vehicleID int64) (*service.Kit, error) {
 	}, nil
 }
 
+type fakeOrders struct{ asked []int64 }
+
+func (f *fakeOrders) OrdersOf(_ context.Context, user int64, _ int) ([]domain.Order, error) {
+	f.asked = append(f.asked, user)
+	return []domain.Order{{ID: 42, Status: domain.OrderShipped, Total: domain.UAH(1450),
+		Items:    []domain.OrderItem{{Name: "Колодки", Brand: "AutoLine", Qty: 1}},
+		Contacts: domain.Contacts{Delivery: "Київ, відділення 25"}}}, nil
+}
+
 type fakeHistory struct {
 	mu   sync.Mutex
 	msgs map[int64][]llm.Message
@@ -150,6 +159,7 @@ func (f *fakeHistory) Clear(_ context.Context, chat int64) error {
 const chat = int64(7)
 
 type fixture struct {
+	orders  *fakeOrders
 	agent   *Agent
 	catalog *fakeCatalog
 	cart    *fakeCart
@@ -159,8 +169,8 @@ type fixture struct {
 
 func newAgent(t *testing.T, model *llm.Fake) fixture {
 	t.Helper()
-	f := fixture{catalog: &fakeCatalog{}, cart: &fakeCart{}, garage: &fakeGarage{saved: map[int64]int64{}}, history: newFakeHistory()}
-	a, err := New(context.Background(), model, f.catalog, f.cart, f.garage, fakeKits{}, f.history,
+	f := fixture{orders: &fakeOrders{}, catalog: &fakeCatalog{}, cart: &fakeCart{}, garage: &fakeGarage{saved: map[int64]int64{}}, history: newFakeHistory()}
+	a, err := New(context.Background(), model, f.catalog, f.cart, f.garage, fakeKits{}, f.orders, f.history,
 		Config{MaxSteps: 5, MaxHistory: 30, Timeout: 5 * time.Second},
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.NoError(t, err)
@@ -511,4 +521,19 @@ func TestDecodeVIN(t *testing.T) {
 	bad := result(model, 2)
 	assert.True(t, bad.IsError)
 	assert.Contains(t, bad.Content, "17", "the model can tell the buyer what is wrong")
+}
+
+func TestOrderStatusIsTheBuyersOwn(t *testing.T) {
+	model := llm.NewFake(
+		llm.Call("c1", "order_status", map[string]any{}),
+		llm.Say("Ваше замовлення №42 відправлено."),
+	)
+	f := newAgent(t, model)
+
+	_, err := f.agent.Reply(context.Background(), chat, chat, "де моє замовлення?")
+	require.NoError(t, err)
+	assert.Equal(t, []int64{chat}, f.orders.asked, "the user comes from the chat, not from the model")
+	got := result(model, 1).Content
+	assert.Contains(t, got, `"status":"shipped"`)
+	assert.Contains(t, got, `"meaning":"shipped by Nova Poshta`)
 }
