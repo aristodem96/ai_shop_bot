@@ -100,6 +100,18 @@ func upsertProduct(ctx context.Context, tx pgx.Tx, p product, categoryID int64, 
 		return 0, fmt.Errorf("seed: specs of %s: %w", p.sku, err)
 	}
 
+	// The brand goes into the directory too, so an import that spells it
+	// "Auto Line" finds the shop's "AutoLine" instead of creating a twin.
+	if _, err := tx.Exec(ctx, `
+		WITH b AS (
+			INSERT INTO brands (name) VALUES ($1)
+			ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+			RETURNING id)
+		INSERT INTO brand_aliases (alias, brand_id) SELECT $2, id FROM b
+		ON CONFLICT (alias) DO NOTHING`, p.brand, domain.NormalizeOEM(p.brand)); err != nil {
+		return 0, fmt.Errorf("seed: brand of %s: %w", p.sku, err)
+	}
+
 	var id int64
 	err = tx.QueryRow(ctx, `
 		INSERT INTO products (sku, category_id, name, brand, description, oem_numbers, specs,

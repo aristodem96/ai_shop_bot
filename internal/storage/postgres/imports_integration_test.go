@@ -1,0 +1,136 @@
+package postgres
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/aristodem96/ai_shop_bot/internal/domain"
+	"github.com/aristodem96/ai_shop_bot/internal/importer"
+)
+
+// The example in docs/import is the test input, so the file a reader of the
+// README tries is the file CI proves works.
+const (
+	exampleProfile = "../../../docs/import/example-profile.json"
+	exampleFile    = "../../../docs/import/example-price.csv"
+)
+
+func importExample(t *testing.T, file string, dryRun bool) (*importer.Report, importer.Result) {
+	t.Helper()
+	p, err := importer.LoadProfile(exampleProfile)
+	require.NoError(t, err)
+	rep, res, err := importer.Run(context.Background(), NewImportRepository(testPool), p, file, dryRun)
+	require.NoError(t, err)
+	return rep, res
+}
+
+func cleanImports(t *testing.T) {
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = testPool.Exec(ctx, `DELETE FROM orders WHERE id IN (
+			SELECT order_id FROM order_items oi JOIN products p ON p.id = oi.product_id WHERE p.source = 'demo-stock')`)
+		_, _ = testPool.Exec(ctx, `DELETE FROM products WHERE source = 'demo-stock'`)
+		_, _ = testPool.Exec(ctx, `DELETE FROM import_runs`)
+	})
+}
+
+func imported(t *testing.T, code string) *domain.Product {
+	t.Helper()
+	var id int64
+	require.NoError(t, testPool.QueryRow(context.Background(),
+		`SELECT id FROM products WHERE source = 'demo-stock' AND external_id = $1`, code).Scan(&id))
+	p, err := NewCatalogRepository(testPool).Product(context.Background(), id)
+	require.NoError(t, err)
+	return p
+}
+
+func TestImportExample(t *testing.T) {
+	skipShort(t)
+	cleanImports(t)
+	ctx := context.Background()
+
+	rep, res := importExample(t, exampleFile, true)
+	assert.Equal(t, importer.Result{Inserted: 7, Fitments: 7}, res, "a dry run counts exactly")
+	var n int
+	require.NoError(t, testPool.QueryRow(ctx, `SELECT count(*) FROM products WHERE source = 'demo-stock'`).Scan(&n))
+	assert.Zero(t, n, "and keeps nothing")
+
+	assert.Equal(t, 9, rep.Rows)
+	assert.Equal(t, 1, rep.Skipped, "the price \"за запитом\" is reported, not guessed")
+	assert.Equal(t, []string{"Rivne Gum"}, rep.NewBrands, "\"Auto Line\" and \"STAL-PRO\" are brands the shop has")
+	assert.Equal(t, []importer.Count{{Name: "Lada Priora", N: 1}}, rep.UnmatchedVehicles)
+
+	_, res = importExample(t, exampleFile, false)
+	assert.Equal(t, 7, res.Inserted)
+	assert.NotZero(t, res.RunID)
+
+	pads := imported(t, "10001")
+	assert.Equal(t, "AutoLine", pads.Brand)
+	assert.Equal(t, []string{"5Q0698151B"}, pads.OEMNumbers)
+	assert.Equal(t, domain.UAH(1390), pads.Price)
+	assert.Equal(t, 6, pads.Stock)
+	assert.False(t, pads.OnOrder, "a file with a stock column is the shop's own shelf")
+	octavia := vehicleByCode(t, "octavia-a7-20tdi")
+	assert.True(t, pads.FitsVehicle(octavia), "\"Skoda Octavia A7\" covers every engine of it")
+	assert.True(t, pads.FitsVehicle(vehicleByCode(t, "golf-7-16tdi")), "\"VW Golf VII\" goes through the profile's map")
+	assert.Equal(t, "передня вісь", pads.FitNotes[octavia])
+
+	assert.True(t, imported(t, "10005").FitsVehicle(vehicleByCode(t, "logan-2-16")), "a bare model name is enough when unique")
+	assert.Equal(t, "Rivne Gum", imported(t, "10005").Brand)
+	assert.True(t, imported(t, "10003").FitsVehicle(vehicleByCode(t, "corolla-e210-16")), "2019- overlaps a car made from 2019")
+	brush := imported(t, "10008")
+	assert.True(t, brush.Universal)
+	assert.Equal(t, categoryBySlug(t, "electrical"), brush.CategoryID)
+
+	// A second run of the same file changes nothing but the timestamps.
+	_, res = importExample(t, exampleFile, false)
+	assert.Equal(t, 0, res.Inserted)
+	assert.Equal(t, 7, res.Updated)
+}
+
+func TestImportKeepsHeldStock(t *testing.T) {
+	skipShort(t)
+	cleanImports(t)
+	importExample(t, exampleFile, false)
+
+	// A buyer holds two of the six pads, then the shop uploads the same
+	// count again: six are on the shelf, four are free to sell.
+	const user = int64(5501)
+	pads := imported(t, "10001")
+	buyerCart(t, user, pads.ID, 2)
+	place(t, user)
+	require.Equal(t, 4, stockOf(t, pads.ID))
+
+	importExample(t, exampleFile, false)
+	assert.Equal(t, 4, stockOf(t, pads.ID), "units held by an open order are not sold twice")
+}
+
+func TestImportTakesMissingOffSale(t *testing.T) {
+	skipShort(t)
+	cleanImports(t)
+	importExample(t, exampleFile, false)
+
+	data, err := os.ReadFile(exampleFile)
+	require.NoError(t, err)
+	var kept []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, "10004;") {
+			kept = append(kept, line)
+		}
+	}
+	shorter := filepath.Join(t.TempDir(), "price.csv")
+	require.NoError(t, os.WriteFile(shorter, []byte(strings.Join(kept, "\n")), 0o600))
+
+	_, res := importExample(t, shorter, false)
+	assert.Equal(t, 1, res.Deactivated)
+	var active bool
+	require.NoError(t, testPool.QueryRow(context.Background(),
+		`SELECT is_active FROM products WHERE source = 'demo-stock' AND external_id = '10004'`).Scan(&active))
+	assert.False(t, active, "a part the supplier dropped is off sale, not deleted: orders still point at it")
+}

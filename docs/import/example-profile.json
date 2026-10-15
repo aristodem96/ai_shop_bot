@@ -1,0 +1,31 @@
+{
+  "source": "demo-stock",
+  "sku_prefix": "DS",
+  "csv_delimiter": ";",
+  "columns": {
+    "external_id": "Код",
+    "part_number": "Артикул",
+    "brand": "Бренд",
+    "name": "Найменування",
+    "category": "Група",
+    "price": "Ціна, грн",
+    "stock": "Залишок",
+    "vehicle": "Авто",
+    "years": "Роки",
+    "position": "Розташування"
+  },
+  "markup_percent": 0,
+  "default_category": "other",
+  "create_categories": { "other": "Інше" },
+  "rules": [
+    { "contains": ["гальма", "колодк"], "category": "brakes" },
+    { "contains": ["фільтр масл"], "category": "filters", "part_type": "oil_filter" },
+    { "contains": ["фільтр"], "category": "filters" },
+    { "contains": ["підвіска"], "category": "suspension" },
+    { "contains": ["лампа", "щітка"], "category": "electrical", "universal": true }
+  ],
+  "vehicles": {
+    "VW Golf VII": ["Volkswagen Golf VII"]
+  },
+  "deactivate_missing": true
+}

@@ -20,10 +20,11 @@ help: ## Show this help
 		| awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: build
-build: ## Build the bot and the seed command into ./bin
+build: ## Build the bot, seed and import commands into ./bin
 	@mkdir -p $(BIN)
 	go build -trimpath -ldflags "-s -w" -o $(BIN)/bot ./cmd/bot
 	go build -trimpath -ldflags "-s -w" -o $(BIN)/seed ./cmd/seed
+	go build -trimpath -ldflags "-s -w" -o $(BIN)/import ./cmd/import
 
 .PHONY: run
 run: ## Run the bot locally (needs Postgres up and TELEGRAM_BOT_TOKEN in .env)
@@ -32,6 +33,17 @@ run: ## Run the bot locally (needs Postgres up and TELEGRAM_BOT_TOKEN in .env)
 .PHONY: seed
 seed: ## Migrate and load (or reset) the demo catalogue
 	go run ./cmd/seed
+
+# The example stock file by default; a real one with
+#   make import PROFILE=supplier.json FILE=price.xlsx
+# and always with DRY_RUN=1 first.
+PROFILE ?= docs/import/example-profile.json
+FILE    ?= docs/import/example-price.csv
+DRY_RUN ?=
+
+.PHONY: import
+import: ## Import a price list: make import PROFILE=... FILE=... [DRY_RUN=1]
+	go run ./cmd/import -profile $(PROFILE) -file $(FILE) $(if $(DRY_RUN),-dry-run)
 
 .PHONY: test
 test: ## Run unit tests (integration tests are skipped)
