@@ -42,7 +42,7 @@ const typingEvery = 4 * time.Second
 func (b *Bot) consult(ctx context.Context, chat, user int64, text string) {
 	if b.consultant == nil {
 		b.send(ctx, chat, msgFreeTextSoon, nil)
-		b.sendCategories(ctx, chat)
+		b.sendCategories(ctx, chat, user)
 		return
 	}
 	if utf8.RuneCountInString(text) > maxQuestionRunes {

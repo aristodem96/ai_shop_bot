@@ -86,35 +86,35 @@ func (f *fakeTelegram) last(method string) sent {
 	return sent{}
 }
 
-// fakeCatalog serves one category with one jacket.
-type fakeCatalog struct{ jacket domain.Product }
+// fakeCatalog serves one category with one pair of brake pads.
+type fakeCatalog struct{ pads domain.Product }
 
 func (f *fakeCatalog) Categories(context.Context) ([]domain.Category, error) {
-	return []domain.Category{{ID: 1, Slug: "jackets", Title: "Куртки"}}, nil
+	return []domain.Category{{ID: 1, Slug: "brakes", Title: "Гальмівна система"}}, nil
 }
 
-func (f *fakeCatalog) CategoryPage(_ context.Context, id int64, _ int) (*service.ProductPage, error) {
+func (f *fakeCatalog) CategoryPage(_ context.Context, id int64, car *domain.Vehicle, _ int) (*service.ProductPage, error) {
 	if id != 1 {
 		return nil, domain.ErrNotFound
 	}
-	return &service.ProductPage{Category: domain.Category{ID: 1, Title: "Куртки"},
-		Products: []domain.Product{f.jacket}, Pages: 1}, nil
+	return &service.ProductPage{Category: domain.Category{ID: 1, Title: "Гальмівна система"},
+		Products: []domain.Product{f.pads}, Vehicle: car, Pages: 1}, nil
 }
 
 func (f *fakeCatalog) Product(_ context.Context, id int64) (*domain.Product, error) {
-	if id != f.jacket.ID {
+	if id != f.pads.ID {
 		return nil, domain.ErrNotFound
 	}
-	p := f.jacket
+	p := f.pads
 	return &p, nil
 }
 
-func (f *fakeCatalog) Similar(ctx context.Context, id int64) (*domain.Product, []domain.Product, error) {
+func (f *fakeCatalog) Analogues(ctx context.Context, id int64, _ *domain.Vehicle) (*domain.Product, []domain.Product, error) {
 	p, err := f.Product(ctx, id)
 	return p, nil, err
 }
 
-// fakeCart is backed by the jacket's stock, enough to exercise the bot's
+// fakeCart is backed by the pads' stock, enough to exercise the bot's
 // handling of both success and refusal.
 type fakeCart struct {
 	catalog *fakeCatalog
@@ -124,37 +124,35 @@ type fakeCart struct {
 
 func (f *fakeCart) Get(_ context.Context, user int64) (*domain.Cart, error) {
 	c := &domain.Cart{UserID: user}
-	for _, v := range f.catalog.jacket.Variants {
-		if n := f.qty[v.ID]; n > 0 {
-			c.Lines = append(c.Lines, domain.CartLine{VariantID: v.ID, ProductID: v.ProductID,
-				ProductName: f.catalog.jacket.Name, Size: v.Size, Price: f.catalog.jacket.Price, Qty: n, Stock: v.Stock})
-		}
+	p := f.catalog.pads
+	if n := f.qty[p.ID]; n > 0 {
+		c.Lines = append(c.Lines, domain.CartLine{ProductID: p.ID, ProductName: p.Name, Brand: p.Brand,
+			Price: p.Price, Qty: n, Stock: p.Stock})
 	}
 	return c, nil
 }
 
-func (f *fakeCart) Add(ctx context.Context, user, variant int64) (*domain.Cart, error) {
+func (f *fakeCart) Add(ctx context.Context, user, productID int64) (*domain.Cart, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
-	v, ok := f.catalog.jacket.Variant(variant)
-	if !ok {
+	if productID != f.catalog.pads.ID {
 		return nil, domain.ErrNotFound
 	}
-	if f.qty[variant]+1 > v.Stock {
+	if f.qty[productID]+1 > f.catalog.pads.Stock {
 		return nil, domain.ErrOutOfStock
 	}
-	f.qty[variant]++
+	f.qty[productID]++
 	return f.Get(ctx, user)
 }
 
-func (f *fakeCart) Decrement(ctx context.Context, user, variant int64) (*domain.Cart, error) {
-	f.qty[variant] = max(f.qty[variant]-1, 0)
+func (f *fakeCart) Decrement(ctx context.Context, user, productID int64) (*domain.Cart, error) {
+	f.qty[productID] = max(f.qty[productID]-1, 0)
 	return f.Get(ctx, user)
 }
 
-func (f *fakeCart) Remove(ctx context.Context, user, variant int64) (*domain.Cart, error) {
-	delete(f.qty, variant)
+func (f *fakeCart) Remove(ctx context.Context, user, productID int64) (*domain.Cart, error) {
+	delete(f.qty, productID)
 	return f.Get(ctx, user)
 }
 
@@ -163,26 +161,68 @@ func (f *fakeCart) Clear(context.Context, int64) error {
 	return nil
 }
 
-const (
-	chat     = int64(77)
-	jacketID = int64(5)
-	sizeM    = int64(51)
-	sizeL    = int64(52) // sold out
+var (
+	octavia = domain.Vehicle{ID: 50, Make: "Skoda", Model: "Octavia A7", YearFrom: 2013, YearTo: 2020, Engine: "1.4 TSI"}
+	lanos   = domain.Vehicle{ID: 60, Make: "Daewoo", Model: "Lanos", YearFrom: 1997, YearTo: 2009, Engine: "1.5"}
 )
 
-func newTestBot() (*Bot, *fakeTelegram, *fakeCart) {
-	catalog := &fakeCatalog{jacket: domain.Product{
-		ID: jacketID, CategoryID: 1, Name: "Пуховик «Nord»", Brand: "Nord Line",
-		Color: "olive", Season: "winter", Price: domain.UAH(3499), TotalStock: 3,
-		Variants: []domain.Variant{
-			{ID: sizeM, ProductID: jacketID, Size: "M", Stock: 3},
-			{ID: sizeL, ProductID: jacketID, Size: "L", Stock: 0},
-		},
+type fakeGarage struct {
+	car *domain.Vehicle
+}
+
+func (f *fakeGarage) Makes(context.Context) ([]domain.Vehicle, error) {
+	return []domain.Vehicle{lanos, octavia}, nil
+}
+
+func (f *fakeGarage) SameMake(_ context.Context, id int64) ([]domain.Vehicle, error) {
+	for _, v := range []domain.Vehicle{lanos, octavia} {
+		if v.ID == id {
+			return []domain.Vehicle{v}, nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
+func (f *fakeGarage) Get(context.Context, int64) (*domain.Vehicle, error) { return f.car, nil }
+
+func (f *fakeGarage) Set(_ context.Context, _, id int64) (*domain.Vehicle, error) {
+	for _, v := range []domain.Vehicle{lanos, octavia} {
+		if v.ID == id {
+			f.car = &v
+			return &v, nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
+func (f *fakeGarage) Clear(context.Context, int64) error {
+	f.car = nil
+	return nil
+}
+
+const (
+	chat   = int64(77)
+	padsID = int64(5)
+)
+
+type testBot struct {
+	*Bot
+	tg     *fakeTelegram
+	cart   *fakeCart
+	garage *fakeGarage
+}
+
+func newTestBot() testBot {
+	catalog := &fakeCatalog{pads: domain.Product{
+		ID: padsID, CategoryID: 1, SKU: "BRK-001", Name: "Колодки гальмівні передні", Brand: "AutoLine",
+		Price: domain.UAH(1450), Stock: 2, OEMNumbers: []string{"5Q0698151"},
+		Fits: []domain.Vehicle{octavia},
 	}}
 	cart := &fakeCart{catalog: catalog, qty: map[int64]int{}}
+	garage := &fakeGarage{}
 	tg := &fakeTelegram{}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return New(nil, tg, catalog, cart, Config{}, log), tg, cart
+	return testBot{Bot: New(nil, tg, catalog, cart, garage, Config{}, log), tg: tg, cart: cart, garage: garage}
 }
 
 func text(s string) telegram.Update {
@@ -213,114 +253,149 @@ func callbacks(m telegram.ReplyMarkup) []string {
 	return out
 }
 
-func TestStartShowsMenuAndCategories(t *testing.T) {
-	b, tg, _ := newTestBot()
+func TestStartAsksForTheCarFirst(t *testing.T) {
+	b := newTestBot()
 	b.Handle(context.Background(), text("/start"))
 
-	require.Equal(t, []string{"sendMessage", "sendMessage"}, tg.methods())
-	assert.IsType(t, &telegram.ReplyKeyboard{}, tg.calls[0].markup, "the main menu goes with the greeting")
-	assert.Contains(t, callbacks(tg.calls[1].markup), encode(actCategory, 1, 0))
+	require.Equal(t, []string{"sendMessage", "sendMessage"}, b.tg.methods())
+	assert.IsType(t, &telegram.ReplyKeyboard{}, b.tg.calls[0].markup, "the main menu goes with the greeting")
+	assert.Contains(t, b.tg.calls[1].text, msgPickCarFirst)
+	assert.Contains(t, callbacks(b.tg.calls[1].markup), encode(actMake, octavia.ID))
+}
+
+func TestStartWithACarGoesToTheCatalogue(t *testing.T) {
+	b := newTestBot()
+	b.garage.car = &octavia
+	b.Handle(context.Background(), text("/start"))
+
+	assert.Contains(t, b.tg.calls[1].text, "Для: Skoda Octavia A7 1.4 TSI")
+	assert.Contains(t, callbacks(b.tg.calls[1].markup), encode(actCategory, 1, 0))
+}
+
+func TestChoosingACar(t *testing.T) {
+	b := newTestBot()
+	ctx := context.Background()
+
+	b.Handle(ctx, press(encode(actMake, octavia.ID)))
+	assert.Contains(t, callbacks(b.tg.last("editMessageText").markup), encode(actSetCar, octavia.ID))
+
+	b.Handle(ctx, press(encode(actSetCar, octavia.ID)))
+	assert.Equal(t, &octavia, b.garage.car)
+	assert.Contains(t, b.tg.last("editMessageText").text, "Ваше авто")
+	assert.Equal(t, msgCarSaved, b.tg.last("answerCallbackQuery").text)
+
+	b.Handle(ctx, press(encode(actForgetCar)))
+	assert.Nil(t, b.garage.car)
+	assert.Equal(t, msgCarForgotten, b.tg.last("editMessageText").text)
 }
 
 func TestGroupChatsAreRefused(t *testing.T) {
-	b, tg, _ := newTestBot()
+	b := newTestBot()
 	u := text("/start")
 	u.Message.Chat.Type = "group"
 	b.Handle(context.Background(), u)
 
-	require.Len(t, tg.calls, 1)
-	assert.Equal(t, msgPrivateOnly, tg.calls[0].text)
+	require.Len(t, b.tg.calls, 1)
+	assert.Equal(t, msgPrivateOnly, b.tg.calls[0].text)
+}
+
+func TestProductCardShowsFit(t *testing.T) {
+	b := newTestBot()
+	b.garage.car = &lanos
+	b.Handle(context.Background(), press(encode(actProduct, padsID)))
+
+	card := b.tg.last("sendPhoto")
+	assert.Contains(t, card.text, "Не підходить до вашого Daewoo Lanos 1.5")
+	assert.Contains(t, callbacks(card.markup), encode(actAdd, padsID))
 }
 
 func TestProductCardFallsBackToTextWithoutPhoto(t *testing.T) {
-	b, tg, _ := newTestBot()
-	tg.photoErr = errors.New("telegram: sendPhoto failed (400): wrong file identifier")
+	b := newTestBot()
+	b.tg.photoErr = errors.New("telegram: sendPhoto failed (400): wrong file identifier")
 
-	b.Handle(context.Background(), press(encode(actProduct, jacketID)))
+	b.Handle(context.Background(), press(encode(actProduct, padsID)))
 
-	require.Equal(t, []string{"sendMessage", "answerCallbackQuery"}, tg.methods())
-	assert.Contains(t, tg.calls[0].text, "Пуховик")
-	assert.Contains(t, callbacks(tg.calls[0].markup), encode(actPickSize, jacketID))
-}
-
-func TestSizePickerOffersOnlySizesInStock(t *testing.T) {
-	b, tg, _ := newTestBot()
-	b.Handle(context.Background(), press(encode(actPickSize, jacketID)))
-
-	edit := tg.last("editMessageReplyMarkup")
-	assert.Equal(t, int64(900), edit.msg, "the card itself is edited")
-	data := callbacks(edit.markup)
-	assert.Contains(t, data, encode(actAdd, jacketID, sizeM))
-	assert.NotContains(t, data, encode(actAdd, jacketID, sizeL), "a sold-out size gets no button")
-	assert.Contains(t, data, encode(actCardMenu, jacketID))
+	require.Equal(t, []string{"sendMessage", "answerCallbackQuery"}, b.tg.methods())
+	assert.Contains(t, b.tg.calls[0].text, "Колодки")
+	assert.Contains(t, callbacks(b.tg.calls[0].markup), encode(actAdd, padsID))
 }
 
 func TestAddToCart(t *testing.T) {
-	b, tg, cart := newTestBot()
-	b.Handle(context.Background(), press(encode(actAdd, jacketID, sizeM)))
+	b := newTestBot()
+	b.Handle(context.Background(), press(encode(actAdd, padsID)))
 
-	assert.Equal(t, 1, cart.qty[sizeM])
-	answer := tg.last("answerCallbackQuery")
-	assert.Contains(t, answer.text, "Додано розмір M")
+	assert.Equal(t, 1, b.cart.qty[padsID])
+	answer := b.tg.last("answerCallbackQuery")
+	assert.Equal(t, "✅ Додано. У кошику: 1 шт.", answer.text)
 	assert.False(t, answer.alert, "success is a toast, not a dialog")
-	assert.Contains(t, callbacks(tg.last("editMessageReplyMarkup").markup), encode(actPickSize, jacketID),
-		"the card gets its normal buttons back")
 }
 
-func TestAddSoldOutSizeAlertsAndRefreshesPicker(t *testing.T) {
-	b, tg, _ := newTestBot()
-	b.Handle(context.Background(), press(encode(actAdd, jacketID, sizeL)))
+func TestAddToCartWarnsWhenItDoesNotFit(t *testing.T) {
+	b := newTestBot()
+	b.garage.car = &lanos
+	b.Handle(context.Background(), press(encode(actAdd, padsID)))
 
-	answer := tg.last("answerCallbackQuery")
+	assert.Equal(t, 1, b.cart.qty[padsID], "still added: it may be for another car")
+	assert.Contains(t, b.tg.last("answerCallbackQuery").text, "не підходить до вашого Daewoo Lanos")
+}
+
+func TestAddBeyondStockAlerts(t *testing.T) {
+	b := newTestBot()
+	ctx := context.Background()
+	b.Handle(ctx, press(encode(actAdd, padsID)))
+	b.Handle(ctx, press(encode(actAdd, padsID)))
+	b.Handle(ctx, press(encode(actAdd, padsID)))
+
+	answer := b.tg.last("answerCallbackQuery")
 	assert.Equal(t, msgOutOfStock, answer.text)
 	assert.True(t, answer.alert)
-	assert.NotContains(t, callbacks(tg.last("editMessageReplyMarkup").markup), encode(actAdd, jacketID, sizeL))
 }
 
 func TestUnexpectedErrorsAreNotShownToTheUser(t *testing.T) {
-	b, tg, cart := newTestBot()
-	cart.err = errors.New("postgres: connection refused")
-	b.Handle(context.Background(), press(encode(actAdd, jacketID, sizeM)))
+	b := newTestBot()
+	b.cart.err = errors.New("postgres: connection refused")
+	b.Handle(context.Background(), press(encode(actAdd, padsID)))
 
-	assert.Equal(t, msgInternalFail, tg.last("answerCallbackQuery").text)
+	assert.Equal(t, msgInternalFail, b.tg.last("answerCallbackQuery").text)
 }
 
 func TestCartButtonsEditTheCartInPlace(t *testing.T) {
-	b, tg, cart := newTestBot()
+	b := newTestBot()
 	ctx := context.Background()
 
-	b.Handle(ctx, press(encode(actInc, sizeM)))
-	b.Handle(ctx, press(encode(actInc, sizeM)))
-	assert.Equal(t, 2, cart.qty[sizeM])
+	b.Handle(ctx, press(encode(actInc, padsID)))
+	b.Handle(ctx, press(encode(actInc, padsID)))
+	assert.Equal(t, 2, b.cart.qty[padsID])
 
-	edit := tg.last("editMessageText")
+	edit := b.tg.last("editMessageText")
 	assert.Equal(t, int64(900), edit.msg)
 	assert.Contains(t, edit.text, "2 × ")
 
 	b.Handle(ctx, press(encode(actClear)))
-	assert.Equal(t, msgCartEmpty, tg.last("editMessageText").text)
-	assert.Equal(t, msgCartCleared, tg.last("answerCallbackQuery").text)
+	assert.Equal(t, msgCartEmpty, b.tg.last("editMessageText").text)
+	assert.Equal(t, msgCartCleared, b.tg.last("answerCallbackQuery").text)
 }
 
 func TestEveryCallbackIsAnsweredOnce(t *testing.T) {
 	for _, data := range []string{
 		encode(actCategories), encode(actCategory, 1, 0), encode(actCategory, 99, 0),
-		encode(actProduct, jacketID), encode(actProduct, 404), encode(actSimilar, jacketID),
-		encode(actCart), encode(actDec, sizeM), encode(actNoop), "garbage", "p:999999999999999999999",
+		encode(actProduct, padsID), encode(actProduct, 404), encode(actAnalogues, padsID),
+		encode(actCart), encode(actDec, padsID), encode(actMakes), encode(actMake, 404),
+		encode(actSetCar, 404), encode(actNoop), "garbage", "p:999999999999999999999",
 	} {
-		b, tg, _ := newTestBot()
+		b := newTestBot()
 		b.Handle(context.Background(), press(data))
 
-		answers := slices.DeleteFunc(tg.methods(), func(m string) bool { return m != "answerCallbackQuery" })
+		answers := slices.DeleteFunc(b.tg.methods(), func(m string) bool { return m != "answerCallbackQuery" })
 		assert.Len(t, answers, 1, "%q", data)
 	}
 }
 
 func TestStaleButtonsSaySo(t *testing.T) {
-	b, tg, _ := newTestBot()
+	b := newTestBot()
 	b.Handle(context.Background(), press("garbage"))
-	assert.Equal(t, msgStaleButton, tg.last("answerCallbackQuery").text)
+	assert.Equal(t, msgStaleButton, b.tg.last("answerCallbackQuery").text)
 
 	b.Handle(context.Background(), press(encode(actProduct, 404)))
-	assert.True(t, strings.Contains(tg.last("answerCallbackQuery").text, "недоступний"))
+	assert.True(t, strings.Contains(b.tg.last("answerCallbackQuery").text, "недоступний"))
 }

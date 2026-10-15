@@ -1,5 +1,5 @@
-// Package bot is the Telegram front end of the shop: the catalogue menu,
-// product cards and the cart, driven entirely by buttons. No model is involved
+// Package bot is the Telegram front end of the auto parts shop: the buyer's
+// car, the catalogue, product cards and the cart, driven entirely by buttons. No model is involved
 // in anything a button does -- that path is instant, free and deterministic.
 // Free text goes to the AI consultant from stage 2.
 package bot
@@ -34,17 +34,26 @@ type Messenger interface {
 // Catalog is what the bot needs from the catalogue service.
 type Catalog interface {
 	Categories(ctx context.Context) ([]domain.Category, error)
-	CategoryPage(ctx context.Context, categoryID int64, page int) (*service.ProductPage, error)
+	CategoryPage(ctx context.Context, categoryID int64, car *domain.Vehicle, page int) (*service.ProductPage, error)
 	Product(ctx context.Context, id int64) (*domain.Product, error)
-	Similar(ctx context.Context, id int64) (*domain.Product, []domain.Product, error)
+	Analogues(ctx context.Context, id int64, car *domain.Vehicle) (*domain.Product, []domain.Product, error)
 }
 
 // Cart is what the bot needs from the cart service.
 type Cart interface {
 	Get(ctx context.Context, userID int64) (*domain.Cart, error)
-	Add(ctx context.Context, userID, variantID int64) (*domain.Cart, error)
-	Decrement(ctx context.Context, userID, variantID int64) (*domain.Cart, error)
-	Remove(ctx context.Context, userID, variantID int64) (*domain.Cart, error)
+	Add(ctx context.Context, userID, productID int64) (*domain.Cart, error)
+	Decrement(ctx context.Context, userID, productID int64) (*domain.Cart, error)
+	Remove(ctx context.Context, userID, productID int64) (*domain.Cart, error)
+	Clear(ctx context.Context, userID int64) error
+}
+
+// Garage is what the bot needs to know and change the buyer's car.
+type Garage interface {
+	Makes(ctx context.Context) ([]domain.Vehicle, error)
+	SameMake(ctx context.Context, vehicleID int64) ([]domain.Vehicle, error)
+	Get(ctx context.Context, userID int64) (*domain.Vehicle, error)
+	Set(ctx context.Context, userID, vehicleID int64) (*domain.Vehicle, error)
 	Clear(ctx context.Context, userID int64) error
 }
 
@@ -62,6 +71,7 @@ type Bot struct {
 	tg      Messenger
 	catalog Catalog
 	cart    Cart
+	garage  Garage
 	cfg     Config
 	log     *slog.Logger
 
@@ -71,8 +81,8 @@ type Bot struct {
 }
 
 // New wires a Bot.
-func New(updates UpdateSource, tg Messenger, catalog Catalog, cart Cart, cfg Config, log *slog.Logger) *Bot {
-	return &Bot{updates: updates, tg: tg, catalog: catalog, cart: cart, cfg: cfg, log: log}
+func New(updates UpdateSource, tg Messenger, catalog Catalog, cart Cart, garage Garage, cfg Config, log *slog.Logger) *Bot {
+	return &Bot{updates: updates, tg: tg, catalog: catalog, cart: cart, garage: garage, cfg: cfg, log: log}
 }
 
 // Run long-polls for updates until ctx is cancelled, then finishes the updates
@@ -187,9 +197,11 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 	switch m.Text {
 	case "/start":
 		b.send(ctx, chat, msgWelcome, mainMenu())
-		b.sendCategories(ctx, chat)
+		b.start(ctx, chat, user)
 	case "/catalog", btnCatalog:
-		b.sendCategories(ctx, chat)
+		b.sendCategories(ctx, chat, user)
+	case "/car", btnCar:
+		b.sendCar(ctx, chat, user)
 	case "/cart", btnCart:
 		b.sendCart(ctx, chat, user)
 	case "/help", btnHelp:
@@ -243,17 +255,13 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 	case actCategory:
 		return "", b.editProductPage(ctx, cc, a[0], int(a[1]))
 	case actCategoryN:
-		return "", b.sendProductPage(ctx, cc.chat, a[0])
+		return "", b.sendProductPage(ctx, cc, a[0])
 	case actProduct:
-		return "", b.sendProduct(ctx, cc.chat, a[0])
-	case actPickSize:
-		return "Оберіть розмір", b.editProductButtons(ctx, cc, a[0], sizeKeyboard)
-	case actCardMenu:
-		return "", b.editProductButtons(ctx, cc, a[0], productKeyboard)
+		return "", b.sendProduct(ctx, cc, a[0])
 	case actAdd:
-		return b.addToCart(ctx, cc, a[0], a[1])
-	case actSimilar:
-		return "", b.sendSimilar(ctx, cc.chat, a[0])
+		return b.addToCart(ctx, cc, a[0])
+	case actAnalogues:
+		return "", b.sendAnalogues(ctx, cc, a[0])
 	case actCart:
 		b.sendCart(ctx, cc.chat, cc.user)
 		return "", nil
@@ -271,6 +279,14 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 			return &domain.Cart{UserID: cc.user}, nil
 		})
 		return msgCartCleared, err
+	case actMakes:
+		return "", b.editMakes(ctx, cc)
+	case actMake:
+		return "", b.editVehicles(ctx, cc, a[0])
+	case actSetCar:
+		return msgCarSaved, b.setCar(ctx, cc, a[0])
+	case actForgetCar:
+		return "", b.forgetCar(ctx, cc)
 	case actNoop:
 		return "", nil
 	}

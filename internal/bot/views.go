@@ -16,7 +16,7 @@ import (
 
 // Every catalogue value goes through html.EscapeString before it reaches a
 // message: messages are sent with parse_mode=HTML, and a product named
-// "Tee <3" would otherwise make Telegram reject the whole message.
+// "Lamp <H7>" would otherwise make Telegram reject the whole message.
 var esc = html.EscapeString
 
 func button(text string, act action, args ...int64) telegram.InlineButton {
@@ -27,14 +27,24 @@ func mainMenu() *telegram.ReplyKeyboard {
 	return &telegram.ReplyKeyboard{
 		Rows: [][]telegram.KeyboardButton{
 			{{Text: btnCatalog}, {Text: btnCart}},
-			{{Text: btnHelp}},
+			{{Text: btnCar}, {Text: btnHelp}},
 		},
 		Resize:     true,
 		Persistent: true,
 	}
 }
 
-func categoriesView(cats []domain.Category) (string, *telegram.InlineKeyboard) {
+func categoriesView(cats []domain.Category, car *domain.Vehicle) (string, *telegram.InlineKeyboard) {
+	text := "<b>Каталог</b>\n"
+	carButton := button("🚗 Обрати авто", actMakes)
+	if car != nil {
+		text += "🚗 Для: " + esc(car.Label()) + "\n"
+		carButton = button("🚗 Змінити авто", actMakes)
+	} else {
+		text += "Показую всі деталі.\n"
+	}
+	text += "\nОберіть категорію:"
+
 	kb := &telegram.InlineKeyboard{}
 	// Two per row: category names are short, and six fit without scrolling.
 	for i := 0; i < len(cats); i += 2 {
@@ -44,16 +54,22 @@ func categoriesView(cats []domain.Category) (string, *telegram.InlineKeyboard) {
 		}
 		kb.Rows = append(kb.Rows, row)
 	}
-	kb.Rows = append(kb.Rows, []telegram.InlineButton{button(btnCart, actCart)})
-	return msgCategories, kb
+	kb.Rows = append(kb.Rows, []telegram.InlineButton{carButton, button(btnCart, actCart)})
+	return text, kb
 }
 
 func productPageView(pg *service.ProductPage) (string, *telegram.InlineKeyboard) {
 	text := fmt.Sprintf("<b>%s</b>", esc(pg.Category.Title))
-	if len(pg.Products) == 0 {
+	if pg.Vehicle != nil {
+		text += "\n🚗 " + esc(pg.Vehicle.Label())
+	}
+	switch {
+	case len(pg.Products) == 0 && pg.Vehicle != nil:
+		text += "\n\nДля вашого авто в цій категорії поки нічого немає."
+	case len(pg.Products) == 0:
 		text += "\n\nУ цій категорії поки порожньо."
-	} else {
-		text += "\nОберіть товар:"
+	default:
+		text += "\n\nОберіть товар:"
 	}
 
 	kb := &telegram.InlineKeyboard{}
@@ -83,49 +99,78 @@ func productPageView(pg *service.ProductPage) (string, *telegram.InlineKeyboard)
 // productLabel fits a product on one button. Button text is plain, so it is
 // not escaped.
 func productLabel(p domain.Product) string {
-	label := fmt.Sprintf("%s · %s — %s", p.Name, domain.ColorLabel(p.Color), p.Price)
+	label := fmt.Sprintf("%s · %s — %s", p.Name, p.Brand, p.Price)
 	if !p.InStock() {
 		label += " · немає"
 	}
 	return label
 }
 
-// productCaption is the text under a product photo. Sizes are all listed,
-// sold-out ones struck through: a buyer looking for XL learns it exists but
-// is gone, instead of wondering whether the model comes in XL at all.
-func productCaption(p *domain.Product) string {
+// maxFitsListed bounds the vehicles listed on a card without a chosen car.
+const maxFitsListed = 4
+
+// productCaption is the text under a product photo. With a car chosen it says
+// plainly whether the part fits it -- the question every buyer of parts has.
+func productCaption(p *domain.Product, car *domain.Vehicle) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "<b>%s</b>\n", esc(p.Name))
-	fmt.Fprintf(&b, "%s · %s · %s\n", esc(p.Brand), domain.ColorLabel(p.Color), domain.SeasonLabel(p.Season))
-	fmt.Fprintf(&b, "<b>%s</b>\n\n", p.Price)
+	fmt.Fprintf(&b, "%s · арт. %s\n", esc(p.Brand), esc(p.SKU))
+	fmt.Fprintf(&b, "<b>%s</b> · %s\n\n", p.Price, stockLabel(p.Stock))
 	if p.Description != "" {
 		fmt.Fprintf(&b, "%s\n\n", esc(p.Description))
 	}
 
-	if !p.InStock() {
-		b.WriteString("❌ Немає в наявності")
-		return b.String()
-	}
-
-	sizes := make([]string, 0, len(p.Variants))
-	for _, v := range p.Variants {
-		switch {
-		case v.Stock == 0:
-			sizes = append(sizes, "<s>"+esc(v.Size)+"</s>")
-		case v.Stock <= domain.LowStock:
-			sizes = append(sizes, fmt.Sprintf("%s (%d шт.)", esc(v.Size), v.Stock))
-		default:
-			sizes = append(sizes, esc(v.Size))
+	if len(p.Specs) > 0 {
+		specs := make([]string, len(p.Specs))
+		for i, s := range p.Specs {
+			specs[i] = esc(s.Name) + ": " + esc(s.Value)
 		}
+		b.WriteString(strings.Join(specs, "\n") + "\n")
 	}
-	b.WriteString("Розміри: " + strings.Join(sizes, " · "))
+	if len(p.OEMNumbers) > 0 {
+		fmt.Fprintf(&b, "OEM: <code>%s</code>\n", esc(strings.Join(p.OEMNumbers, ", ")))
+	}
+	b.WriteString("\n" + fitmentLine(p, car))
 	return b.String()
 }
 
+func stockLabel(stock int) string {
+	switch {
+	case stock == 0:
+		return "❌ немає в наявності"
+	case stock <= domain.LowStock:
+		return fmt.Sprintf("⚠️ останні %d шт.", stock)
+	default:
+		return "✅ в наявності"
+	}
+}
+
+func fitmentLine(p *domain.Product, car *domain.Vehicle) string {
+	switch {
+	case p.Universal:
+		return "🌐 Універсальний товар — перевірте характеристики під своє авто."
+	case car != nil && p.FitsVehicle(car.ID):
+		return "✅ Підходить до вашого " + esc(car.Short())
+	case car != nil:
+		return "⚠️ Не підходить до вашого " + esc(car.Short())
+	case len(p.Fits) == 0:
+		return ""
+	}
+	names := make([]string, 0, maxFitsListed)
+	for _, v := range p.Fits[:min(len(p.Fits), maxFitsListed)] {
+		names = append(names, esc(v.Short()))
+	}
+	line := "🚗 Підходить до: " + strings.Join(names, ", ")
+	if extra := len(p.Fits) - maxFitsListed; extra > 0 {
+		line += fmt.Sprintf(" та ще %d", extra)
+	}
+	return line
+}
+
 func productKeyboard(p *domain.Product) *telegram.InlineKeyboard {
-	first := []telegram.InlineButton{button("🔁 Схоже", actSimilar, p.ID)}
+	first := []telegram.InlineButton{button("🔁 Аналоги", actAnalogues, p.ID)}
 	if p.InStock() {
-		first = append([]telegram.InlineButton{button("🛒 У кошик", actPickSize, p.ID)}, first...)
+		first = append([]telegram.InlineButton{button("🛒 У кошик", actAdd, p.ID)}, first...)
 	}
 	return &telegram.InlineKeyboard{Rows: [][]telegram.InlineButton{
 		first,
@@ -133,40 +178,71 @@ func productKeyboard(p *domain.Product) *telegram.InlineKeyboard {
 	}}
 }
 
-// sizeKeyboard replaces the card's buttons while a size is being chosen. Only
-// sizes in stock get a button: a button that can only fail is worse than none.
-func sizeKeyboard(p *domain.Product) *telegram.InlineKeyboard {
-	const perRow = 4
+func analoguesView(p *domain.Product, analogues []domain.Product) (string, *telegram.InlineKeyboard) {
+	if len(analogues) == 0 {
+		return msgNoAnalogues, &telegram.InlineKeyboard{Rows: [][]telegram.InlineButton{
+			{button("⬅️ До категорії", actCategoryN, p.CategoryID)},
+		}}
+	}
 	kb := &telegram.InlineKeyboard{}
-	var row []telegram.InlineButton
-	for _, v := range p.Variants {
-		if v.Stock == 0 {
-			continue
-		}
-		row = append(row, button(v.Size, actAdd, p.ID, v.ID))
+	for _, a := range analogues {
+		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(productLabel(a), actProduct, a.ID)})
+	}
+	return fmt.Sprintf("Аналоги: <b>%s</b> (%s):", esc(p.Name), esc(p.Brand)), kb
+}
+
+// makesView is the first step of choosing a car. Each make's button carries
+// the id of one of its vehicles, which stands for the make.
+func makesView(makes []domain.Vehicle, car *domain.Vehicle) (string, *telegram.InlineKeyboard) {
+	text := msgMakes
+	if car != nil {
+		text = "🚗 Зараз: " + esc(car.Label()) + "\n\n" + msgMakes
+	}
+	kb := &telegram.InlineKeyboard{}
+	const perRow = 3
+	row := make([]telegram.InlineButton, 0, perRow)
+	for _, m := range makes {
+		row = append(row, button(m.Make, actMake, m.ID))
 		if len(row) == perRow {
 			kb.Rows = append(kb.Rows, row)
-			row = nil
+			row = make([]telegram.InlineButton, 0, perRow)
 		}
 	}
 	if len(row) > 0 {
 		kb.Rows = append(kb.Rows, row)
 	}
-	kb.Rows = append(kb.Rows, []telegram.InlineButton{button("✖️ Скасувати", actCardMenu, p.ID)})
-	return kb
+	if car != nil {
+		kb.Rows = append(kb.Rows, []telegram.InlineButton{button("Показувати всі деталі", actForgetCar)})
+	}
+	return text, kb
 }
 
-func similarView(p *domain.Product, similar []domain.Product) (string, *telegram.InlineKeyboard) {
-	if len(similar) == 0 {
-		return msgNoSimilar, &telegram.InlineKeyboard{Rows: [][]telegram.InlineButton{
-			{button("⬅️ До категорії", actCategoryN, p.CategoryID)},
-		}}
+func vehiclesView(vehicles []domain.Vehicle) (string, *telegram.InlineKeyboard) {
+	text := "🚗 <b>Оберіть модель і двигун</b>"
+	if len(vehicles) > 0 {
+		text = fmt.Sprintf("🚗 <b>%s</b>: оберіть модель і двигун", esc(vehicles[0].Make))
 	}
 	kb := &telegram.InlineKeyboard{}
-	for _, s := range similar {
-		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(productLabel(s), actProduct, s.ID)})
+	for _, v := range vehicles {
+		label := fmt.Sprintf("%s %s · %s", v.Model, v.Engine, v.Years())
+		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(label, actSetCar, v.ID)})
 	}
-	return fmt.Sprintf("Схоже на <b>%s</b>:", esc(p.Name)), kb
+	kb.Rows = append(kb.Rows, []telegram.InlineButton{button("⬅️ Марки", actMakes)})
+	return text, kb
+}
+
+func carSavedView(car *domain.Vehicle) (string, *telegram.InlineKeyboard) {
+	return "✅ Ваше авто: <b>" + esc(car.Label()) + "</b>\n\nКаталог і консультант тепер підбирають деталі саме під нього.",
+		&telegram.InlineKeyboard{Rows: [][]telegram.InlineButton{
+			{button("🛍 Каталог для цього авто", actCategories)},
+			{button("🚗 Змінити авто", actMakes)},
+		}}
+}
+
+func carForgottenView() (string, *telegram.InlineKeyboard) {
+	return msgCarForgotten, &telegram.InlineKeyboard{Rows: [][]telegram.InlineButton{
+		{button("🚗 Обрати авто", actMakes), button(btnCatalog, actCategories)},
+	}}
 }
 
 // maxReplyRunes keeps a model reply inside Telegram's 4096-character message
@@ -213,7 +289,7 @@ func cartView(c *domain.Cart) (string, *telegram.InlineKeyboard) {
 
 	for i, l := range c.Lines {
 		n := strconv.Itoa(i + 1)
-		fmt.Fprintf(&b, "\n%s. %s, розмір %s\n", n, esc(l.ProductName), esc(l.Size))
+		fmt.Fprintf(&b, "\n%s. %s (%s)\n", n, esc(l.ProductName), esc(l.Brand))
 		fmt.Fprintf(&b, "    %d × %s = <b>%s</b>\n", l.Qty, l.Price, l.Subtotal())
 		switch {
 		case l.Stock == 0:
@@ -223,12 +299,11 @@ func cartView(c *domain.Cart) (string, *telegram.InlineKeyboard) {
 		}
 
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{
-			button("➖", actDec, l.VariantID),
-			// The label opens the product, which is where a buyer goes to
-			// pick another size instead.
-			button(fmt.Sprintf("%s. %s ×%d", n, l.Size, l.Qty), actProduct, l.ProductID),
-			button("➕", actInc, l.VariantID),
-			button("🗑", actDel, l.VariantID),
+			button("➖", actDec, l.ProductID),
+			// The label opens the product card.
+			button(fmt.Sprintf("№%s ×%d", n, l.Qty), actProduct, l.ProductID),
+			button("➕", actInc, l.ProductID),
+			button("🗑", actDel, l.ProductID),
 		})
 	}
 	fmt.Fprintf(&b, "\nРазом: <b>%s</b> (%d шт.)", c.Total(), c.Items())

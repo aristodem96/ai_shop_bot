@@ -1,204 +1,304 @@
 package seed
 
-// The demo catalogue. Brands are made up so the bot can be shown publicly
-// without borrowing anyone's trademark.
+// The demo catalogue of an auto parts shop.
+//
+// The vehicles are real models, but the parts are not: brands, part numbers
+// and fitments are invented for the demo and are not a compatibility
+// reference. Made-up brands also let the bot be shown publicly without
+// borrowing anyone's trademark.
 
 type category struct {
 	slug, title string
-	chart       string
+	// imageColor tints the placeholder photos of the category.
+	imageColor string
 }
 
 var categories = []category{
-	{"jackets", "Куртки", "tops"},
-	{"hoodies", "Худі та світшоти", "tops"},
-	{"tshirts", "Футболки", "tops"},
-	{"jeans", "Джинси та штани", "bottoms"},
-	{"shoes", "Взуття", "shoes"},
-	{"accessories", "Аксесуари", "one_size"},
+	{"brakes", "Гальмівна система", "b33a3a"},
+	{"filters", "Фільтри", "3f6fb5"},
+	{"oils", "Масла та рідини", "c9a227"},
+	{"suspension", "Підвіска", "4c8c4a"},
+	{"engine", "Двигун: ремені, свічки", "6b5b95"},
+	{"electrical", "Електрика", "2f7f86"},
 }
 
-// chartRow is one size of a chart. Zero means "not measured by this chart"
-// and is stored as NULL.
-type chartRow struct {
-	size                 string
-	chestMin, chestMax   int
-	waistMin, waistMax   int
-	heightMin, heightMax int
-	footMin, footMax     int
+type vehicle struct {
+	code             string
+	make, model      string
+	yearFrom, yearTo int // yearTo 0: still produced
+	engine, fuel     string
 }
 
-type chart struct {
-	code, title string
-	rows        []chartRow
+var vehicles = []vehicle{
+	{"octavia-a7-14tsi", "Skoda", "Octavia A7", 2013, 2020, "1.4 TSI", "petrol"},
+	{"octavia-a7-20tdi", "Skoda", "Octavia A7", 2013, 2020, "2.0 TDI", "diesel"},
+	{"golf-7-16tdi", "Volkswagen", "Golf VII", 2012, 2019, "1.6 TDI", "diesel"},
+	{"passat-b8-20tdi", "Volkswagen", "Passat B8", 2014, 2022, "2.0 TDI", "diesel"},
+	{"camry-xv70-25", "Toyota", "Camry XV70", 2017, 2023, "2.5", "petrol"},
+	{"corolla-e210-16", "Toyota", "Corolla E210", 2019, 0, "1.6", "petrol"},
+	{"logan-2-15dci", "Renault", "Logan II", 2012, 2020, "1.5 dCi", "diesel"},
+	{"logan-2-16", "Renault", "Logan II", 2012, 2020, "1.6 8V", "petrol"},
+	{"tucson-tl-20", "Hyundai", "Tucson TL", 2015, 2020, "2.0 MPI", "petrol"},
+	{"sportage-ql-20", "Kia", "Sportage QL", 2015, 2021, "2.0 MPI", "petrol"},
+	{"focus-3-16", "Ford", "Focus III", 2011, 2018, "1.6 Ti-VCT", "petrol"},
+	{"lanos-15", "Daewoo", "Lanos", 1997, 2009, "1.5", "petrol"},
 }
 
-var charts = []chart{
-	{"tops", "Верхній одяг і футболки", []chartRow{
-		{size: "XS", chestMin: 82, chestMax: 87, heightMin: 158, heightMax: 164},
-		{size: "S", chestMin: 88, chestMax: 93, heightMin: 164, heightMax: 170},
-		{size: "M", chestMin: 94, chestMax: 99, heightMin: 170, heightMax: 176},
-		{size: "L", chestMin: 100, chestMax: 105, heightMin: 176, heightMax: 182},
-		{size: "XL", chestMin: 106, chestMax: 111, heightMin: 182, heightMax: 188},
-		{size: "XXL", chestMin: 112, chestMax: 118, heightMin: 186, heightMax: 194},
-	}},
-	// Jeans are sized by waist in inches, the way denim labels are printed.
-	{"bottoms", "Джинси (талія, дюйми)", []chartRow{
-		{size: "28", waistMin: 70, waistMax: 74},
-		{size: "30", waistMin: 75, waistMax: 79},
-		{size: "32", waistMin: 80, waistMax: 84},
-		{size: "34", waistMin: 85, waistMax: 89},
-		{size: "36", waistMin: 90, waistMax: 95},
-	}},
-	{"shoes", "Взуття (довжина стопи)", []chartRow{
-		{size: "37", footMin: 235, footMax: 240},
-		{size: "38", footMin: 241, footMax: 246},
-		{size: "39", footMin: 247, footMax: 252},
-		{size: "40", footMin: 253, footMax: 258},
-		{size: "41", footMin: 259, footMax: 264},
-		{size: "42", footMin: 265, footMax: 270},
-		{size: "43", footMin: 271, footMax: 276},
-		{size: "44", footMin: 277, footMax: 282},
-		{size: "45", footMin: 283, footMax: 288},
-	}},
-	{"one_size", "Універсальний розмір", []chartRow{{size: "ONE"}}},
-}
+// Fitment groups: vehicles that share a platform share many parts.
+var (
+	vag        = []string{"octavia-a7-14tsi", "octavia-a7-20tdi", "golf-7-16tdi", "passat-b8-20tdi"}
+	vagDiesel  = []string{"octavia-a7-20tdi", "golf-7-16tdi", "passat-b8-20tdi"}
+	toyota     = []string{"camry-xv70-25", "corolla-e210-16"}
+	logan      = []string{"logan-2-15dci", "logan-2-16"}
+	hyundaiKia = []string{"tucson-tl-20", "sportage-ql-20"}
+	focus      = []string{"focus-3-16"}
+	lanos      = []string{"lanos-15"}
+)
+
+// one builds a fitment list of named vehicles.
+func one(codes ...string) []string { return codes }
+
+type spec = [2]string
 
 type product struct {
 	sku, category string
 	name, brand   string
-	color, season string
-	gender        string
-	styles        []string
 	price         int64 // whole hryvnias
+	fits          []string
+	universal     bool
+	oem           []string
+	specs         []spec
 	description   string
-	imageLabel    string         // English text drawn on the placeholder photo
-	stock         map[string]int // overrides the generated stock per size
-	excludeSizes  []string
+	imageLabel    string // English text drawn on the placeholder photo
+	// stock overrides the generated stock when set; stockSoldOut means 0.
+	stock int
 }
+
+// stockSoldOut pins a product at zero, which the zero value of stock cannot.
+const stockSoldOut = -1
 
 var products = []product{
-	// --- Jackets -------------------------------------------------------------
-	{"JKT-001", "jackets", "Пуховик «Nord»", "Nord Line", "black", "winter", "unisex", []string{"casual", "outdoor"}, 3499,
-		"Теплий пуховик з капюшоном, наповнювач пух/перо 90/10, тримає до −20 °C.", "Puffer Nord",
-		// M holds a single unit on purpose: stage 3 races two buyers for it.
-		map[string]int{"M": 1}, nil},
-	{"JKT-002", "jackets", "Пуховик «Nord»", "Nord Line", "olive", "winter", "unisex", []string{"casual", "outdoor"}, 3499,
-		"Теплий пуховик з капюшоном, наповнювач пух/перо 90/10, тримає до −20 °C.", "Puffer Nord", nil, nil},
-	{"JKT-003", "jackets", "Парка «Polar»", "Carpathia", "khaki", "winter", "men", []string{"outdoor", "casual"}, 4299,
-		"Довга парка з мембраною 10K і штучним хутром на капюшоні. Для морозу й вітру.", "Parka Polar", nil, nil},
-	{"JKT-004", "jackets", "Бомбер «Pilot»", "Urban Fox", "black", "demi", "unisex", []string{"street", "casual"}, 2199,
-		"Класичний нейлоновий бомбер з легким утеплювачем і трикотажними манжетами.", "Bomber Pilot", nil, nil},
-	{"JKT-005", "jackets", "Вітровка «Breeze»", "Urban Fox", "blue", "summer", "unisex", []string{"sport"}, 1299,
-		"Легка вітровка з водовідштовхувальним просоченням, складається в кишеню.", "Windbreaker", nil, nil},
-	{"JKT-006", "jackets", "Джинсова куртка «Trucker»", "Kyiv Denim", "blue", "demi", "unisex", []string{"casual", "street"}, 1899,
-		"Джинсова куртка прямого крою з щільного деніму 13 oz.", "Denim Trucker", nil, nil},
-	{"JKT-007", "jackets", "Софтшел «Trail»", "Carpathia", "grey", "demi", "men", []string{"outdoor", "sport"}, 2699,
-		"Софтшел з флісовою підкладкою: для походів у Карпати й прохолодного міста.", "Softshell Trail", nil, nil},
-	{"JKT-008", "jackets", "Пальто «Lviv»", "Stepove", "beige", "demi", "women", []string{"classic"}, 4899,
-		"Вовняне пальто прямого крою, 60% вовни. Довжина до коліна.", "Coat Lviv", nil, []string{"XXL"}},
-	{"JKT-009", "jackets", "Укорочений пуховик «Puff»", "Nord Line", "white", "winter", "women", []string{"street", "casual"}, 2999,
-		"Об'ємний укорочений пуховик зі стьобкою, високий комір-стійка.", "Puffer Short", nil, []string{"XXL"}},
+	// --- Brakes --------------------------------------------------------------
+	{sku: "BRK-001", category: "brakes", name: "Колодки гальмівні передні", brand: "AutoLine", price: 1450,
+		fits: vag, oem: []string{"5Q0 698 151", "1K0 698 151"},
+		specs:       []spec{{"Вісь", "передня"}, {"Товщина", "20.3 мм"}, {"Датчик зносу", "ні"}},
+		description: "Органічні колодки з низьким пилоутворенням для щоденної їзди містом і трасою.",
+		imageLabel:  "Brake pads",
+		// A single unit on purpose: stage 3 races two buyers for it.
+		stock: 1},
+	{sku: "BRK-002", category: "brakes", name: "Колодки гальмівні передні керамічні", brand: "Stal Pro", price: 2290,
+		fits: vag, oem: []string{"5Q0 698 151"},
+		specs:       []spec{{"Вісь", "передня"}, {"Товщина", "20.3 мм"}, {"Склад", "кераміка"}},
+		description: "Керамічні колодки: тихі, майже без пилу на дисках, стабільні при нагріванні.",
+		imageLabel:  "Ceramic pads"},
+	{sku: "BRK-003", category: "brakes", name: "Колодки гальмівні передні", brand: "AutoLine", price: 1690,
+		fits: toyota, oem: []string{"04465-33480"},
+		specs:       []spec{{"Вісь", "передня"}, {"Товщина", "17.5 мм"}},
+		description: "Колодки з противибраційними пластинами в комплекті.", imageLabel: "Brake pads"},
+	{sku: "BRK-004", category: "brakes", name: "Колодки гальмівні передні", brand: "AutoLine", price: 890,
+		fits: logan, oem: []string{"41 06 084 81R"},
+		specs:       []spec{{"Вісь", "передня"}, {"Товщина", "18 мм"}},
+		description: "Бюджетні колодки з ресурсом до 40 тис. км.", imageLabel: "Brake pads"},
+	{sku: "BRK-005", category: "brakes", name: "Колодки гальмівні передні", brand: "Pivden Parts", price: 1290,
+		fits: hyundaiKia, oem: []string{"58101-D7A00"},
+		specs:       []spec{{"Вісь", "передня"}, {"Датчик зносу", "так"}},
+		description: "Колодки з акустичним датчиком зносу.", imageLabel: "Brake pads"},
+	{sku: "BRK-006", category: "brakes", name: "Диск гальмівний передній вентильований", brand: "Stal Pro", price: 1890,
+		fits: vag, oem: []string{"5Q0 615 301 F"},
+		specs:       []spec{{"Вісь", "передня"}, {"Діаметр", "312 мм"}, {"Ціна за", "1 шт."}},
+		description: "Вентильований диск з антикорозійним покриттям. Міняти парою на осі.",
+		imageLabel:  "Brake disc"},
+	{sku: "BRK-007", category: "brakes", name: "Диск гальмівний передній", brand: "AutoLine", price: 1150,
+		fits: logan, oem: []string{"40 20 600 10R"},
+		specs:       []spec{{"Вісь", "передня"}, {"Діаметр", "259 мм"}, {"Ціна за", "1 шт."}},
+		description: "Суцільний диск. Міняти парою на осі.", imageLabel: "Brake disc"},
+	{sku: "BRK-008", category: "brakes", name: "Колодки гальмівні передні", brand: "AutoLine", price: 1050,
+		fits: focus, oem: []string{"1830418"},
+		specs:       []spec{{"Вісь", "передня"}},
+		description: "Колодки з фаскою для швидкого притирання.", imageLabel: "Brake pads"},
+	// Sold out: shows how the catalogue treats a dead end.
+	{sku: "BRK-009", category: "brakes", name: "Колодки гальмівні передні", brand: "Pivden Parts", price: 450,
+		fits: lanos, oem: []string{"96273708"},
+		specs:       []spec{{"Вісь", "передня"}},
+		description: "Колодки для Lanos і Sens.", imageLabel: "Brake pads", stock: stockSoldOut},
 
-	// --- Hoodies -------------------------------------------------------------
-	{"HOD-001", "hoodies", "Худі «Basic»", "Urban Fox", "black", "all", "unisex", []string{"casual"}, 1199,
-		"Щільний футер 320 г/м² з начосом, кишеня-кенгуру, подвійний капюшон.", "Hoodie Basic", nil, nil},
-	{"HOD-002", "hoodies", "Худі «Basic»", "Urban Fox", "grey", "all", "unisex", []string{"casual"}, 1199,
-		"Щільний футер 320 г/м² з начосом, кишеня-кенгуру, подвійний капюшон.", "Hoodie Basic", nil, nil},
-	{"HOD-003", "hoodies", "Худі «Basic»", "Urban Fox", "green", "all", "unisex", []string{"casual"}, 1199,
-		"Щільний футер 320 г/м² з начосом, кишеня-кенгуру, подвійний капюшон.", "Hoodie Basic", nil, nil},
-	{"HOD-004", "hoodies", "Худі оверсайз «Drop»", "Urban Fox", "beige", "all", "unisex", []string{"street"}, 1499,
-		"Вільний крій зі спущеним плечем, щільність 360 г/м².", "Hoodie Drop", nil, nil},
-	{"HOD-005", "hoodies", "Худі на блискавці «Zip»", "Nord Line", "navy", "demi", "unisex", []string{"casual", "sport"}, 1399,
-		"Худі на металевій блискавці з бічними кишенями.", "Zip Hoodie", nil, nil},
-	{"HOD-006", "hoodies", "Світшот «College»", "Stepove", "red", "all", "unisex", []string{"casual", "classic"}, 999,
-		"Світшот з круглим вирізом і нашивкою в університетському стилі.", "Sweatshirt", nil, nil},
-	{"HOD-007", "hoodies", "Світшот «Вишиванка»", "Stepove", "white", "all", "unisex", []string{"casual"}, 1299,
-		"Бавовняний світшот з вишитим орнаментом на грудях.", "Vyshyvanka", nil, nil},
-	{"HOD-008", "hoodies", "Флісова кофта «Fleece»", "Carpathia", "khaki", "demi", "unisex", []string{"outdoor"}, 1099,
-		"Теплий фліс 280 г/м², комір-стійка, швидко сохне.", "Fleece", nil, nil},
-	{"HOD-009", "hoodies", "Спортивне худі «Run»", "Nord Line", "blue", "all", "unisex", []string{"sport"}, 1299,
-		"Легке худі з тканини, що відводить вологу. Для бігу й залу.", "Hoodie Run", nil, nil},
+	// --- Filters -------------------------------------------------------------
+	{sku: "FLT-001", category: "filters", name: "Фільтр масляний", brand: "FiltroMax", price: 290,
+		fits: one("octavia-a7-14tsi"), oem: []string{"04E 115 561 H"},
+		specs:       []spec{{"Тип", "накручуваний"}},
+		description: "Фільтр з антидренажним клапаном.", imageLabel: "Oil filter"},
+	// The same OEM number from another brand: an analogue of FLT-001.
+	{sku: "FLT-002", category: "filters", name: "Фільтр масляний", brand: "AutoLine", price: 240,
+		fits: one("octavia-a7-14tsi"), oem: []string{"04E 115 561 H"},
+		specs:       []spec{{"Тип", "накручуваний"}},
+		description: "Бюджетний аналог оригінального фільтра.", imageLabel: "Oil filter"},
+	{sku: "FLT-003", category: "filters", name: "Фільтр масляний (картридж)", brand: "FiltroMax", price: 340,
+		fits: vagDiesel, oem: []string{"03N 115 562"},
+		specs:       []spec{{"Тип", "картридж"}},
+		description: "Фільтруючий елемент з ущільнювальними кільцями.", imageLabel: "Oil filter"},
+	{sku: "FLT-004", category: "filters", name: "Фільтр масляний", brand: "FiltroMax", price: 260,
+		fits: toyota, oem: []string{"90915-10003"},
+		specs:       []spec{{"Тип", "накручуваний"}},
+		description: "Фільтр для бензинових двигунів Toyota.", imageLabel: "Oil filter"},
+	{sku: "FLT-005", category: "filters", name: "Фільтр масляний", brand: "FiltroMax", price: 230,
+		fits: logan, oem: []string{"82 00 768 913"},
+		specs:       []spec{{"Тип", "накручуваний"}},
+		description: "Підходить до бензинових і дизельних Logan.", imageLabel: "Oil filter"},
+	{sku: "FLT-006", category: "filters", name: "Фільтр масляний", brand: "FiltroMax", price: 220,
+		fits: hyundaiKia, oem: []string{"26300-35505"},
+		specs:       []spec{{"Тип", "накручуваний"}},
+		description: "Фільтр для двигунів 2.0 MPI.", imageLabel: "Oil filter"},
+	{sku: "FLT-007", category: "filters", name: "Фільтр повітряний", brand: "FiltroMax", price: 480,
+		fits: vag, oem: []string{"5Q0 129 620 B"},
+		specs:       []spec{{"Форма", "прямокутний"}},
+		description: "Багатошаровий фільтруючий матеріал.", imageLabel: "Air filter"},
+	{sku: "FLT-008", category: "filters", name: "Фільтр повітряний", brand: "FiltroMax", price: 420,
+		fits: hyundaiKia, oem: []string{"28113-D3300"},
+		specs:       []spec{{"Форма", "прямокутний"}},
+		description: "Фільтр повітряний двигуна.", imageLabel: "Air filter"},
+	{sku: "FLT-009", category: "filters", name: "Фільтр салону вугільний", brand: "FiltroMax", price: 520,
+		fits: vag, oem: []string{"5Q0 819 653"},
+		specs:       []spec{{"Тип", "вугільний"}},
+		description: "Затримує пил, пилок і запахи з вулиці.", imageLabel: "Cabin filter"},
+	{sku: "FLT-010", category: "filters", name: "Фільтр масляний", brand: "Pivden Parts", price: 120,
+		fits: lanos, oem: []string{"25183779"},
+		specs:       []spec{{"Тип", "накручуваний"}},
+		description: "Фільтр для Lanos 1.5.", imageLabel: "Oil filter"},
 
-	// --- T-shirts ------------------------------------------------------------
-	{"TSH-001", "tshirts", "Футболка «Basic»", "Urban Fox", "white", "summer", "unisex", []string{"casual"}, 399,
-		"Бавовна 100%, 180 г/м², класичний крій.", "Tee Basic", nil, nil},
-	{"TSH-002", "tshirts", "Футболка «Basic»", "Urban Fox", "black", "summer", "unisex", []string{"casual"}, 399,
-		"Бавовна 100%, 180 г/м², класичний крій.", "Tee Basic", nil, nil},
-	{"TSH-003", "tshirts", "Футболка «Basic»", "Urban Fox", "grey", "summer", "unisex", []string{"casual"}, 399,
-		"Бавовна 100%, 180 г/м², класичний крій.", "Tee Basic", nil, nil},
-	{"TSH-004", "tshirts", "Футболка оверсайз «Heavy»", "Urban Fox", "beige", "summer", "unisex", []string{"street"}, 599,
-		"Щільна бавовна 240 г/м², вільний крій, спущене плече.", "Tee Heavy", nil, nil},
-	{"TSH-005", "tshirts", "Футболка «Kyiv»", "Stepove", "navy", "summer", "unisex", []string{"street"}, 549,
-		"Футболка з принтом-мапою Києва на спині.", "Tee Kyiv", nil, nil},
-	{"TSH-006", "tshirts", "Поло «Club»", "Stepove", "green", "summer", "men", []string{"classic"}, 799,
-		"Поло з піке, комір на трьох ґудзиках.", "Polo Club", nil, nil},
-	{"TSH-007", "tshirts", "Спортивна футболка «Dry»", "Nord Line", "red", "summer", "unisex", []string{"sport"}, 499,
-		"Легкий поліестер з відведенням вологи, пласкі шви.", "Tee Dry", nil, nil},
-	{"TSH-008", "tshirts", "Лонгслів «Layer»", "Urban Fox", "brown", "demi", "unisex", []string{"casual"}, 649,
-		"Бавовняний лонгслів для багатошарових образів.", "Longsleeve", nil, nil},
-	{"TSH-009", "tshirts", "Футболка «Вишиванка»", "Stepove", "white", "summer", "unisex", []string{"casual"}, 699,
-		"Бавовняна футболка з вишитим орнаментом на комірі.", "Tee Vyshyvanka", nil, nil},
+	// --- Oils and fluids: universal, the specs decide ------------------------
+	{sku: "OIL-001", category: "oils", name: "Моторна олива 5W-30 синтетична, 4 л", brand: "LubriTech", price: 1290,
+		universal:   true,
+		specs:       []spec{{"В'язкість", "5W-30"}, {"Об'єм", "4 л"}, {"Допуски", "VW 504.00 / 507.00"}},
+		description: "Синтетика з низьким вмістом золи для двигунів з сажовим фільтром.",
+		imageLabel:  "Oil 5W-30"},
+	{sku: "OIL-002", category: "oils", name: "Моторна олива 5W-30 синтетична, 1 л", brand: "LubriTech", price: 380,
+		universal:   true,
+		specs:       []spec{{"В'язкість", "5W-30"}, {"Об'єм", "1 л"}, {"Допуски", "VW 504.00 / 507.00"}},
+		description: "Та сама олива в літровій каністрі — для доливання.", imageLabel: "Oil 5W-30"},
+	{sku: "OIL-003", category: "oils", name: "Моторна олива 0W-20 синтетична, 4 л", brand: "LubriTech", price: 1490,
+		universal:   true,
+		specs:       []spec{{"В'язкість", "0W-20"}, {"Об'єм", "4 л"}, {"Стандарт", "API SP, ILSAC GF-6"}},
+		description: "Енергозберігаюча олива для сучасних японських і корейських двигунів.",
+		imageLabel:  "Oil 0W-20"},
+	{sku: "OIL-004", category: "oils", name: "Моторна олива 10W-40 напівсинтетична, 4 л", brand: "LubriTech", price: 890,
+		universal:   true,
+		specs:       []spec{{"В'язкість", "10W-40"}, {"Об'єм", "4 л"}, {"Стандарт", "API SL/CF"}},
+		description: "Для двигунів з пробігом і старших авто.", imageLabel: "Oil 10W-40"},
+	{sku: "OIL-005", category: "oils", name: "Антифриз G12+ червоний, 5 л", brand: "LubriTech", price: 590,
+		universal:   true,
+		specs:       []spec{{"Тип", "G12+"}, {"Об'єм", "5 л"}, {"Готовий", "так, до −36 °C"}},
+		description: "Готовий до використання, змішується з G12 і G11.", imageLabel: "Coolant G12+"},
+	{sku: "OIL-006", category: "oils", name: "Гальмівна рідина DOT 4, 1 л", brand: "LubriTech", price: 260,
+		universal:   true,
+		specs:       []spec{{"Клас", "DOT 4"}, {"Об'єм", "1 л"}},
+		description: "Для систем з ABS і ESP. Міняти раз на два роки.", imageLabel: "DOT 4"},
+	{sku: "OIL-007", category: "oils", name: "Омивач скла зимовий −20 °C, 4 л", brand: "LubriTech", price: 190,
+		universal:   true,
+		specs:       []spec{{"Температура", "до −20 °C"}, {"Об'єм", "4 л"}},
+		description: "Без різкого запаху, не залишає розводів.", imageLabel: "Washer fluid"},
+	{sku: "OIL-008", category: "oils", name: "Трансмісійна олива 75W-90, 1 л", brand: "LubriTech", price: 420,
+		universal:   true,
+		specs:       []spec{{"В'язкість", "75W-90"}, {"Об'єм", "1 л"}, {"Стандарт", "API GL-4/GL-5"}},
+		description: "Для механічних коробок передач і редукторів.", imageLabel: "Gear oil"},
 
-	// --- Jeans ---------------------------------------------------------------
-	{"JNS-001", "jeans", "Джинси «Straight»", "Kyiv Denim", "blue", "all", "unisex", []string{"casual", "classic"}, 1699,
-		"Прямий крій, середня посадка, бавовна з 1% еластану.", "Jeans Straight", nil, nil},
-	{"JNS-002", "jeans", "Джинси «Straight»", "Kyiv Denim", "black", "all", "unisex", []string{"casual", "classic"}, 1699,
-		"Прямий крій, середня посадка, бавовна з 1% еластану.", "Jeans Straight", nil, nil},
-	{"JNS-003", "jeans", "Джинси «Slim»", "Kyiv Denim", "blue", "all", "men", []string{"casual"}, 1599,
-		"Звужений крій, стрейч-деним.", "Jeans Slim", nil, nil},
-	{"JNS-004", "jeans", "Джинси «Slim»", "Kyiv Denim", "grey", "all", "men", []string{"casual"}, 1599,
-		"Звужений крій, стрейч-деним.", "Jeans Slim", nil, nil},
-	{"JNS-005", "jeans", "Джинси «Wide»", "Kyiv Denim", "blue", "all", "unisex", []string{"street"}, 1899,
-		"Широкі джинси з високою посадкою, жорсткий деним.", "Jeans Wide", nil, nil},
-	{"JNS-006", "jeans", "Джинси «Mom»", "Kyiv Denim", "blue", "all", "women", []string{"casual"}, 1599,
-		"Висока посадка, звуження донизу, вільні в стегнах.", "Jeans Mom", nil, []string{"36"}},
-	{"JNS-007", "jeans", "Утеплені джинси «Warm»", "Kyiv Denim", "blue", "winter", "men", []string{"casual", "outdoor"}, 1999,
-		"Джинси на флісовій підкладці для морозів.", "Jeans Warm", nil, []string{"28"}},
-	{"JNS-008", "jeans", "Карго «Utility»", "Urban Fox", "khaki", "all", "unisex", []string{"street"}, 1499,
-		"Штани карго з об'ємними кишенями, бавовняний твіл.", "Cargo", nil, nil},
+	// --- Suspension ----------------------------------------------------------
+	{sku: "SUS-001", category: "suspension", name: "Амортизатор передній газовий", brand: "Stal Pro", price: 2390,
+		fits: vag, oem: []string{"5Q0 413 031"},
+		specs:       []spec{{"Вісь", "передня"}, {"Тип", "газомасляний"}, {"Ціна за", "1 шт."}},
+		description: "Амортизатор зі збільшеним ресурсом для наших доріг. Міняти парою.",
+		imageLabel:  "Shock absorber"},
+	{sku: "SUS-002", category: "suspension", name: "Амортизатор передній газовий", brand: "AutoLine", price: 1790,
+		fits: vag, oem: []string{"5Q0 413 031"},
+		specs:       []spec{{"Вісь", "передня"}, {"Тип", "газомасляний"}, {"Ціна за", "1 шт."}},
+		description: "Доступний аналог з тим самим номером.", imageLabel: "Shock absorber"},
+	{sku: "SUS-003", category: "suspension", name: "Стійка стабілізатора передня", brand: "AutoLine", price: 390,
+		fits: vag, oem: []string{"1K0 411 315 R"},
+		specs:       []spec{{"Вісь", "передня"}, {"Сторона", "ліва/права"}},
+		description: "Тяга стабілізатора з посиленими пильовиками.", imageLabel: "Stabilizer link"},
+	{sku: "SUS-004", category: "suspension", name: "Амортизатор передній правий", brand: "Stal Pro", price: 2890,
+		fits: one("camry-xv70-25"), oem: []string{"48510-80789"},
+		specs:       []spec{{"Вісь", "передня"}, {"Сторона", "права"}},
+		description: "Стійка в зборі для правої сторони.", imageLabel: "Strut"},
+	{sku: "SUS-005", category: "suspension", name: "Кульова опора", brand: "Pivden Parts", price: 520,
+		fits: logan, oem: []string{"40 16 073 11R"},
+		specs:       []spec{{"Сторона", "ліва/права"}},
+		description: "Опора з кріпленням, ресурс до 60 тис. км.", imageLabel: "Ball joint"},
+	{sku: "SUS-006", category: "suspension", name: "Стійка стабілізатора передня", brand: "Pivden Parts", price: 450,
+		fits: hyundaiKia, oem: []string{"54830-D3000"},
+		specs:       []spec{{"Вісь", "передня"}},
+		description: "Тяга стабілізатора.", imageLabel: "Stabilizer link"},
+	{sku: "SUS-007", category: "suspension", name: "Сайлентблок переднього важеля", brand: "AutoLine", price: 340,
+		fits: focus, oem: []string{"1500243"},
+		specs:       []spec{{"Положення", "задній"}},
+		description: "Поліуретан-гумовий сайлентблок.", imageLabel: "Bushing"},
+	{sku: "SUS-008", category: "suspension", name: "Амортизатор передній масляний", brand: "Pivden Parts", price: 990,
+		fits: lanos, oem: []string{"96226990"},
+		specs:       []spec{{"Вісь", "передня"}, {"Тип", "масляний"}},
+		description: "Амортизатор для Lanos і Sens.", imageLabel: "Shock absorber"},
 
-	// --- Shoes ---------------------------------------------------------------
-	{"SHO-001", "shoes", "Кросівки «Runner»", "Nord Line", "white", "all", "unisex", []string{"sport", "casual"}, 2499,
-		"Легкі кросівки з амортизуючою підошвою і сітчастим верхом.", "Runner", nil, nil},
-	{"SHO-002", "shoes", "Кросівки «Runner»", "Nord Line", "black", "all", "unisex", []string{"sport", "casual"}, 2499,
-		"Легкі кросівки з амортизуючою підошвою і сітчастим верхом.", "Runner", nil, nil},
-	{"SHO-003", "shoes", "Кеди «Canvas»", "Urban Fox", "white", "summer", "unisex", []string{"casual", "street"}, 1299,
-		"Класичні кеди з парусини на гумовій підошві.", "Canvas", nil, nil},
-	{"SHO-004", "shoes", "Черевики «Trek»", "Carpathia", "brown", "winter", "men", []string{"outdoor"}, 3299,
-		"Утеплені шкіряні черевики з нековзною протекторною підошвою.", "Boots Trek", nil, []string{"37", "38"}},
-	{"SHO-005", "shoes", "Челсі «Chelsea»", "Stepove", "black", "demi", "unisex", []string{"classic"}, 2899,
-		"Шкіряні челсі з еластичними вставками.", "Chelsea", nil, nil},
-	{"SHO-006", "shoes", "Зимові кросівки «Frost»", "Nord Line", "grey", "winter", "unisex", []string{"sport", "outdoor"}, 2799,
-		"Кросівки з мембраною і теплою підкладкою.", "Sneakers Frost", nil, nil},
-	{"SHO-007", "shoes", "Сліпони «Easy»", "Urban Fox", "blue", "summer", "unisex", []string{"casual"}, 999,
-		"Сліпони без шнурків з дихаючого текстилю.", "Slip-on", nil, nil},
-	{"SHO-008", "shoes", "Лофери «Office»", "Stepove", "brown", "all", "unisex", []string{"classic"}, 2299,
-		"Шкіряні лофери для офісу та урочистих подій.", "Loafers", nil, nil},
-	{"SHO-009", "shoes", "Кросівки «Retro»", "Urban Fox", "beige", "all", "unisex", []string{"street", "casual"}, 1999,
-		"Кросівки в стилі 80-х із замшевими вставками.", "Retro", nil, nil},
+	// --- Engine --------------------------------------------------------------
+	{sku: "ENG-001", category: "engine", name: "Комплект ГРМ (ремінь + ролики)", brand: "Stal Pro", price: 3890,
+		fits: vagDiesel, oem: []string{"04L 198 119 A"},
+		specs:       []spec{{"Склад", "ремінь, натяжний і обвідний ролики"}, {"Інтервал заміни", "120 тис. км"}},
+		description: "Повний комплект для заміни ременя ГРМ на дизелях 1.6 і 2.0 TDI.",
+		imageLabel:  "Timing kit"},
+	{sku: "ENG-002", category: "engine", name: "Свічка запалювання", brand: "Iskra", price: 260,
+		fits: one("octavia-a7-14tsi"), oem: []string{"04E 905 612"},
+		specs:       []spec{{"Тип", "нікелева"}, {"Ціна за", "1 шт."}, {"Потрібно", "4 шт."}},
+		description: "Свічка для турбованих двигунів 1.4 TSI.", imageLabel: "Spark plug"},
+	{sku: "ENG-003", category: "engine", name: "Свічка запалювання іридієва", brand: "Iskra", price: 520,
+		fits: toyota, oem: []string{"90919-01289"},
+		specs:       []spec{{"Тип", "іридієва"}, {"Ціна за", "1 шт."}, {"Потрібно", "4 шт."}},
+		description: "Ресурс до 100 тис. км.", imageLabel: "Iridium plug"},
+	{sku: "ENG-004", category: "engine", name: "Ремінь генератора поліклиновий", brand: "AutoLine", price: 380,
+		fits: logan, oem: []string{"11 72 078 15R"},
+		specs:       []spec{{"Профіль", "6PK1070"}},
+		description: "Ремінь приводу навісного обладнання.", imageLabel: "Belt"},
+	{sku: "ENG-005", category: "engine", name: "Комплект ГРМ", brand: "Stal Pro", price: 2190,
+		fits: one("logan-2-16"), oem: []string{"13 0C 174 80R"},
+		specs:       []spec{{"Склад", "ремінь, натяжний ролик"}, {"Інтервал заміни", "60 тис. км"}},
+		description: "Комплект ГРМ для 1.6 8V.", imageLabel: "Timing kit"},
+	{sku: "ENG-006", category: "engine", name: "Свічка запалювання", brand: "Iskra", price: 230,
+		fits: hyundaiKia, oem: []string{"18849-11051"},
+		specs:       []spec{{"Тип", "нікелева"}, {"Ціна за", "1 шт."}, {"Потрібно", "4 шт."}},
+		description: "Свічка для 2.0 MPI.", imageLabel: "Spark plug"},
+	{sku: "ENG-007", category: "engine", name: "Котушка запалювання", brand: "Iskra", price: 1290,
+		fits: focus, oem: []string{"1857081"},
+		specs:       []spec{{"Тип", "модуль на 4 циліндри"}},
+		description: "Котушка-модуль, ставиться без доопрацювань.", imageLabel: "Ignition coil"},
+	{sku: "ENG-008", category: "engine", name: "Ремінь ГРМ", brand: "Pivden Parts", price: 420,
+		fits: lanos, oem: []string{"96352914"},
+		specs:       []spec{{"Зубців", "111"}},
+		description: "Ремінь ГРМ для Lanos 1.5.", imageLabel: "Timing belt"},
 
-	// --- Accessories ---------------------------------------------------------
-	{"ACC-001", "accessories", "Шапка «Beanie»", "Nord Line", "black", "winter", "unisex", []string{"casual"}, 399,
-		"В'язана шапка з вовною мериноса, з відворотом.", "Beanie", nil, nil},
-	{"ACC-002", "accessories", "Шапка «Beanie»", "Nord Line", "red", "winter", "unisex", []string{"casual"}, 399,
-		"В'язана шапка з вовною мериноса, з відворотом.", "Beanie", nil, nil},
-	{"ACC-003", "accessories", "Шарф «Wool»", "Stepove", "grey", "winter", "unisex", []string{"classic"}, 699,
-		"Вовняний шарф 180×30 см.", "Scarf", nil, nil},
-	{"ACC-004", "accessories", "Кепка «Cap»", "Urban Fox", "navy", "summer", "unisex", []string{"street", "sport"}, 449,
-		"Бавовняна кепка з регульованою застібкою.", "Cap", nil, nil},
-	{"ACC-005", "accessories", "Рукавички «Touch»", "Carpathia", "black", "winter", "unisex", []string{"outdoor"}, 349,
-		"Флісові рукавички із сенсорними кінчиками пальців.", "Gloves", nil, nil},
-	{"ACC-006", "accessories", "Рюкзак «City»", "Urban Fox", "black", "all", "unisex", []string{"casual", "street"}, 1499,
-		"Міський рюкзак на 22 л з відділенням для ноутбука 15\".", "Backpack", nil, nil},
-	// Sold out in every size: shows how the catalogue treats a dead end.
-	{"ACC-007", "accessories", "Ремінь «Classic»", "Stepove", "brown", "all", "unisex", []string{"classic"}, 599,
-		"Шкіряний ремінь з латунною пряжкою.", "Belt", map[string]int{"ONE": 0}, nil},
-}
-
-// colorHex paints each placeholder photo in the product's colour, so the demo
-// catalogue is at least honest about what colour a thing is.
-var colorHex = map[string]string{
-	"black": "222222", "white": "f2f2f2", "grey": "9e9e9e", "beige": "d9c3a0",
-	"brown": "7b5233", "blue": "3f6fb5", "navy": "1f2f55", "green": "4c8c4a",
-	"khaki": "8a8358", "olive": "6b7034", "red": "b33a3a",
+	// --- Electrical ----------------------------------------------------------
+	{sku: "ELC-001", category: "electrical", name: "Акумулятор 60 А·год 540 А", brand: "Iskra", price: 3190,
+		universal:   true,
+		specs:       []spec{{"Ємність", "60 А·год"}, {"Пусковий струм", "540 А"}, {"Полярність", "зворотна (+ праворуч)"}},
+		description: "Кальцієвий акумулятор для більшості легкових авто. Перевірте розміри посадкового місця.",
+		imageLabel:  "Battery 60Ah"},
+	{sku: "ELC-002", category: "electrical", name: "Акумулятор 74 А·год 680 А", brand: "Iskra", price: 4290,
+		universal:   true,
+		specs:       []spec{{"Ємність", "74 А·год"}, {"Пусковий струм", "680 А"}, {"Полярність", "зворотна (+ праворуч)"}},
+		description: "Для авто з більшим двигуном або дизелем.", imageLabel: "Battery 74Ah"},
+	{sku: "ELC-003", category: "electrical", name: "Лампа H7 12V 55W, 2 шт.", brand: "Iskra", price: 290,
+		universal:   true,
+		specs:       []spec{{"Цоколь", "H7"}, {"Потужність", "55 Вт"}, {"У комплекті", "2 шт."}},
+		description: "Галогенова лампа ближнього світла.", imageLabel: "Bulb H7"},
+	{sku: "ELC-004", category: "electrical", name: "Лампа H4 12V 60/55W", brand: "Iskra", price: 210,
+		universal:   true,
+		specs:       []spec{{"Цоколь", "H4"}, {"Потужність", "60/55 Вт"}},
+		description: "Двониткова лампа ближнього й дальнього світла.", imageLabel: "Bulb H4"},
+	{sku: "ELC-005", category: "electrical", name: "Лампа LED W5W, 2 шт.", brand: "Iskra", price: 180,
+		universal:   true,
+		specs:       []spec{{"Цоколь", "W5W"}, {"У комплекті", "2 шт."}},
+		description: "Світлодіодні габарити, біле світло.", imageLabel: "LED W5W"},
+	{sku: "ELC-006", category: "electrical", name: "Щітки склоочисника 600/450 мм, комплект", brand: "AutoLine", price: 690,
+		fits:        vag,
+		specs:       []spec{{"Довжина", "600 + 450 мм"}, {"Тип", "безкаркасні"}},
+		description: "Безкаркасні щітки з кріпленням під оригінал.", imageLabel: "Wipers"},
+	{sku: "ELC-007", category: "electrical", name: "Датчик ABS передній", brand: "Pivden Parts", price: 890,
+		fits: hyundaiKia, oem: []string{"95670-F2000"},
+		specs:       []spec{{"Вісь", "передня"}},
+		description: "Датчик швидкості колеса.", imageLabel: "ABS sensor"},
 }

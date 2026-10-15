@@ -50,7 +50,8 @@ func run() error {
 	}
 	log.Info("catalogue seeded",
 		slog.Int("categories", st.Categories),
+		slog.Int("vehicles", st.Vehicles),
 		slog.Int("products", st.Products),
-		slog.Int("variants", st.Variants))
+		slog.Int("fitments", st.Fitments))
 	return nil
 }

@@ -8,7 +8,7 @@ import (
 )
 
 // Callback data is what an inline button sends back when pressed: a short
-// action code and its numeric arguments, joined by colons, e.g. "a:12:57".
+// action code and its numeric arguments, joined by colons, e.g. "p:12".
 //
 // Telegram caps it at 64 bytes and stores it on the user's phone, so it is
 // treated as untrusted input: it names what was pressed, never a price or a
@@ -21,15 +21,17 @@ const (
 	actCategory   action = "c"    // c:<category>:<page> edit into a product page
 	actCategoryN  action = "cn"   // cn:<category> send a product page as a new message
 	actProduct    action = "p"    // p:<product> send a product card
-	actPickSize   action = "b"    // b:<product> swap the card's buttons for sizes
-	actCardMenu   action = "k"    // k:<product> restore the card's buttons
-	actAdd        action = "a"    // a:<product>:<variant> add a size to the cart
-	actSimilar    action = "s"    // s:<product> send similar products
+	actAdd        action = "a"    // a:<product> add one unit to the cart
+	actAnalogues  action = "s"    // s:<product> send interchangeable parts
 	actCart       action = "cart" // send the cart as a new message
-	actInc        action = "ci"   // ci:<variant> one more unit
-	actDec        action = "cd"   // cd:<variant> one unit less
-	actDel        action = "cr"   // cr:<variant> remove the line
+	actInc        action = "ci"   // ci:<product> one more unit
+	actDec        action = "cd"   // cd:<product> one unit less
+	actDel        action = "cr"   // cr:<product> remove the line
 	actClear      action = "cx"   // empty the cart
+	actMakes      action = "gk"   // edit into the make menu
+	actMake       action = "gm"   // gm:<vehicle> edit into the vehicles of that vehicle's make
+	actSetCar     action = "gs"   // gs:<vehicle> choose the car
+	actForgetCar  action = "gx"   // forget the car
 	actNoop       action = "x"    // a label that only looks like a button
 )
 
@@ -37,8 +39,8 @@ const (
 // handler can index the arguments without guarding against short input.
 var arity = map[action]int{
 	actCategories: 0, actCategory: 2, actCategoryN: 1, actProduct: 1,
-	actPickSize: 1, actCardMenu: 1, actAdd: 2, actSimilar: 1,
-	actCart: 0, actInc: 1, actDec: 1, actDel: 1, actClear: 0, actNoop: 0,
+	actAdd: 1, actAnalogues: 1, actCart: 0, actInc: 1, actDec: 1, actDel: 1,
+	actClear: 0, actMakes: 0, actMake: 1, actSetCar: 1, actForgetCar: 0, actNoop: 0,
 }
 
 // maxCallbackData is Telegram's limit on callback_data, in bytes.

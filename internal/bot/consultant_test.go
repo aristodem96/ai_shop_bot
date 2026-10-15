@@ -40,25 +40,25 @@ func (f fakeLimiter) Allow(context.Context, int64) (bool, time.Duration, error) 
 	return f.allow, 90 * time.Second, f.err
 }
 
-func withConsultant(c *fakeConsultant, l Limiter) (*Bot, *fakeTelegram) {
-	b, tg, _ := newTestBot()
+func withConsultant(c *fakeConsultant, l Limiter) (testBot, *fakeTelegram) {
+	b := newTestBot()
 	b.UseConsultant(c, l)
-	return b, tg
+	return b, b.tg
 }
 
 func TestConsultantAnswerWithCards(t *testing.T) {
 	c := &fakeConsultant{reply: &agent.Reply{
-		Text:       "Ось <пуховик> & ще дещо",
-		ProductIDs: []int64{jacketID, 404}, // 404 left the catalogue meanwhile
+		Text:       "Ось <колодки> & ще дещо",
+		ProductIDs: []int64{padsID, 404}, // 404 left the catalogue meanwhile
 	}}
 	b, tg := withConsultant(c, fakeLimiter{allow: true})
 
-	b.Handle(context.Background(), text("тепла куртка"))
+	b.Handle(context.Background(), text("колодки на октавію"))
 
-	assert.Equal(t, []string{"тепла куртка"}, c.asked)
+	assert.Equal(t, []string{"колодки на октавію"}, c.asked)
 	msg := tg.last("sendMessage")
-	assert.Equal(t, "Ось &lt;пуховик&gt; &amp; ще дещо", msg.text, "model output is escaped, never trusted as HTML")
-	assert.Equal(t, []string{encode(actProduct, jacketID)}, callbacks(msg.markup),
+	assert.Equal(t, "Ось &lt;колодки&gt; &amp; ще дещо", msg.text, "model output is escaped, never trusted as HTML")
+	assert.Equal(t, []string{encode(actProduct, padsID)}, callbacks(msg.markup),
 		"a card per product that still exists")
 	assert.Contains(t, tg.methods(), "sendChatAction", "the buyer sees typing while the model works")
 }
@@ -67,7 +67,7 @@ func TestConsultantCartButtonAfterAdding(t *testing.T) {
 	c := &fakeConsultant{reply: &agent.Reply{Text: "Додав.", CartChanged: true}}
 	b, tg := withConsultant(c, fakeLimiter{allow: true})
 
-	b.Handle(context.Background(), text("додай M"))
+	b.Handle(context.Background(), text("додай у кошик"))
 	assert.Contains(t, callbacks(tg.last("sendMessage").markup), encode(actCart))
 }
 
@@ -85,7 +85,7 @@ func TestConsultantFailsClosedWithoutLimiter(t *testing.T) {
 	c := &fakeConsultant{}
 	b, tg := withConsultant(c, fakeLimiter{err: errors.New("redis: connection refused")})
 
-	b.Handle(context.Background(), text("куртка"))
+	b.Handle(context.Background(), text("колодки"))
 	assert.Empty(t, c.asked)
 	assert.Equal(t, msgConsultantDown, tg.last("sendMessage").text)
 }
@@ -94,7 +94,7 @@ func TestConsultantProviderOutage(t *testing.T) {
 	c := &fakeConsultant{err: llm.ErrUnavailable}
 	b, tg := withConsultant(c, fakeLimiter{allow: true})
 
-	b.Handle(context.Background(), text("куртка"))
+	b.Handle(context.Background(), text("колодки"))
 	assert.Equal(t, msgConsultantDown, tg.last("sendMessage").text)
 }
 
@@ -126,11 +126,11 @@ func TestNewConversation(t *testing.T) {
 }
 
 func TestWithoutConsultantFreeTextShowsCatalogue(t *testing.T) {
-	b, tg, _ := newTestBot()
-	b.Handle(context.Background(), text("тепла куртка"))
+	b := newTestBot()
+	b.Handle(context.Background(), text("колодки на октавію"))
 
-	assert.Equal(t, msgFreeTextSoon, tg.calls[0].text)
-	assert.False(t, slices.Contains(tg.methods(), "sendChatAction"))
+	assert.Equal(t, msgFreeTextSoon, b.tg.calls[0].text)
+	assert.False(t, slices.Contains(b.tg.methods(), "sendChatAction"))
 }
 
 func TestConsultantSmallTalkHasNoKeyboard(t *testing.T) {
@@ -144,9 +144,9 @@ func TestConsultantSmallTalkHasNoKeyboard(t *testing.T) {
 }
 
 func TestConsultantCardsWithoutText(t *testing.T) {
-	c := &fakeConsultant{reply: &agent.Reply{Text: "  ", ProductIDs: []int64{jacketID}}}
+	c := &fakeConsultant{reply: &agent.Reply{Text: "  ", ProductIDs: []int64{padsID}}}
 	b, tg := withConsultant(c, fakeLimiter{allow: true})
 
-	b.Handle(context.Background(), text("куртка"))
+	b.Handle(context.Background(), text("колодки"))
 	assert.Equal(t, msgHereYouGo, tg.last("sendMessage").text, "Telegram rejects an empty message")
 }

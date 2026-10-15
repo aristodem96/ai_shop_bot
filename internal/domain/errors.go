@@ -15,6 +15,4 @@ var (
 	ErrQtyLimit = errors.New("quantity limit reached")
 	// ErrCartFull means the cart already has MaxCartLines distinct lines.
 	ErrCartFull = errors.New("cart is full")
-	// ErrNoSuchSize means the product does not come in the requested size.
-	ErrNoSuchSize = errors.New("no such size")
 )

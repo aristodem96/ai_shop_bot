@@ -27,8 +27,8 @@ func TestMoneyString(t *testing.T) {
 
 func TestCartTotals(t *testing.T) {
 	c := Cart{Lines: []CartLine{
-		{VariantID: 1, Price: UAH(1000), Qty: 2, Stock: 5},
-		{VariantID: 2, Price: UAH(399), Qty: 1, Stock: 0},
+		{ProductID: 1, Price: UAH(1000), Qty: 2, Stock: 5},
+		{ProductID: 2, Price: UAH(399), Qty: 1, Stock: 0},
 	}}
 
 	assert.Equal(t, UAH(2399), c.Total())

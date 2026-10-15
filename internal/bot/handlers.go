@@ -11,17 +11,45 @@ import (
 )
 
 // Navigation that starts from a text message (the menu, a product page, the
-// cart) edits that message in place, so the chat does not fill up with stale
-// menus. A product card is a photo and cannot become a text message, so
-// leaving it -- to a page, to similar products -- sends a new one.
+// cart, the car picker) edits that message in place, so the chat does not fill
+// up with stale menus. A product card is a photo and cannot become a text
+// message, so leaving it -- to a page, to analogues -- sends a new one.
 
-func (b *Bot) sendCategories(ctx context.Context, chat int64) {
+// car returns the buyer's car, or nil. A failure to read it degrades to "no
+// car" -- the whole catalogue instead of a filtered one -- rather than to an
+// error, since browsing still works without it.
+func (b *Bot) car(ctx context.Context, user int64) *domain.Vehicle {
+	v, err := b.garage.Get(ctx, user)
+	if err != nil {
+		b.log.WarnContext(ctx, "could not read the buyer's car", slog.Int64("user_id", user), slog.Any("error", err))
+		return nil
+	}
+	return v
+}
+
+// start follows the greeting: a buyer without a car is asked for it first,
+// because nearly every part depends on it.
+func (b *Bot) start(ctx context.Context, chat, user int64) {
+	if b.car(ctx, user) != nil {
+		b.sendCategories(ctx, chat, user)
+		return
+	}
+	makes, err := b.garage.Makes(ctx)
+	if err != nil {
+		b.fail(ctx, chat, "list makes", err)
+		return
+	}
+	text, kb := makesView(makes, nil)
+	b.send(ctx, chat, msgPickCarFirst+"\n\n"+text, kb)
+}
+
+func (b *Bot) sendCategories(ctx context.Context, chat, user int64) {
 	cats, err := b.catalog.Categories(ctx)
 	if err != nil {
 		b.fail(ctx, chat, "list categories", err)
 		return
 	}
-	text, kb := categoriesView(cats)
+	text, kb := categoriesView(cats, b.car(ctx, user))
 	b.send(ctx, chat, text, kb)
 }
 
@@ -30,12 +58,12 @@ func (b *Bot) editCategories(ctx context.Context, cc callbackCtx) error {
 	if err != nil {
 		return err
 	}
-	text, kb := categoriesView(cats)
+	text, kb := categoriesView(cats, b.car(ctx, cc.user))
 	return b.editText(ctx, cc, text, kb)
 }
 
 func (b *Bot) editProductPage(ctx context.Context, cc callbackCtx, categoryID int64, page int) error {
-	pg, err := b.catalog.CategoryPage(ctx, categoryID, page)
+	pg, err := b.catalog.CategoryPage(ctx, categoryID, b.car(ctx, cc.user), page)
 	if err != nil {
 		return err
 	}
@@ -43,74 +71,60 @@ func (b *Bot) editProductPage(ctx context.Context, cc callbackCtx, categoryID in
 	return b.editText(ctx, cc, text, kb)
 }
 
-func (b *Bot) sendProductPage(ctx context.Context, chat, categoryID int64) error {
-	pg, err := b.catalog.CategoryPage(ctx, categoryID, 0)
+func (b *Bot) sendProductPage(ctx context.Context, cc callbackCtx, categoryID int64) error {
+	pg, err := b.catalog.CategoryPage(ctx, categoryID, b.car(ctx, cc.user), 0)
 	if err != nil {
 		return err
 	}
 	text, kb := productPageView(pg)
-	return b.tg.SendMessage(ctx, chat, text, kb)
+	return b.tg.SendMessage(ctx, cc.chat, text, kb)
 }
 
 // sendProduct sends a product card. The photo is fetched by Telegram from a
 // URL; if that fails -- the image host is down, the URL went stale -- the card
 // still goes out as text. A missing photo should cost the picture, not the
 // sale.
-func (b *Bot) sendProduct(ctx context.Context, chat, productID int64) error {
+func (b *Bot) sendProduct(ctx context.Context, cc callbackCtx, productID int64) error {
 	p, err := b.catalog.Product(ctx, productID)
 	if err != nil {
 		return err
 	}
-	caption, kb := productCaption(p), productKeyboard(p)
+	caption, kb := productCaption(p, b.car(ctx, cc.user)), productKeyboard(p)
 
-	err = b.tg.SendPhoto(ctx, chat, p.ImageURL, caption, kb)
+	err = b.tg.SendPhoto(ctx, cc.chat, p.ImageURL, caption, kb)
 	if err == nil || ctx.Err() != nil {
 		return err
 	}
 	b.log.WarnContext(ctx, "could not send product photo, falling back to text",
 		slog.Int64("product_id", p.ID), slog.Any("error", err))
-	return b.tg.SendMessage(ctx, chat, caption, kb)
+	return b.tg.SendMessage(ctx, cc.chat, caption, kb)
 }
 
-// editProductButtons re-reads the product before redrawing its buttons, so
-// the size picker reflects stock now, not when the card was sent.
-func (b *Bot) editProductButtons(ctx context.Context, cc callbackCtx, productID int64,
-	keyboard func(*domain.Product) *telegram.InlineKeyboard,
-) error {
-	p, err := b.catalog.Product(ctx, productID)
+// addToCart adds one unit. A part that does not fit the buyer's car is still
+// added -- they may be buying for another car -- but the toast says so.
+func (b *Bot) addToCart(ctx context.Context, cc callbackCtx, productID int64) (string, error) {
+	cart, err := b.cart.Add(ctx, cc.user, productID)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return b.editMarkup(ctx, cc, keyboard(p))
-}
+	line, _ := cart.Line(productID)
+	toast := fmt.Sprintf("✅ Додано. У кошику: %d шт.", line.Qty)
 
-func (b *Bot) addToCart(ctx context.Context, cc callbackCtx, productID, variantID int64) (string, error) {
-	cart, err := b.cart.Add(ctx, cc.user, variantID)
-	if err != nil {
-		// The picker may be showing a size that has just sold out; redraw it
-		// from fresh stock so the next tap cannot hit the same wall.
-		if errors.Is(err, domain.ErrOutOfStock) {
-			if rerr := b.editProductButtons(ctx, cc, productID, sizeKeyboard); rerr != nil {
-				b.log.WarnContext(ctx, "could not refresh size picker", slog.Any("error", rerr))
-			}
+	if car := b.car(ctx, cc.user); car != nil {
+		if p, err := b.catalog.Product(ctx, productID); err == nil && !p.FitsVehicle(car.ID) {
+			toast += "\n⚠️ Ця деталь не підходить до вашого " + car.Short()
 		}
-		return "", err
 	}
-
-	line, _ := cart.Line(variantID)
-	if err := b.editProductButtons(ctx, cc, productID, productKeyboard); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("✅ Додано розмір %s. У кошику: %d шт.", line.Size, cart.Items()), nil
+	return toast, nil
 }
 
-func (b *Bot) sendSimilar(ctx context.Context, chat, productID int64) error {
-	p, similar, err := b.catalog.Similar(ctx, productID)
+func (b *Bot) sendAnalogues(ctx context.Context, cc callbackCtx, productID int64) error {
+	p, analogues, err := b.catalog.Analogues(ctx, productID, b.car(ctx, cc.user))
 	if err != nil {
 		return err
 	}
-	text, kb := similarView(p, similar)
-	return b.tg.SendMessage(ctx, chat, text, kb)
+	text, kb := analoguesView(p, analogues)
+	return b.tg.SendMessage(ctx, cc.chat, text, kb)
 }
 
 func (b *Bot) sendCart(ctx context.Context, chat, user int64) {
@@ -133,6 +147,60 @@ func (b *Bot) changeCart(ctx context.Context, cc callbackCtx, change func() (*do
 	return b.editText(ctx, cc, text, kb)
 }
 
+// --- the buyer's car ---------------------------------------------------------
+
+func (b *Bot) sendCar(ctx context.Context, chat, user int64) {
+	if car := b.car(ctx, user); car != nil {
+		text, kb := carSavedView(car)
+		b.send(ctx, chat, text, kb)
+		return
+	}
+	makes, err := b.garage.Makes(ctx)
+	if err != nil {
+		b.fail(ctx, chat, "list makes", err)
+		return
+	}
+	text, kb := makesView(makes, nil)
+	b.send(ctx, chat, text, kb)
+}
+
+func (b *Bot) editMakes(ctx context.Context, cc callbackCtx) error {
+	makes, err := b.garage.Makes(ctx)
+	if err != nil {
+		return err
+	}
+	text, kb := makesView(makes, b.car(ctx, cc.user))
+	return b.editText(ctx, cc, text, kb)
+}
+
+func (b *Bot) editVehicles(ctx context.Context, cc callbackCtx, vehicleID int64) error {
+	vehicles, err := b.garage.SameMake(ctx, vehicleID)
+	if err != nil {
+		return err
+	}
+	text, kb := vehiclesView(vehicles)
+	return b.editText(ctx, cc, text, kb)
+}
+
+func (b *Bot) setCar(ctx context.Context, cc callbackCtx, vehicleID int64) error {
+	car, err := b.garage.Set(ctx, cc.user, vehicleID)
+	if err != nil {
+		return err
+	}
+	text, kb := carSavedView(car)
+	return b.editText(ctx, cc, text, kb)
+}
+
+func (b *Bot) forgetCar(ctx context.Context, cc callbackCtx) error {
+	if err := b.garage.Clear(ctx, cc.user); err != nil {
+		return err
+	}
+	text, kb := carForgottenView()
+	return b.editText(ctx, cc, text, kb)
+}
+
+// --- plumbing ----------------------------------------------------------------
+
 // send is for replies whose failure the user cannot be told about anyway: if
 // Telegram refuses a message, a second message saying so would be refused too.
 func (b *Bot) send(ctx context.Context, chat int64, html string, markup telegram.ReplyMarkup) {
@@ -153,13 +221,6 @@ func (b *Bot) editText(ctx context.Context, cc callbackCtx, html string, kb *tel
 		return b.tg.SendMessage(ctx, cc.chat, html, kb)
 	}
 	return ignoreNotModified(b.tg.EditMessageText(ctx, cc.chat, cc.msg, html, kb))
-}
-
-func (b *Bot) editMarkup(ctx context.Context, cc callbackCtx, kb *telegram.InlineKeyboard) error {
-	if cc.msg == 0 {
-		return nil
-	}
-	return ignoreNotModified(b.tg.EditMessageReplyMarkup(ctx, cc.chat, cc.msg, kb))
 }
 
 // ignoreNotModified treats "nothing changed" as success: a double tap on "➕"

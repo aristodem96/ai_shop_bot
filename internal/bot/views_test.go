@@ -11,26 +11,35 @@ import (
 
 func TestProductCaption(t *testing.T) {
 	p := &domain.Product{
-		Name: "Tee <3", Brand: "Urban Fox", Color: "white", Season: "summer",
-		Price: domain.UAH(399), TotalStock: 4,
-		Variants: []domain.Variant{
-			{Size: "S", Stock: 0},
-			{Size: "M", Stock: 1},
-			{Size: "L", Stock: 3},
-		},
+		Name: "Лампа <H7>", Brand: "Iskra", SKU: "ELC-003", Price: domain.UAH(290), Stock: 2,
+		Specs:     []domain.Spec{{Name: "Цоколь", Value: "H7"}},
+		Universal: true,
 	}
-	got := productCaption(p)
+	got := productCaption(p, nil)
 
-	assert.Contains(t, got, "<b>Tee &lt;3</b>", "catalogue text is escaped for HTML")
-	assert.Contains(t, got, "білий · літо")
-	assert.Contains(t, got, "Розміри: <s>S</s> · M (1 шт.) · L")
+	assert.Contains(t, got, "<b>Лампа &lt;H7&gt;</b>", "catalogue text is escaped for HTML")
+	assert.Contains(t, got, "Iskra · арт. ELC-003")
+	assert.Contains(t, got, "останні 2 шт.")
+	assert.Contains(t, got, "Цоколь: H7")
+	assert.Contains(t, got, "Універсальний товар")
+}
+
+func TestProductCaptionFit(t *testing.T) {
+	p := &domain.Product{Name: "Колодки", OEMNumbers: []string{"5Q0698151"}, Stock: 9,
+		Fits: []domain.Vehicle{octavia, {ID: 1, Make: "VW", Model: "Golf", Engine: "1.6"},
+			{ID: 2, Make: "VW", Model: "Passat", Engine: "2.0"}, {ID: 3, Make: "Skoda", Model: "Superb", Engine: "2.0"},
+			{ID: 4, Make: "Seat", Model: "Leon", Engine: "1.4"}}}
+
+	assert.Contains(t, productCaption(p, &octavia), "✅ Підходить до вашого Skoda Octavia A7 1.4 TSI")
+	assert.Contains(t, productCaption(p, &lanos), "⚠️ Не підходить до вашого Daewoo Lanos 1.5")
+	assert.Contains(t, productCaption(p, nil), "та ще 1", "without a car, a short list of fits")
+	assert.Contains(t, productCaption(p, nil), "OEM: <code>5Q0698151</code>")
 }
 
 func TestProductCaptionSoldOut(t *testing.T) {
-	p := &domain.Product{Name: "Belt", Price: domain.UAH(599), Variants: []domain.Variant{{Size: "ONE"}}}
-	assert.Contains(t, productCaption(p), "Немає в наявності")
-	assert.NotContains(t, callbacks(productKeyboard(p)), encode(actPickSize, 0),
-		"a sold-out card has no add button")
+	p := &domain.Product{ID: 9, Name: "Колодки Lanos", Price: domain.UAH(450)}
+	assert.Contains(t, productCaption(p, nil), "немає в наявності")
+	assert.NotContains(t, callbacks(productKeyboard(p)), encode(actAdd, 9), "a sold-out card has no add button")
 }
 
 func TestProductPageNavigation(t *testing.T) {
@@ -46,16 +55,23 @@ func TestProductPageNavigation(t *testing.T) {
 	assert.NotContains(t, callbacks(kb), encode(actCategory, 3, -1), "no back arrow on the first page")
 }
 
+func TestProductPageForMyCar(t *testing.T) {
+	text, _ := productPageView(&service.ProductPage{Category: domain.Category{Title: "Фільтри"}, Vehicle: &lanos, Pages: 1})
+	assert.Contains(t, text, "Daewoo Lanos 1.5")
+	assert.Contains(t, text, "Для вашого авто в цій категорії поки нічого немає.")
+}
+
 func TestCartViewFlagsShortLines(t *testing.T) {
 	c := &domain.Cart{Lines: []domain.CartLine{
-		{VariantID: 1, ProductName: "Худі", Size: "M", Price: domain.UAH(1199), Qty: 3, Stock: 1},
-		{VariantID: 2, ProductName: "Шапка", Size: "ONE", Price: domain.UAH(399), Qty: 1, Stock: 0},
+		{ProductID: 1, ProductName: "Свічка", Brand: "Iskra", Price: domain.UAH(260), Qty: 4, Stock: 1},
+		{ProductID: 2, ProductName: "Фільтр", Brand: "FiltroMax", Price: domain.UAH(290), Qty: 1, Stock: 0},
 	}}
 	text, kb := cartView(c)
 
+	assert.Contains(t, text, "Свічка (Iskra)")
 	assert.Contains(t, text, "залишилось лише 1 шт.")
 	assert.Contains(t, text, "більше немає в наявності")
-	assert.Contains(t, text, "(4 шт.)")
+	assert.Contains(t, text, "(5 шт.)")
 	assert.Contains(t, callbacks(kb), encode(actDec, 1))
 	assert.Contains(t, callbacks(kb), encode(actClear))
 }

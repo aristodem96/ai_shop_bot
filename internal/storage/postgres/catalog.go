@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -14,7 +15,7 @@ import (
 
 var _ service.CatalogRepository = (*CatalogRepository)(nil)
 
-// CatalogRepository reads categories, products and their sizes.
+// CatalogRepository reads categories and products.
 type CatalogRepository struct {
 	pool *pgxpool.Pool
 }
@@ -56,29 +57,35 @@ func (r *CatalogRepository) Category(ctx context.Context, id int64) (*domain.Cat
 	return &c, nil
 }
 
-// productColumns and the stock lateral join are shared by every product
-// query, so scanProduct reads them all the same way. The stock sum is a
-// lateral subquery rather than a GROUP BY so that each query can add its own
-// ORDER BY and WHERE on it without repeating the aggregate.
+// productColumns is shared by every product query, so scanProduct reads them
+// all the same way.
 const productColumns = `
 	p.id, p.category_id, p.sku, p.name, p.brand, p.description,
-	p.color, p.season, p.gender, p.styles, p.price, p.image_url, s.stock`
+	p.oem_numbers, p.specs, p.universal, p.price, p.stock, p.image_url`
 
-const stockJoin = `
-	CROSS JOIN LATERAL (
-		SELECT coalesce(sum(v.stock), 0)::int AS stock
-		FROM product_variants v WHERE v.product_id = p.id
-	) s`
+// fitsVehicle is the condition "p fits the vehicle in placeholder ph": a
+// universal part, or one with a fitment row for it. Zero means any vehicle.
+func fitsVehicle(ph string) string {
+	return `(` + ph + ` = 0 OR p.universal OR EXISTS (
+		SELECT 1 FROM product_fitments f WHERE f.product_id = p.id AND f.vehicle_id = ` + ph + `))`
+}
 
 func scanProduct(row pgx.Row) (domain.Product, error) {
 	var (
 		p     domain.Product
 		price int64
+		specs []byte
 	)
 	err := row.Scan(&p.ID, &p.CategoryID, &p.SKU, &p.Name, &p.Brand, &p.Description,
-		&p.Color, &p.Season, &p.Gender, &p.Styles, &price, &p.ImageURL, &p.TotalStock)
+		&p.OEMNumbers, &specs, &p.Universal, &price, &p.Stock, &p.ImageURL)
+	if err != nil {
+		return p, err
+	}
 	p.Price = domain.Money(price)
-	return p, err
+	if err := json.Unmarshal(specs, &p.Specs); err != nil {
+		return p, fmt.Errorf("decode specs of product %d: %w", p.ID, err)
+	}
+	return p, nil
 }
 
 func collectProducts(rows pgx.Rows) ([]domain.Product, error) {
@@ -88,24 +95,25 @@ func collectProducts(rows pgx.Rows) ([]domain.Product, error) {
 }
 
 // ProductsByCategory returns one page of a category, in-stock products first
-// and cheapest first within that. A sold-out jacket at the top of the list is
-// a dead end; at the bottom it still tells the buyer the model exists.
-func (r *CatalogRepository) ProductsByCategory(ctx context.Context, categoryID int64, limit, offset int) ([]domain.Product, int, error) {
+// and cheapest first within that. A sold-out part at the top of the list is a
+// dead end; at the bottom it still tells the buyer the part exists.
+func (r *CatalogRepository) ProductsByCategory(ctx context.Context, categoryID, vehicleID int64, limit, offset int) ([]domain.Product, int, error) {
 	var total int
-	err := r.pool.QueryRow(ctx,
-		`SELECT count(*) FROM products WHERE category_id = $1 AND is_active`, categoryID,
+	err := r.pool.QueryRow(ctx, `
+		SELECT count(*) FROM products p
+		WHERE p.category_id = $1 AND p.is_active AND `+fitsVehicle("$2"),
+		categoryID, vehicleID,
 	).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("postgres: count products of category %d: %w", categoryID, err)
 	}
 
 	rows, err := r.pool.Query(ctx, `
-		SELECT `+productColumns+`
-		FROM products p`+stockJoin+`
-		WHERE p.category_id = $1 AND p.is_active
-		ORDER BY (s.stock > 0) DESC, p.price, p.id
-		LIMIT $2 OFFSET $3`,
-		categoryID, limit, offset)
+		SELECT `+productColumns+` FROM products p
+		WHERE p.category_id = $1 AND p.is_active AND `+fitsVehicle("$2")+`
+		ORDER BY (p.stock > 0) DESC, p.price, p.id
+		LIMIT $3 OFFSET $4`,
+		categoryID, vehicleID, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("postgres: list products of category %d: %w", categoryID, err)
 	}
@@ -116,11 +124,10 @@ func (r *CatalogRepository) ProductsByCategory(ctx context.Context, categoryID i
 	return products, total, nil
 }
 
-// Product returns an active product with its sizes.
+// Product returns an active product with the vehicles it fits.
 func (r *CatalogRepository) Product(ctx context.Context, id int64) (*domain.Product, error) {
 	p, err := scanProduct(r.pool.QueryRow(ctx, `
-		SELECT `+productColumns+`
-		FROM products p`+stockJoin+`
+		SELECT `+productColumns+` FROM products p
 		WHERE p.id = $1 AND p.is_active`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrNotFound
@@ -130,63 +137,46 @@ func (r *CatalogRepository) Product(ctx context.Context, id int64) (*domain.Prod
 	}
 
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, product_id, size, stock
-		FROM product_variants
-		WHERE product_id = $1
-		ORDER BY position, id`, id)
+		SELECT `+vehicleColumns+` FROM vehicles v
+		JOIN product_fitments f ON f.vehicle_id = v.id
+		WHERE f.product_id = $1
+		ORDER BY v.make, v.model, v.year_from, v.engine`, id)
 	if err != nil {
-		return nil, fmt.Errorf("postgres: list variants of product %d: %w", id, err)
+		return nil, fmt.Errorf("postgres: list fitments of product %d: %w", id, err)
 	}
-	p.Variants, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.Variant, error) {
-		var v domain.Variant
-		err := row.Scan(&v.ID, &v.ProductID, &v.Size, &v.Stock)
-		return v, err
-	})
+	p.Fits, err = collectVehicles(rows)
 	if err != nil {
-		return nil, fmt.Errorf("postgres: scan variants: %w", err)
+		return nil, fmt.Errorf("postgres: scan fitments: %w", err)
 	}
 	return &p, nil
 }
 
-// Similar ranks in-stock products of the same category by how many style tags
-// they share with p, then by how close their price is. No model is involved:
-// "similar" from a button is a deterministic query, which is cheaper, instant
-// and gives the same answer twice.
-func (r *CatalogRepository) Similar(ctx context.Context, p *domain.Product, limit int) ([]domain.Product, error) {
+// Analogues ranks in-stock interchangeable parts: those sharing an OEM number
+// with p first -- the same part from another brand -- then the same kind of
+// part for any of the same vehicles, closest in price first. No model is
+// involved: "analogues" from a button is a deterministic query, which is
+// cheaper, instant and gives the same answer twice.
+func (r *CatalogRepository) Analogues(ctx context.Context, p *domain.Product, vehicleID int64, limit int) ([]domain.Product, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT `+productColumns+`
-		FROM products p`+stockJoin+`
-		WHERE p.category_id = $1 AND p.id <> $2 AND p.is_active AND s.stock > 0
-		ORDER BY
-			cardinality(ARRAY(SELECT unnest(p.styles) INTERSECT SELECT unnest($3::text[]))) DESC,
-			abs(p.price - $4),
-			p.id
-		LIMIT $5`,
-		p.CategoryID, p.ID, p.Styles, int64(p.Price), limit)
+		SELECT `+productColumns+` FROM products p
+		WHERE p.id <> $1 AND p.is_active AND p.stock > 0 AND `+fitsVehicle("$5")+` AND (
+			p.oem_numbers && $2::text[]
+			OR (p.category_id = $3 AND (
+				($6 AND p.universal)
+				OR EXISTS (
+					SELECT 1 FROM product_fitments a
+					JOIN product_fitments b ON b.vehicle_id = a.vehicle_id
+					WHERE a.product_id = p.id AND b.product_id = $1)))
+		)
+		ORDER BY (p.oem_numbers && $2::text[]) DESC, abs(p.price - $4), p.id
+		LIMIT $7`,
+		p.ID, p.OEMNumbers, p.CategoryID, int64(p.Price), vehicleID, p.Universal, limit)
 	if err != nil {
-		return nil, fmt.Errorf("postgres: similar to product %d: %w", p.ID, err)
+		return nil, fmt.Errorf("postgres: analogues of product %d: %w", p.ID, err)
 	}
 	products, err := collectProducts(rows)
 	if err != nil {
-		return nil, fmt.Errorf("postgres: scan similar products: %w", err)
+		return nil, fmt.Errorf("postgres: scan analogues: %w", err)
 	}
 	return products, nil
-}
-
-// Variant returns one size of an active product.
-func (r *CatalogRepository) Variant(ctx context.Context, id int64) (*domain.Variant, error) {
-	var v domain.Variant
-	err := r.pool.QueryRow(ctx, `
-		SELECT v.id, v.product_id, v.size, v.stock
-		FROM product_variants v
-		JOIN products p ON p.id = v.product_id AND p.is_active
-		WHERE v.id = $1`, id,
-	).Scan(&v.ID, &v.ProductID, &v.Size, &v.Stock)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, domain.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("postgres: get variant %d: %w", id, err)
-	}
-	return &v, nil
 }

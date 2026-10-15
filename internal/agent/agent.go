@@ -1,6 +1,7 @@
-// Package agent is the shop's AI consultant: it turns a buyer's free text
-// into catalogue searches and cart actions through tools, and answers with
-// text plus the ids of products to show as cards.
+// Package agent is the shop's AI consultant: it turns a buyer's free text --
+// "front pads for a 2015 Octavia 1.4" -- into vehicle lookups, catalogue
+// searches and cart actions through tools, and answers with text plus the ids
+// of products to show as cards.
 //
 // The model never touches the database or the chat directly. It sees only
 // what the tools return, and everything it asks for passes through the same
@@ -30,7 +31,14 @@ type Catalog interface {
 
 // Cart is what the tools need from the cart.
 type Cart interface {
-	AddSize(ctx context.Context, userID, productID int64, size string) (*domain.Cart, error)
+	Add(ctx context.Context, userID, productID int64) (*domain.Cart, error)
+}
+
+// Garage is what the tools need to find vehicles and know the buyer's car.
+type Garage interface {
+	Find(ctx context.Context, q service.VehicleQuery) ([]domain.Vehicle, error)
+	Get(ctx context.Context, userID int64) (*domain.Vehicle, error)
+	Set(ctx context.Context, userID, vehicleID int64) (*domain.Vehicle, error)
 }
 
 // History stores conversations between turns.
@@ -65,8 +73,6 @@ type Reply struct {
 // Agent runs the conversation loop.
 type Agent struct {
 	llm     llm.Client
-	catalog Catalog
-	cart    Cart
 	history History
 	tools   *toolbox
 	cfg     Config
@@ -76,17 +82,15 @@ type Agent struct {
 // New builds an Agent. The categories are read once here, because they go
 // into a tool schema that must stay byte-identical between requests for the
 // provider's prompt cache to hit.
-func New(ctx context.Context, client llm.Client, catalog Catalog, cart Cart, history History, cfg Config, log *slog.Logger) (*Agent, error) {
+func New(ctx context.Context, client llm.Client, catalog Catalog, cart Cart, garage Garage, history History, cfg Config, log *slog.Logger) (*Agent, error) {
 	cats, err := catalog.Categories(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("agent: load categories: %w", err)
 	}
 	return &Agent{
 		llm:     client,
-		catalog: catalog,
-		cart:    cart,
 		history: history,
-		tools:   newToolbox(catalog, cart, cats),
+		tools:   newToolbox(catalog, cart, garage, cats),
 		cfg:     cfg,
 		log:     log,
 	}, nil
@@ -96,7 +100,7 @@ func New(ctx context.Context, client llm.Client, catalog Catalog, cart Cart, his
 // are shop wording, not model output.
 const (
 	replyStuck   = "Не вдалося підібрати відповідь. Спробуйте сформулювати інакше або скористайтеся каталогом."
-	replyRefusal = "Я можу допомогти лише з вибором одягу в нашому магазині. Що шукаєте?"
+	replyRefusal = "Я можу допомогти лише з підбором автозапчастин у нашому магазині. Що шукаєте?"
 )
 
 // Reply answers one buyer message.

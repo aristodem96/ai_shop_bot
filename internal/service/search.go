@@ -16,18 +16,16 @@ const (
 // SearchFilter is a structured catalogue query. Zero fields do not filter.
 type SearchFilter struct {
 	// Query is matched as word prefixes against name, brand and description.
-	Query    string
-	Category string // category slug
-	MinPrice domain.Money
-	MaxPrice domain.Money
-	// Size must be in stock when set.
-	Size          string
-	Colors        []string
-	ExcludeColors []string
-	Season        string
-	Gender        string
-	Styles        []string
-	Limit         int
+	Query string
+	// PartNumber matches an OEM number in any spelling ("1K0 698 151").
+	PartNumber string
+	Category   string // category slug
+	// VehicleID keeps only parts that fit the vehicle, universal ones included.
+	VehicleID int64
+	Brand     string
+	MinPrice  domain.Money
+	MaxPrice  domain.Money
+	Limit     int
 }
 
 // SearchResult is what a search found.
@@ -48,14 +46,15 @@ func (s *CatalogService) Search(ctx context.Context, f SearchFilter) (*SearchRes
 	case f.Limit > MaxSearchLimit:
 		f.Limit = MaxSearchLimit
 	}
+	f.PartNumber = domain.NormalizeOEM(f.PartNumber)
 
 	products, err := s.repo.Search(ctx, f)
 	if err != nil {
 		return nil, err
 	}
 	// Keywords are the least reliable part of a filter: a buyer's word may
-	// simply not appear in any description. Prices, sizes and colours are
-	// what the buyer actually asked for, so those are kept.
+	// simply not appear in any description. The car, the category and the
+	// budget are what the buyer actually asked for, so those are kept.
 	if len(products) == 0 && f.Query != "" {
 		f.Query = ""
 		products, err = s.repo.Search(ctx, f)

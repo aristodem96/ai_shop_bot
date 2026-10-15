@@ -20,11 +20,13 @@ import (
 
 // --- fakes -------------------------------------------------------------------
 
-var olivePuffer = domain.Product{
-	ID: 2, CategoryID: 1, Name: "Пуховик «Nord»", Brand: "Nord Line", Color: "olive",
-	Season: "winter", Gender: "unisex", Styles: []string{"casual"}, Price: domain.UAH(3499),
-	Description: "Теплий пуховик.", TotalStock: 4,
-	Variants: []domain.Variant{{ID: 21, Size: "M", Stock: 1}, {ID: 22, Size: "L", Stock: 3}, {ID: 23, Size: "XL"}},
+var octavia = domain.Vehicle{ID: 5, Make: "Skoda", Model: "Octavia A7", YearFrom: 2013, YearTo: 2020, Engine: "1.4 TSI", Fuel: "petrol"}
+
+var frontPads = domain.Product{
+	ID: 2, CategoryID: 1, SKU: "BRK-001", Name: "Колодки гальмівні передні", Brand: "AutoLine",
+	Price: domain.UAH(1450), Stock: 1, OEMNumbers: []string{"5Q0698151"},
+	Specs:       []domain.Spec{{Name: "Вісь", Value: "передня"}},
+	Description: "Органічні колодки.", Fits: []domain.Vehicle{octavia},
 }
 
 type fakeCatalog struct {
@@ -32,30 +34,64 @@ type fakeCatalog struct {
 }
 
 func (f *fakeCatalog) Categories(context.Context) ([]domain.Category, error) {
-	return []domain.Category{{ID: 1, Slug: "jackets", Title: "Куртки"}}, nil
+	return []domain.Category{{ID: 1, Slug: "brakes", Title: "Гальмівна система"}}, nil
 }
 
 func (f *fakeCatalog) Search(_ context.Context, sf service.SearchFilter) (*service.SearchResult, error) {
 	f.filters = append(f.filters, sf)
-	return &service.SearchResult{Products: []domain.Product{olivePuffer}}, nil
+	return &service.SearchResult{Products: []domain.Product{frontPads}}, nil
 }
 
 func (f *fakeCatalog) Product(_ context.Context, id int64) (*domain.Product, error) {
-	if id == olivePuffer.ID {
-		p := olivePuffer
+	if id == frontPads.ID {
+		p := frontPads
 		return &p, nil
 	}
 	return nil, domain.ErrNotFound
 }
 
-type fakeCart struct{ added []string }
+// fakeCart holds up to the product's stock.
+type fakeCart struct{ qty int }
 
-func (f *fakeCart) AddSize(_ context.Context, _, productID int64, size string) (*domain.Cart, error) {
-	if size == "XL" {
+func (f *fakeCart) Add(_ context.Context, _, productID int64) (*domain.Cart, error) {
+	if productID != frontPads.ID {
+		return nil, domain.ErrNotFound
+	}
+	if f.qty+1 > frontPads.Stock {
 		return nil, domain.ErrOutOfStock
 	}
-	f.added = append(f.added, size)
-	return &domain.Cart{Lines: []domain.CartLine{{Price: domain.UAH(3499), Qty: len(f.added), ProductID: productID}}}, nil
+	f.qty++
+	return &domain.Cart{Lines: []domain.CartLine{{ProductID: productID, Price: frontPads.Price, Qty: f.qty, Stock: frontPads.Stock}}}, nil
+}
+
+type fakeGarage struct {
+	saved   map[int64]int64
+	queries []service.VehicleQuery
+}
+
+func (f *fakeGarage) Find(_ context.Context, q service.VehicleQuery) ([]domain.Vehicle, error) {
+	f.queries = append(f.queries, q)
+	if q.Make == "" || strings.EqualFold(q.Make, octavia.Make) {
+		return []domain.Vehicle{octavia}, nil
+	}
+	return nil, nil
+}
+
+func (f *fakeGarage) Get(_ context.Context, user int64) (*domain.Vehicle, error) {
+	if _, ok := f.saved[user]; ok {
+		v := octavia
+		return &v, nil
+	}
+	return nil, nil
+}
+
+func (f *fakeGarage) Set(_ context.Context, user, vehicleID int64) (*domain.Vehicle, error) {
+	if vehicleID != octavia.ID {
+		return nil, domain.ErrNotFound
+	}
+	f.saved[user] = vehicleID
+	v := octavia
+	return &v, nil
 }
 
 type fakeHistory struct {
@@ -97,69 +133,112 @@ func (f *fakeHistory) Clear(_ context.Context, chat int64) error {
 
 const chat = int64(7)
 
-func newAgent(t *testing.T, model *llm.Fake) (*Agent, *fakeCatalog, *fakeCart, *fakeHistory) {
+type fixture struct {
+	agent   *Agent
+	catalog *fakeCatalog
+	cart    *fakeCart
+	garage  *fakeGarage
+	history *fakeHistory
+}
+
+func newAgent(t *testing.T, model *llm.Fake) fixture {
 	t.Helper()
-	catalog, cart, history := &fakeCatalog{}, &fakeCart{}, newFakeHistory()
-	a, err := New(context.Background(), model, catalog, cart, history,
-		Config{MaxSteps: 4, MaxHistory: 20, Timeout: 5 * time.Second},
+	f := fixture{catalog: &fakeCatalog{}, cart: &fakeCart{}, garage: &fakeGarage{saved: map[int64]int64{}}, history: newFakeHistory()}
+	a, err := New(context.Background(), model, f.catalog, f.cart, f.garage, f.history,
+		Config{MaxSteps: 5, MaxHistory: 30, Timeout: 5 * time.Second},
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.NoError(t, err)
-	return a, catalog, cart, history
+	f.agent = a
+	return f
+}
+
+// result returns the tool result the model received on request n.
+func result(model *llm.Fake, n int) llm.ToolResult {
+	msgs := model.Requests[n].Messages
+	return msgs[len(msgs)-1].ToolResults[0]
 }
 
 // --- dialogues ---------------------------------------------------------------
 
-func TestSearchShowAnswer(t *testing.T) {
+func TestFindCarSearchShowAnswer(t *testing.T) {
 	model := llm.NewFake(
-		llm.Call("c1", "search_products", map[string]any{
-			"category": "jackets", "season": "winter", "max_price_uah": 3500,
-			"size": "M", "exclude_colors": []string{"black"},
-		}),
-		llm.Call("c2", "show_products", map[string]any{"product_ids": []int64{2}}),
-		llm.Say("Ось теплий оливковий пуховик у розмірі M."),
+		llm.Call("c1", "find_vehicle", map[string]any{"make": "Skoda", "model": "Octavia", "year": 2015, "engine": "1.4"}),
+		llm.Call("c2", "search_parts", map[string]any{"vehicle_id": 5, "category": "brakes", "query": "колодк передн"}),
+		llm.Call("c3", "show_products", map[string]any{"product_ids": []int64{2}}),
+		llm.Say("Ось передні колодки на вашу Octavia 1.4 TSI."),
 	)
-	a, catalog, _, history := newAgent(t, model)
+	f := newAgent(t, model)
 
-	reply, err := a.Reply(context.Background(), chat, chat, "тепла куртка до 3500, розмір M, не чорна")
+	reply, err := f.agent.Reply(context.Background(), chat, chat, "передні колодки на октавію 2015 1.4")
 	require.NoError(t, err)
 
-	assert.Equal(t, "Ось теплий оливковий пуховик у розмірі M.", reply.Text)
+	assert.Equal(t, "Ось передні колодки на вашу Octavia 1.4 TSI.", reply.Text)
 	assert.Equal(t, []int64{2}, reply.ProductIDs)
 	assert.Zero(t, model.Remaining())
 
-	// The model's arguments became a typed filter, money in kopiyky.
-	require.Len(t, catalog.filters, 1)
-	f := catalog.filters[0]
-	assert.Equal(t, domain.UAH(3500), f.MaxPrice)
-	assert.Equal(t, []string{"black"}, f.ExcludeColors)
+	assert.Equal(t, service.VehicleQuery{Make: "Skoda", Model: "Octavia", Year: 2015, Engine: "1.4"}, f.garage.queries[0])
+	assert.Contains(t, result(model, 1).Content, `"label":"Skoda Octavia A7 1.4 TSI (2013–2020)"`)
 
-	// The model was shown the search result: ids, hryvnias and sizes in stock.
-	result := model.Requests[1].Messages[2].ToolResults[0]
-	assert.False(t, result.IsError)
-	assert.Contains(t, result.Content, `"id":2`)
-	assert.Contains(t, result.Content, `"price_uah":3499`)
-	assert.Contains(t, result.Content, `"sizes_in_stock":["M","L"]`, "a sold-out size is not offered")
-	assert.Contains(t, result.Content, `"low_stock":["M"]`)
+	require.Len(t, f.catalog.filters, 1)
+	assert.Equal(t, int64(5), f.catalog.filters[0].VehicleID, "the search is for the car that was found")
+	assert.Equal(t, "brakes", f.catalog.filters[0].Category)
 
-	// The whole exchange is remembered for the next message.
-	saved := history.msgs[chat]
-	require.Len(t, saved, 6)
-	assert.Equal(t, "тепла куртка до 3500, розмір M, не чорна", saved[0].Text)
-	assert.Equal(t, "Ось теплий оливковий пуховик у розмірі M.", saved[5].Text)
+	found := result(model, 2).Content
+	assert.Contains(t, found, `"id":2`)
+	assert.Contains(t, found, `"price_uah":1450`)
+	assert.Contains(t, found, `"stock":"last_units"`)
+	assert.Contains(t, found, `"oem_numbers":["5Q0698151"]`)
+
+	saved := f.history.msgs[chat]
+	require.Len(t, saved, 8)
+	assert.Equal(t, "передні колодки на октавію 2015 1.4", saved[0].Text)
+}
+
+func TestUnknownCarListsCoveredMakes(t *testing.T) {
+	model := llm.NewFake(
+		llm.Call("c1", "find_vehicle", map[string]any{"make": "Tesla", "model": "Model 3"}),
+		llm.Say("На жаль, на Tesla деталей немає."),
+	)
+	f := newAgent(t, model)
+
+	_, err := f.agent.Reply(context.Background(), chat, chat, "колодки на теслу")
+	require.NoError(t, err)
+	got := result(model, 1).Content
+	assert.Contains(t, got, `"vehicles":[]`)
+	assert.Contains(t, got, `"makes_covered":["Skoda"]`)
+}
+
+func TestSaveMyCarAndCheckFit(t *testing.T) {
+	model := llm.NewFake(
+		llm.Call("c1", "get_my_vehicle", map[string]any{}),
+		llm.Call("c2", "set_my_vehicle", map[string]any{"vehicle_id": 5}),
+		llm.Call("c3", "get_part", map[string]any{"product_id": 2}),
+		llm.Say("Так, підходить."),
+	)
+	f := newAgent(t, model)
+
+	_, err := f.agent.Reply(context.Background(), chat, chat, "у мене октавія 1.4, ці колодки підійдуть?")
+	require.NoError(t, err)
+
+	assert.Equal(t, `{"vehicle":null}`, result(model, 1).Content)
+	assert.Equal(t, int64(5), f.garage.saved[chat], "the car is saved for the catalogue too")
+	part := result(model, 3).Content
+	assert.Contains(t, part, `"fits_my_vehicle":true`, "fit comes from the fitment table, not the model")
+	assert.Contains(t, part, `"fits":["Skoda Octavia A7 1.4 TSI (2013–2020)"]`)
 }
 
 func TestPrefixStaysStableAcrossSteps(t *testing.T) {
 	model := llm.NewFake(
-		llm.Call("c1", "search_products", map[string]any{"category": "jackets"}),
-		llm.Say("Є пуховик."),
-		llm.Say("Так, він теплий."),
+		llm.Call("c1", "search_parts", map[string]any{"category": "brakes"}),
+		llm.Say("Є колодки."),
+		llm.Say("Так, вони для передньої осі."),
 	)
-	a, _, _, _ := newAgent(t, model)
+	f := newAgent(t, model)
 	ctx := context.Background()
 
-	_, err := a.Reply(ctx, chat, chat, "куртка")
+	_, err := f.agent.Reply(ctx, chat, chat, "колодки")
 	require.NoError(t, err)
-	_, err = a.Reply(ctx, chat, chat, "а він теплий?")
+	_, err = f.agent.Reply(ctx, chat, chat, "вони передні?")
 	require.NoError(t, err)
 
 	// System and tools are what the provider caches and what Claude binds
@@ -170,79 +249,88 @@ func TestPrefixStaysStableAcrossSteps(t *testing.T) {
 		assert.Equal(t, string(first), string(again))
 		assert.Equal(t, model.Requests[0].System, r.System)
 	}
-	// And the second buyer message is appended after the first exchange.
 	last := model.Requests[2].Messages
-	assert.Equal(t, "куртка", last[0].Text)
-	assert.Equal(t, "а він теплий?", last[len(last)-1].Text)
+	assert.Equal(t, "колодки", last[0].Text)
+	assert.Equal(t, "вони передні?", last[len(last)-1].Text)
 }
 
 func TestInventedProductIsNotShown(t *testing.T) {
 	model := llm.NewFake(
 		llm.Call("c1", "show_products", map[string]any{"product_ids": []int64{2, 999}}),
-		llm.Say("Ось пуховик."),
+		llm.Say("Ось колодки."),
 	)
-	a, _, _, _ := newAgent(t, model)
+	f := newAgent(t, model)
 
-	reply, err := a.Reply(context.Background(), chat, chat, "покажи щось")
+	reply, err := f.agent.Reply(context.Background(), chat, chat, "покажи щось")
 	require.NoError(t, err)
 
 	assert.Equal(t, []int64{2}, reply.ProductIDs, "only the real product becomes a card")
-	result := model.Requests[1].Messages[2].ToolResults[0]
-	assert.True(t, result.IsError)
-	assert.Contains(t, result.Content, "999", "the model is told which id was wrong")
+	res := result(model, 1)
+	assert.True(t, res.IsError)
+	assert.Contains(t, res.Content, "999", "the model is told which id was wrong")
 }
 
-func TestAddToCart(t *testing.T) {
+func TestAddToCartStopsAtStock(t *testing.T) {
 	model := llm.NewFake(
-		llm.Call("c1", "add_to_cart", map[string]any{"product_id": 2, "size": "XL"}),
-		llm.Call("c2", "add_to_cart", map[string]any{"product_id": 2, "size": "L"}),
-		llm.Say("XL немає, додав L."),
+		llm.Call("c1", "add_to_cart", map[string]any{"product_id": 2, "quantity": 2}),
+		llm.Say("Додав одну — більше немає."),
 	)
-	a, _, cart, _ := newAgent(t, model)
+	f := newAgent(t, model)
 
-	reply, err := a.Reply(context.Background(), chat, chat, "додай пуховик у XL")
+	reply, err := f.agent.Reply(context.Background(), chat, chat, "додай дві")
 	require.NoError(t, err)
 
 	assert.True(t, reply.CartChanged)
-	assert.Equal(t, []string{"L"}, cart.added)
-	refused := model.Requests[1].Messages[2].ToolResults[0]
-	assert.True(t, refused.IsError)
-	assert.Equal(t, "this size is out of stock", refused.Content)
+	assert.Equal(t, 1, f.cart.qty, "the last unit went in, the second did not")
+	assert.Contains(t, result(model, 1).Content, `"added":1,"cart_items":1`)
+}
+
+func TestAddToCartRejectsBulk(t *testing.T) {
+	model := llm.NewFake(
+		llm.Call("c1", "add_to_cart", map[string]any{"product_id": 2, "quantity": 50}),
+		llm.Say("Стільки не можна."),
+	)
+	f := newAgent(t, model)
+
+	reply, err := f.agent.Reply(context.Background(), chat, chat, "додай 50 штук")
+	require.NoError(t, err)
+	assert.False(t, reply.CartChanged)
+	assert.Zero(t, f.cart.qty)
+	assert.True(t, result(model, 1).IsError)
 }
 
 func TestBadToolInputIsReportedToTheModel(t *testing.T) {
 	model := llm.NewFake(
-		llm.Call("c1", "search_products", map[string]any{"categry": "jackets"}),
+		llm.Call("c1", "search_parts", map[string]any{"categry": "brakes"}),
 		llm.Call("c2", "drop_database", map[string]any{}),
 		llm.Say("Вибачте."),
 	)
-	a, catalog, _, _ := newAgent(t, model)
+	f := newAgent(t, model)
 
-	_, err := a.Reply(context.Background(), chat, chat, "куртка")
+	_, err := f.agent.Reply(context.Background(), chat, chat, "колодки")
 	require.NoError(t, err)
 
-	assert.Empty(t, catalog.filters, "a misspelled filter must not run as an unfiltered search")
-	typo := model.Requests[1].Messages[2].ToolResults[0]
+	assert.Empty(t, f.catalog.filters, "a misspelled filter must not run as an unfiltered search")
+	typo := result(model, 1)
 	assert.True(t, typo.IsError)
 	assert.Contains(t, typo.Content, "categry")
-	unknown := model.Requests[2].Messages[4].ToolResults[0]
-	assert.True(t, unknown.IsError)
+	assert.True(t, result(model, 2).IsError)
 }
 
 func TestRunningOutOfSteps(t *testing.T) {
-	steps := make([]llm.FakeStep, 0, 4)
-	for i := range 4 {
-		steps = append(steps, llm.Call("c"+strings.Repeat("x", i), "search_products", map[string]any{}))
+	steps := make([]llm.FakeStep, 0, 5)
+	for i := range 5 {
+		steps = append(steps, llm.Call("c"+strings.Repeat("x", i), "search_parts", map[string]any{}))
 	}
-	a, _, _, history := newAgent(t, llm.NewFake(steps...))
+	f := newAgent(t, llm.NewFake(steps...))
 
-	reply, err := a.Reply(context.Background(), chat, chat, "щось")
+	reply, err := f.agent.Reply(context.Background(), chat, chat, "щось")
 	require.NoError(t, err)
 	assert.Equal(t, replyStuck, reply.Text)
 
 	// Only the question and the fixed answer are stored: a history ending on
 	// tool results with no answer would be malformed for the next request.
-	saved := history.msgs[chat]
+	saved := f.history.msgs[chat]
 	require.Len(t, saved, 2)
 	assert.Equal(t, llm.RoleAssistant, saved[1].Role)
 }
@@ -251,29 +339,69 @@ func TestRefusalIsNotRemembered(t *testing.T) {
 	model := llm.NewFake(llm.FakeStep{Response: &llm.Response{
 		Message: llm.Message{Role: llm.RoleAssistant}, StopReason: llm.StopRefusal,
 	}})
-	a, _, _, history := newAgent(t, model)
+	f := newAgent(t, model)
 
-	reply, err := a.Reply(context.Background(), chat, chat, "щось недозволене")
+	reply, err := f.agent.Reply(context.Background(), chat, chat, "щось недозволене")
 	require.NoError(t, err)
 	assert.Equal(t, replyRefusal, reply.Text)
-	assert.Empty(t, history.msgs[chat])
+	assert.Empty(t, f.history.msgs[chat])
 }
 
 func TestProviderOutageIsReported(t *testing.T) {
-	a, _, _, _ := newAgent(t, llm.NewFake(llm.FakeStep{Err: llm.ErrUnavailable}))
-	_, err := a.Reply(context.Background(), chat, chat, "куртка")
+	f := newAgent(t, llm.NewFake(llm.FakeStep{Err: llm.ErrUnavailable}))
+	_, err := f.agent.Reply(context.Background(), chat, chat, "колодки")
 	require.Error(t, err)
 	assert.True(t, IsUnavailable(err))
 }
 
 func TestReset(t *testing.T) {
-	a, _, _, history := newAgent(t, llm.NewFake(llm.Say("Привіт!")))
-	_, err := a.Reply(context.Background(), chat, chat, "привіт")
+	f := newAgent(t, llm.NewFake(llm.Say("Привіт!")))
+	_, err := f.agent.Reply(context.Background(), chat, chat, "привіт")
 	require.NoError(t, err)
-	require.NotEmpty(t, history.msgs[chat])
+	require.NotEmpty(t, f.history.msgs[chat])
 
-	require.NoError(t, a.Reset(context.Background(), chat))
-	assert.Empty(t, history.msgs[chat])
+	require.NoError(t, f.agent.Reset(context.Background(), chat))
+	assert.Empty(t, f.history.msgs[chat])
+}
+
+func TestTextBeforeShowIsTheAnswer(t *testing.T) {
+	// Seen live: the model speaks, shows products, then ends with no text.
+	talkAndShow := llm.Call("c1", "show_products", map[string]any{"product_ids": []int64{2}})
+	talkAndShow.Response.Message.Text = "Ось передні колодки."
+	f := newAgent(t, llm.NewFake(talkAndShow, llm.Say("")))
+
+	reply, err := f.agent.Reply(context.Background(), chat, chat, "колодки")
+	require.NoError(t, err)
+	assert.Equal(t, "Ось передні колодки.", reply.Text)
+	assert.Equal(t, []int64{2}, reply.ProductIDs)
+}
+
+func TestEmptyFinalTurnIsStoredWithTheSentText(t *testing.T) {
+	f := newAgent(t, llm.NewFake(llm.Call("c1", "show_products", map[string]any{"product_ids": []int64{2}}), llm.Say("")))
+
+	reply, err := f.agent.Reply(context.Background(), chat, chat, "колодки")
+	require.NoError(t, err)
+
+	saved := f.history.msgs[chat]
+	assert.Equal(t, reply.Text, saved[len(saved)-1].Text, "no assistant message is stored empty")
+}
+
+func TestEmptyMessagesInOldHistoryAreDropped(t *testing.T) {
+	// The shape a chat was left in by the bug this guards against.
+	model := llm.NewFake(llm.Say("Усе добре!"))
+	f := newAgent(t, model)
+	f.history.msgs[chat] = []llm.Message{
+		{Role: llm.RoleUser, Text: "колодки"},
+		{Role: llm.RoleAssistant},
+	}
+
+	_, err := f.agent.Reply(context.Background(), chat, chat, "як справи")
+	require.NoError(t, err)
+
+	sent := model.Requests[0].Messages
+	require.Len(t, sent, 2)
+	assert.Equal(t, "колодки", sent[0].Text)
+	assert.Equal(t, "як справи", sent[1].Text)
 }
 
 // --- history trimming --------------------------------------------------------
@@ -293,46 +421,4 @@ func TestTrimDropsWholeTurns(t *testing.T) {
 	got = trim(msgs, 3)
 	assert.Equal(t, "3", got[0].Text, "a tool result is never left without its call")
 	assert.Len(t, got, 4, "one turn longer than the cap is kept whole")
-}
-
-func TestTextBeforeShowIsTheAnswer(t *testing.T) {
-	// Seen live: the model speaks, shows products, then ends with no text.
-	talkAndShow := llm.Call("c1", "show_products", map[string]any{"product_ids": []int64{2}})
-	talkAndShow.Response.Message.Text = "Ось теплий варіант."
-	model := llm.NewFake(talkAndShow, llm.Say(""))
-	a, _, _, _ := newAgent(t, model)
-
-	reply, err := a.Reply(context.Background(), chat, chat, "куртка")
-	require.NoError(t, err)
-	assert.Equal(t, "Ось теплий варіант.", reply.Text)
-	assert.Equal(t, []int64{2}, reply.ProductIDs)
-}
-
-func TestEmptyFinalTurnIsStoredWithTheSentText(t *testing.T) {
-	model := llm.NewFake(llm.Call("c1", "show_products", map[string]any{"product_ids": []int64{2}}), llm.Say(""))
-	a, _, _, history := newAgent(t, model)
-
-	reply, err := a.Reply(context.Background(), chat, chat, "куртка")
-	require.NoError(t, err)
-
-	saved := history.msgs[chat]
-	assert.Equal(t, reply.Text, saved[len(saved)-1].Text, "no assistant message is stored empty")
-}
-
-func TestEmptyMessagesInOldHistoryAreDropped(t *testing.T) {
-	// The shape a chat was left in by the bug this guards against.
-	model := llm.NewFake(llm.Say("Усе добре!"))
-	a, _, _, history := newAgent(t, model)
-	history.msgs[chat] = []llm.Message{
-		{Role: llm.RoleUser, Text: "куртка"},
-		{Role: llm.RoleAssistant},
-	}
-
-	_, err := a.Reply(context.Background(), chat, chat, "як справи")
-	require.NoError(t, err)
-
-	sent := model.Requests[0].Messages
-	require.Len(t, sent, 2)
-	assert.Equal(t, "куртка", sent[0].Text)
-	assert.Equal(t, "як справи", sent[1].Text)
 }

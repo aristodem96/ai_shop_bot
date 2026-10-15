@@ -33,7 +33,7 @@ func TestParseCallbackRejectsGarbage(t *testing.T) {
 		"p",      // missing argument
 		"p:1:2",  // too many
 		"p:abc",  // not a number
-		"a:1",    // too few
+		"a:1:2",  // too many
 		"cats:1", // takes none
 		"p:" + strings.Repeat("9", 70),
 	} {

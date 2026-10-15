@@ -13,19 +13,34 @@ import (
 type CatalogRepository interface {
 	Categories(ctx context.Context) ([]domain.Category, error)
 	Category(ctx context.Context, id int64) (*domain.Category, error)
-	// ProductsByCategory returns one page of active products, in-stock first,
-	// with TotalStock filled and Variants left empty, plus the total count.
-	ProductsByCategory(ctx context.Context, categoryID int64, limit, offset int) ([]domain.Product, int, error)
-	// Product returns an active product with its variants in size order.
+	// ProductsByCategory returns one page of active products, in stock first,
+	// plus the total count. A non-zero vehicleID limits it to parts that fit
+	// that vehicle, universal ones included.
+	ProductsByCategory(ctx context.Context, categoryID, vehicleID int64, limit, offset int) ([]domain.Product, int, error)
+	// Product returns an active product with the vehicles it fits.
 	Product(ctx context.Context, id int64) (*domain.Product, error)
-	// Similar returns in-stock products of the same category, other than p,
-	// closest in style and price first.
-	Similar(ctx context.Context, p *domain.Product, limit int) ([]domain.Product, error)
-	// Variant returns one size of an active product.
-	Variant(ctx context.Context, id int64) (*domain.Variant, error)
-	// Search returns in-stock products matching every set field of f, with
-	// their variants, best match first.
+	// Analogues returns in-stock parts interchangeable with p: the same OEM
+	// number first, then the same kind of part for the same vehicles. A
+	// non-zero vehicleID keeps only parts that fit it.
+	Analogues(ctx context.Context, p *domain.Product, vehicleID int64, limit int) ([]domain.Product, error)
+	// Search returns in-stock products matching every set field of f, best
+	// match first.
 	Search(ctx context.Context, f SearchFilter) ([]domain.Product, error)
+}
+
+// VehicleRepository reads the vehicle list.
+type VehicleRepository interface {
+	// Vehicles returns all vehicles ordered by make, model and year.
+	Vehicles(ctx context.Context) ([]domain.Vehicle, error)
+	Vehicle(ctx context.Context, id int64) (*domain.Vehicle, error)
+}
+
+// GarageRepository stores each buyer's car.
+type GarageRepository interface {
+	// Garage returns the buyer's car, or nil if none was chosen.
+	Garage(ctx context.Context, userID int64) (*domain.Vehicle, error)
+	SetGarage(ctx context.Context, userID, vehicleID int64) error
+	ClearGarage(ctx context.Context, userID int64) error
 }
 
 // CartRepository stores carts.
@@ -34,6 +49,6 @@ type CartRepository interface {
 	Cart(ctx context.Context, userID int64) (*domain.Cart, error)
 	// SetQty sets the quantity of a line, creating the cart and the line as
 	// needed. Zero removes the line.
-	SetQty(ctx context.Context, userID, variantID int64, qty int) error
+	SetQty(ctx context.Context, userID, productID int64, qty int) error
 	Clear(ctx context.Context, userID int64) error
 }

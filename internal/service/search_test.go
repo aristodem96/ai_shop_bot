@@ -24,30 +24,37 @@ func TestSearchClampsLimit(t *testing.T) {
 	assert.Equal(t, MaxSearchLimit, f.filters[1].Limit, "the model cannot ask for the whole catalogue")
 }
 
+func TestSearchNormalizesPartNumber(t *testing.T) {
+	f := &fakeCatalog{}
+	_, err := NewCatalogService(f).Search(context.Background(), SearchFilter{PartNumber: "1k0-698 151"})
+	require.NoError(t, err)
+	assert.Equal(t, "1K0698151", f.filters[0].PartNumber)
+}
+
 func TestSearchRelaxesKeywordsButKeepsFilters(t *testing.T) {
-	coat := domain.Product{ID: 1, Name: "Пальто"}
+	pads := domain.Product{ID: 1, Name: "Колодки"}
 	f := &fakeCatalog{search: func(sf SearchFilter) []domain.Product {
 		if sf.Query != "" {
 			return nil // no product mentions the buyer's word
 		}
-		return []domain.Product{coat}
+		return []domain.Product{pads}
 	}}
 	svc := NewCatalogService(f)
 
-	res, err := svc.Search(context.Background(), SearchFilter{Query: "кашемір", MaxPrice: domain.UAH(5000), Size: "M"})
+	res, err := svc.Search(context.Background(), SearchFilter{Query: "тихі", VehicleID: 7, MaxPrice: domain.UAH(2000)})
 	require.NoError(t, err)
 	assert.True(t, res.Relaxed)
-	assert.Equal(t, []domain.Product{coat}, res.Products)
+	assert.Equal(t, []domain.Product{pads}, res.Products)
 
 	require.Len(t, f.filters, 2)
 	assert.Empty(t, f.filters[1].Query)
-	assert.Equal(t, domain.UAH(5000), f.filters[1].MaxPrice, "the price limit survives relaxation")
-	assert.Equal(t, "M", f.filters[1].Size)
+	assert.Equal(t, int64(7), f.filters[1].VehicleID, "the car survives relaxation")
+	assert.Equal(t, domain.UAH(2000), f.filters[1].MaxPrice)
 }
 
 func TestSearchWithoutKeywordsIsNotRelaxed(t *testing.T) {
 	f := &fakeCatalog{search: func(SearchFilter) []domain.Product { return nil }}
-	res, err := NewCatalogService(f).Search(context.Background(), SearchFilter{Size: "XXXL"})
+	res, err := NewCatalogService(f).Search(context.Background(), SearchFilter{PartNumber: "000"})
 	require.NoError(t, err)
 	assert.False(t, res.Relaxed)
 	assert.Empty(t, res.Products)

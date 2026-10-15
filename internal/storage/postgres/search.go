@@ -7,8 +7,6 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
 	"github.com/aristodem96/ai_shop_bot/internal/service"
 )
@@ -29,44 +27,34 @@ func (w *whereBuilder) arg(v any) string {
 
 func (w *whereBuilder) add(cond string) { w.conds = append(w.conds, cond) }
 
-// Search finds active products with at least one size in stock that match
-// every set field of the filter. Results carry their variants.
+// Search finds active, in-stock products that match every set field of the
+// filter.
 func (r *CatalogRepository) Search(ctx context.Context, f service.SearchFilter) ([]domain.Product, error) {
 	var w whereBuilder
 	w.add("p.is_active")
+	w.add("p.stock > 0")
 
 	if f.Category != "" {
 		w.add("p.category_id = (SELECT id FROM categories WHERE slug = " + w.arg(f.Category) + ")")
+	}
+	if f.VehicleID != 0 {
+		w.add(fitsVehicle(w.arg(f.VehicleID)))
+	}
+	// A part number is matched against the OEM numbers and the shop's own
+	// SKU, both normalised, so "1K0-698-151" and "1k0698151" find the same
+	// part.
+	if f.PartNumber != "" {
+		ph := w.arg(f.PartNumber)
+		w.add("(" + ph + " = ANY(p.oem_numbers) OR upper(replace(p.sku, '-', '')) = " + ph + ")")
+	}
+	if f.Brand != "" {
+		w.add("lower(p.brand) = lower(" + w.arg(f.Brand) + ")")
 	}
 	if f.MinPrice > 0 {
 		w.add("p.price >= " + w.arg(int64(f.MinPrice)))
 	}
 	if f.MaxPrice > 0 {
 		w.add("p.price <= " + w.arg(int64(f.MaxPrice)))
-	}
-	if len(f.Colors) > 0 {
-		w.add("p.color = ANY(" + w.arg(f.Colors) + ")")
-	}
-	if len(f.ExcludeColors) > 0 {
-		w.add("NOT (p.color = ANY(" + w.arg(f.ExcludeColors) + "))")
-	}
-	// An all-season product suits any season, and a unisex one any gender:
-	// "a winter hoodie for him" should find the all-season unisex hoodie.
-	if f.Season != "" {
-		w.add("p.season IN (" + w.arg(f.Season) + ", 'all')")
-	}
-	if f.Gender != "" {
-		w.add("p.gender IN (" + w.arg(f.Gender) + ", 'unisex')")
-	}
-	if len(f.Styles) > 0 {
-		w.add("p.styles && " + w.arg(f.Styles))
-	}
-	// With a size asked for, that size must be in stock; otherwise any size.
-	if f.Size != "" {
-		w.add(`EXISTS (SELECT 1 FROM product_variants v
-			WHERE v.product_id = p.id AND v.stock > 0 AND upper(v.size) = upper(` + w.arg(f.Size) + `))`)
-	} else {
-		w.add("s.stock > 0")
 	}
 
 	order := "p.price, p.id"
@@ -76,7 +64,7 @@ func (r *CatalogRepository) Search(ctx context.Context, f service.SearchFilter) 
 		order = "ts_rank(p.search, to_tsquery('simple', " + ph + ")) DESC, " + order
 	}
 
-	sql := `SELECT ` + productColumns + ` FROM products p` + stockJoin +
+	sql := `SELECT ` + productColumns + ` FROM products p` +
 		` WHERE ` + strings.Join(w.conds, " AND ") +
 		` ORDER BY ` + order +
 		` LIMIT ` + w.arg(f.Limit)
@@ -89,45 +77,7 @@ func (r *CatalogRepository) Search(ctx context.Context, f service.SearchFilter) 
 	if err != nil {
 		return nil, fmt.Errorf("postgres: scan search results: %w", err)
 	}
-	if err := r.attachVariants(ctx, products); err != nil {
-		return nil, err
-	}
 	return products, nil
-}
-
-// attachVariants loads the sizes of many products in one query rather than
-// one query per product.
-func (r *CatalogRepository) attachVariants(ctx context.Context, products []domain.Product) error {
-	if len(products) == 0 {
-		return nil
-	}
-	ids := make([]int64, len(products))
-	index := make(map[int64]int, len(products))
-	for i, p := range products {
-		ids[i] = p.ID
-		index[p.ID] = i
-	}
-
-	rows, err := r.pool.Query(ctx, `
-		SELECT id, product_id, size, stock FROM product_variants
-		WHERE product_id = ANY($1)
-		ORDER BY product_id, position, id`, ids)
-	if err != nil {
-		return fmt.Errorf("postgres: list variants: %w", err)
-	}
-	variants, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.Variant, error) {
-		var v domain.Variant
-		err := row.Scan(&v.ID, &v.ProductID, &v.Size, &v.Stock)
-		return v, err
-	})
-	if err != nil {
-		return fmt.Errorf("postgres: scan variants: %w", err)
-	}
-	for _, v := range variants {
-		p := &products[index[v.ProductID]]
-		p.Variants = append(p.Variants, v)
-	}
-	return nil
 }
 
 // maxQueryWords bounds the tsquery a single search can build.

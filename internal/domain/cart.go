@@ -3,9 +3,10 @@ package domain
 // Cart limits. They are business rules, so they live in code: nothing a buyer
 // types -- or, from stage 2, anything the model says -- can change them.
 const (
-	// MaxQtyPerLine caps one size of one product. A clothing shop selling ten
-	// identical jackets to one person is a reseller or a mistake.
-	MaxQtyPerLine = 5
+	// MaxQtyPerLine caps one product. Parts come in sets of two or four at
+	// most (pads, plugs, shocks); ten of one part is a trade order, which
+	// goes through a manager, not a chat bot.
+	MaxQtyPerLine = 10
 	// MaxCartLines caps distinct lines, which also bounds the cart message
 	// below Telegram's 4096 character and 100 button limits.
 	MaxCartLines = 15
@@ -17,16 +18,15 @@ type Cart struct {
 	Lines  []CartLine
 }
 
-// CartLine is one size of one product in a cart.
+// CartLine is one product in a cart.
 type CartLine struct {
-	VariantID   int64
 	ProductID   int64
 	ProductName string
-	Size        string
+	Brand       string
 	Price       Money
 	Qty         int
-	// Stock is the current stock of the size. It may have dropped below Qty
-	// since the line was added; the cart shows that instead of hiding it.
+	// Stock is the current stock. It may have dropped below Qty since the
+	// line was added; the cart shows that instead of hiding it.
 	Stock int
 }
 
@@ -54,10 +54,10 @@ func (c *Cart) Items() int {
 	return n
 }
 
-// Line finds the line for a variant.
-func (c *Cart) Line(variantID int64) (CartLine, bool) {
+// Line finds the line for a product.
+func (c *Cart) Line(productID int64) (CartLine, bool) {
 	for _, l := range c.Lines {
-		if l.VariantID == variantID {
+		if l.ProductID == productID {
 			return l, true
 		}
 	}
