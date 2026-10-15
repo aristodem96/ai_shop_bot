@@ -134,3 +134,32 @@ func TestImportTakesMissingOffSale(t *testing.T) {
 		`SELECT is_active FROM products WHERE source = 'demo-stock' AND external_id = '10004'`).Scan(&active))
 	assert.False(t, active, "a part the supplier dropped is off sale, not deleted: orders still point at it")
 }
+
+// The shipped directory is test data too: a typo in it fails CI, not a
+// shop's first import.
+func TestImportVehicleDirectory(t *testing.T) {
+	skipShort(t)
+	ctx := context.Background()
+	var before []string
+	require.NoError(t, testPool.QueryRow(ctx, `SELECT array_agg(code) FROM vehicles`).Scan(&before))
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(ctx, `DELETE FROM vehicles WHERE code <> ALL($1)`, before)
+		_, _ = testPool.Exec(ctx, `DELETE FROM vehicle_models m WHERE NOT EXISTS (
+			SELECT 1 FROM vehicles v WHERE v.make = m.make AND v.model = m.model)`)
+	})
+	repo := NewImportRepository(testPool)
+	problems, res, err := importer.ImportVehicles(ctx, repo, "../../../data/vehicles.csv", false)
+	require.NoError(t, err)
+	assert.Empty(t, problems)
+	assert.Equal(t, len(before), res.Updated, "the seed's cars are in the file and are matched, not doubled")
+	assert.Positive(t, res.Inserted)
+
+	camry := vehicleByCode(t, "camry-xv70-25")
+	v, err := NewVehicleRepository(testPool).Vehicle(ctx, camry)
+	require.NoError(t, err)
+	assert.Equal(t, "0W-20", v.OilViscosity, "service data is kept")
+
+	_, res, err = importer.ImportVehicles(ctx, repo, "../../../data/vehicles.csv", false)
+	require.NoError(t, err)
+	assert.Zero(t, res.Inserted, "a second load adds nothing")
+}

@@ -1,7 +1,11 @@
 // Command import loads a supplier's price list (CSV or Excel) into the
-// catalogue, as its profile describes it.
+// catalogue, as its profile describes it, or the shop's vehicle directory.
 //
 //	import -profile supplier.json -file price.xlsx -dry-run
+//	import -vehicles data/vehicles.csv
+//
+// Load vehicles first: a price list's fitments can only point at vehicles
+// the catalogue knows.
 //
 // Run with -dry-run first: it reports what would change and every row it
 // could not understand, and changes nothing.
@@ -38,17 +42,21 @@ func run() error {
 	var (
 		profilePath = flag.String("profile", "", "supplier profile, JSON (required)")
 		filePath    = flag.String("file", "", "price list, .csv or .xlsx (required)")
+		vehicles    = flag.String("vehicles", "", "vehicle directory, .csv (instead of -profile and -file)")
 		dryRun      = flag.Bool("dry-run", false, "report what would change and change nothing")
 	)
 	flag.Parse()
-	if *profilePath == "" || *filePath == "" {
+	if (*vehicles == "") == (*profilePath == "" || *filePath == "") {
 		flag.Usage()
-		return fmt.Errorf("-profile and -file are required")
+		return fmt.Errorf("give either -profile and -file, or -vehicles")
 	}
 
-	profile, err := importer.LoadProfile(*profilePath)
-	if err != nil {
-		return err
+	var profile *importer.Profile
+	if *vehicles == "" {
+		var err error
+		if profile, err = importer.LoadProfile(*profilePath); err != nil {
+			return err
+		}
 	}
 	cfg, err := config.LoadDatabase()
 	if err != nil {
@@ -71,6 +79,9 @@ func run() error {
 	defer pool.Close()
 
 	started := time.Now()
+	if *vehicles != "" {
+		return importVehicles(ctx, postgres.NewImportRepository(pool), *vehicles, *dryRun)
+	}
 	report, res, err := importer.Run(ctx, postgres.NewImportRepository(pool), profile, *filePath, *dryRun)
 	var out strings.Builder
 	if report != nil {
@@ -78,6 +89,28 @@ func run() error {
 	}
 	if err == nil {
 		printResult(&out, res, *dryRun, time.Since(started))
+	}
+	if _, werr := io.WriteString(os.Stdout, out.String()); werr != nil && err == nil {
+		err = werr
+	}
+	return err
+}
+
+func importVehicles(ctx context.Context, store importer.VehicleStore, path string, dryRun bool) error {
+	problems, res, err := importer.ImportVehicles(ctx, store, path, dryRun)
+	var out strings.Builder
+	if len(problems) > 0 {
+		fmt.Fprintf(&out, "Skipped rows: %d\n", len(problems))
+		for _, p := range problems {
+			fmt.Fprintf(&out, "  line %d  %s\n", p.Row.Line, p.Reason)
+		}
+	}
+	if err == nil {
+		verb := "Applied"
+		if dryRun {
+			verb = "Dry run, nothing changed. Would apply"
+		}
+		fmt.Fprintf(&out, "%s: %d new vehicles, %d updated\n", verb, res.Inserted, res.Updated)
 	}
 	if _, werr := io.WriteString(os.Stdout, out.String()); werr != nil && err == nil {
 		err = werr

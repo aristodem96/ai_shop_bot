@@ -274,3 +274,57 @@ func stage(ctx context.Context, tx pgx.Tx, products []importer.Product) error {
 	}
 	return nil
 }
+
+var _ importer.VehicleStore = (*ImportRepository)(nil)
+
+// ApplyVehicles upserts a vehicle directory in one transaction. A vehicle is
+// matched on make, model, engine and first year, so the seed's cars and the
+// same cars in a file meet instead of doubling. Service data the file leaves
+// empty does not erase what is known.
+func (r *ImportRepository) ApplyVehicles(ctx context.Context, vs []importer.Vehicle, dryRun bool) (importer.VehicleResult, error) {
+	var res importer.VehicleResult
+	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		for _, v := range vs {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO vehicle_models (make, model) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+				v.Make, v.Model); err != nil {
+				return fmt.Errorf("postgres: model of %s: %w", v.Code(), err)
+			}
+			var inserted bool
+			err := tx.QueryRow(ctx, `
+				INSERT INTO vehicles (code, make, model, year_from, year_to, engine, fuel, oil_viscosity, oil_volume_l)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, nullif($8, ''), nullif($9, 0::numeric))
+				ON CONFLICT (make, model, engine, year_from) DO UPDATE SET
+					year_to = EXCLUDED.year_to, fuel = EXCLUDED.fuel,
+					oil_viscosity = coalesce(EXCLUDED.oil_viscosity, vehicles.oil_viscosity),
+					oil_volume_l = coalesce(EXCLUDED.oil_volume_l, vehicles.oil_volume_l)
+				RETURNING xmax = 0`,
+				v.Code(), v.Make, v.Model, v.YearFrom, nullable(v.YearTo), v.Engine, v.Fuel,
+				v.OilViscosity, v.OilVolume,
+			).Scan(&inserted)
+			if err != nil {
+				return fmt.Errorf("postgres: upsert vehicle %s: %w", v.Code(), err)
+			}
+			if inserted {
+				res.Inserted++
+			} else {
+				res.Updated++
+			}
+		}
+		if dryRun {
+			return errDryRun
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, errDryRun) {
+		return importer.VehicleResult{}, err
+	}
+	return res, nil
+}
+
+func nullable(n int) *int {
+	if n == 0 {
+		return nil
+	}
+	return &n
+}

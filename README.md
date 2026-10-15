@@ -37,6 +37,7 @@ the buttons. Most of this README is about that boundary.
 - [Testing](#testing)
 - [Configuration](#configuration)
 - [Deploying](#deploying)
+- [Loading a real catalogue](#loading-a-real-catalogue)
 - [Out of scope](#out-of-scope)
 - [Layout](#layout)
 
@@ -417,11 +418,76 @@ start without the secrets. The image is 31 MB on distroless.
 
 ---
 
+## Loading a real catalogue
+
+The demo catalogue is code; a shop's is a file. The catalogue was shaped
+against a real Ukrainian price list of 81 654 rows, which is what a supplier
+actually sends:
+
+- **a vehicle is named only as "Make Model"**, so a fitment can point at a whole
+  model, optionally within years, and applies to every engine of it;
+- **one part number is sold under several brands** (those are the analogues),
+  so the supplier's own id, not the part number, is the key a re-import
+  matches on;
+- **brands come spelt five ways** ("KYB", "Kyb", "K.Y.B."): a brand directory
+  keeps one name and every spelling met;
+- **most of it is not on the shop's shelf**: a part *on order* sells without
+  stock and shows when it arrives;
+- **no photos, often no category**: a card without a photo goes out as text,
+  and rules in the profile sort rows into sections by words in the name.
+
+Two steps, vehicles first, since a price list's fitments can only point at
+cars the catalogue knows:
+
+```bash
+make import-vehicles                    # data/vehicles.csv: ~200 cars common in Ukraine
+make import PROFILE=supplier.json FILE=price.xlsx DRY_RUN=1
+make import PROFILE=supplier.json FILE=price.xlsx
+```
+
+A **profile** is a JSON file per supplier: which column is the name, price,
+brand, part number and vehicle, the words that sort rows into categories, the
+delivery time for parts on order, and a map for vehicle names the directory
+does not use verbatim (`"Chevrolet Aveo": ["Chevrolet Aveo T200", "Chevrolet
+Aveo T250"]`). A new supplier is a new JSON file, not a release. The example
+in [docs/import/](docs/import/) is also what the integration test imports.
+
+The **dry run** applies everything in a transaction and rolls it back, so its
+numbers are exact: how many products would be added, updated and taken off
+sale, which rows could not be read (with the line number Excel shows), which
+brands are new — a misspelling shows up there first — and which vehicle names
+match no model. A name is never guessed into a model: a wrong fitment sells a
+part that does not fit.
+
+Rows travel by `COPY` into temporary tables and are merged in one transaction,
+so the shop sees the old price list or the new one, never half of each.
+81 654 rows load in about 5 seconds. A re-import updates in place and takes
+off sale what the file no longer lists. A stock column counts what is on the
+shelf, and units held by open orders are still on it, so they are subtracted:
+otherwise an order that expires later would give its units back twice. Every
+run is logged in `import_runs`.
+
+On a server the command is in the image:
+
+```bash
+docker compose run --rm --entrypoint /import bot -vehicles /data/vehicles.csv
+docker compose run --rm -v $PWD/imports:/imports --entrypoint /import bot \
+  -profile /imports/supplier.json -file /imports/price.xlsx -dry-run
+```
+
+---
+
 ## Out of scope
 
-- **The catalogue is a demo.** The cars are real models; the brands, part
-  numbers and fitments are invented and are not a compatibility reference. A
-  real shop would load them from a supplier feed or TecDoc.
+- **The demo catalogue is invented.** The cars are real models; the brands,
+  part numbers and fitments are made up and are not a compatibility reference.
+  A real shop loads its own with the importer.
+- **The vehicle directory is a starter.** About 200 cars common in Ukraine,
+  with years and engines from general knowledge; a shop that needs every car
+  sold in Europe licenses TecDoc and loads it the same way.
+- **Brand aliases are added in SQL.** A spelling that differs by more than
+  punctuation ("Kayaba" for KYB) is one `INSERT` into `brand_aliases`; there
+  is no command for it yet.
 - **Refunds are manual.** A cancelled paid order tells the manager to refund it
   in the Monobank cabinet; the API's cancel endpoint is not wired in.
 - **No fiscal receipts.** Monobank's `basketOrder` is only needed with a PRRO
@@ -439,6 +505,7 @@ start without the secrets. The image is 31 MB on distroless.
 cmd/
   bot/                 composition root: the bot, webhook server, payment poll, reminders
   seed/                migrations + demo catalogue
+  import/              price lists (CSV, Excel) and the vehicle directory
 internal/
   domain/              entities and rules: money, vehicles, cart, orders, VIN, phone numbers
   service/             use cases and the ports they need
@@ -452,6 +519,9 @@ internal/
   storage/postgres/    repositories and their integration tests
   storage/redis/       conversations, sessions, rate limiter
   seed/                the demo catalogue
+  importer/            price list profiles, parsing, brand and vehicle matching
   config/              environment configuration
 migrations/            goose migrations, embedded in the binary
+data/vehicles.csv      the vehicle directory
+docs/import/           an example price list and its profile
 ```

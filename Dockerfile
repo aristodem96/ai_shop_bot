@@ -19,6 +19,9 @@ FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/bot /bot
 COPY --from=build /out/seed /seed
 COPY --from=build /out/import /import
+# The vehicle directory ships with the image, so a server loads it with
+# `--entrypoint /import bot -vehicles /data/vehicles.csv`, no copying.
+COPY data /data
 
 USER nonroot:nonroot
 ENTRYPOINT ["/bot"]

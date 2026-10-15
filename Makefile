@@ -45,6 +45,12 @@ DRY_RUN ?=
 import: ## Import a price list: make import PROFILE=... FILE=... [DRY_RUN=1]
 	go run ./cmd/import -profile $(PROFILE) -file $(FILE) $(if $(DRY_RUN),-dry-run)
 
+VEHICLES ?= data/vehicles.csv
+
+.PHONY: import-vehicles
+import-vehicles: ## Load the vehicle directory (before any price list): make import-vehicles [VEHICLES=...] [DRY_RUN=1]
+	go run ./cmd/import -vehicles $(VEHICLES) $(if $(DRY_RUN),-dry-run)
+
 .PHONY: test
 test: ## Run unit tests (integration tests are skipped)
 	go test -race -short ./...
