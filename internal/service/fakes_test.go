@@ -22,9 +22,9 @@ func (f *fakeCatalog) Categories(context.Context) ([]domain.Category, error) {
 	return f.categories, nil
 }
 
-func (f *fakeCatalog) CategoryBySlug(_ context.Context, slug string) (*domain.Category, error) {
+func (f *fakeCatalog) Category(_ context.Context, id int64) (*domain.Category, error) {
 	for _, c := range f.categories {
-		if c.Slug == slug {
+		if c.ID == id {
 			return &c, nil
 		}
 	}

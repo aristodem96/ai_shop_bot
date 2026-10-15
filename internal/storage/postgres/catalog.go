@@ -41,17 +41,17 @@ func (r *CatalogRepository) Categories(ctx context.Context) ([]domain.Category, 
 	return cats, nil
 }
 
-// CategoryBySlug finds a category.
-func (r *CatalogRepository) CategoryBySlug(ctx context.Context, slug string) (*domain.Category, error) {
+// Category finds a category.
+func (r *CatalogRepository) Category(ctx context.Context, id int64) (*domain.Category, error) {
 	var c domain.Category
 	err := r.pool.QueryRow(ctx,
-		`SELECT id, slug, title FROM categories WHERE slug = $1`, slug,
+		`SELECT id, slug, title FROM categories WHERE id = $1`, id,
 	).Scan(&c.ID, &c.Slug, &c.Title)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("postgres: get category %q: %w", slug, err)
+		return nil, fmt.Errorf("postgres: get category %d: %w", id, err)
 	}
 	return &c, nil
 }

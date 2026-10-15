@@ -42,8 +42,8 @@ func (s *CatalogService) Categories(ctx context.Context) ([]domain.Category, err
 // CategoryPage returns one page of a category. A page past the end is clamped
 // to the last one: a stale button pressed after the catalogue shrank should
 // still show something useful rather than an empty list.
-func (s *CatalogService) CategoryPage(ctx context.Context, slug string, page int) (*ProductPage, error) {
-	cat, err := s.repo.CategoryBySlug(ctx, slug)
+func (s *CatalogService) CategoryPage(ctx context.Context, categoryID int64, page int) (*ProductPage, error) {
+	cat, err := s.repo.Category(ctx, categoryID)
 	if err != nil {
 		return nil, err
 	}

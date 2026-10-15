@@ -133,7 +133,7 @@ func TestCategories(t *testing.T) {
 	require.Len(t, cats, 6)
 	assert.Equal(t, "jackets", cats[0].Slug, "menu order follows position")
 
-	_, err = NewCatalogRepository(testPool).CategoryBySlug(context.Background(), "nope")
+	_, err = NewCatalogRepository(testPool).Category(context.Background(), -1)
 	require.ErrorIs(t, err, domain.ErrNotFound)
 }
 
@@ -142,10 +142,10 @@ func TestProductsByCategoryPutsInStockFirst(t *testing.T) {
 	repo := NewCatalogRepository(testPool)
 	ctx := context.Background()
 
-	cat, err := repo.CategoryBySlug(ctx, "accessories")
-	require.NoError(t, err)
+	var catID int64
+	require.NoError(t, testPool.QueryRow(ctx, `SELECT id FROM categories WHERE slug = 'accessories'`).Scan(&catID))
 
-	all, total, err := repo.ProductsByCategory(ctx, cat.ID, 100, 0)
+	all, total, err := repo.ProductsByCategory(ctx, catID, 100, 0)
 	require.NoError(t, err)
 	require.Len(t, all, total)
 
@@ -156,7 +156,7 @@ func TestProductsByCategoryPutsInStockFirst(t *testing.T) {
 		assert.Positive(t, p.TotalStock, "%s should be in stock", p.SKU)
 	}
 
-	page, total2, err := repo.ProductsByCategory(ctx, cat.ID, 2, 2)
+	page, total2, err := repo.ProductsByCategory(ctx, catID, 2, 2)
 	require.NoError(t, err)
 	assert.Equal(t, total, total2)
 	assert.Equal(t, all[2:4], page, "pages are slices of the same order")

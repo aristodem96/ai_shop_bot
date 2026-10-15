@@ -12,7 +12,7 @@ import (
 // CatalogRepository reads the catalogue.
 type CatalogRepository interface {
 	Categories(ctx context.Context) ([]domain.Category, error)
-	CategoryBySlug(ctx context.Context, slug string) (*domain.Category, error)
+	Category(ctx context.Context, id int64) (*domain.Category, error)
 	// ProductsByCategory returns one page of active products, in-stock first,
 	// with TotalStock filled and Variants left empty, plus the total count.
 	ProductsByCategory(ctx context.Context, categoryID int64, limit, offset int) ([]domain.Product, int, error)

@@ -25,12 +25,12 @@ func TestCategoryPagePagination(t *testing.T) {
 	svc := newCatalogFixture(PageSize*2 + 3)
 	ctx := context.Background()
 
-	page, err := svc.CategoryPage(ctx, "jackets", 0)
+	page, err := svc.CategoryPage(ctx, 1, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 3, page.Pages)
 	assert.Len(t, page.Products, PageSize)
 
-	page, err = svc.CategoryPage(ctx, "jackets", 2)
+	page, err = svc.CategoryPage(ctx, 1, 2)
 	require.NoError(t, err)
 	assert.Len(t, page.Products, 3, "the last page holds the remainder")
 }
@@ -38,12 +38,12 @@ func TestCategoryPagePagination(t *testing.T) {
 func TestCategoryPageClampsStalePage(t *testing.T) {
 	svc := newCatalogFixture(PageSize + 1)
 
-	page, err := svc.CategoryPage(context.Background(), "jackets", 7)
+	page, err := svc.CategoryPage(context.Background(), 1, 7)
 	require.NoError(t, err)
 	assert.Equal(t, 1, page.Page, "a page past the end shows the last one")
 	assert.Len(t, page.Products, 1)
 
-	page, err = svc.CategoryPage(context.Background(), "jackets", -1)
+	page, err = svc.CategoryPage(context.Background(), 1, -1)
 	require.NoError(t, err)
 	assert.Equal(t, 0, page.Page)
 }
@@ -51,14 +51,14 @@ func TestCategoryPageClampsStalePage(t *testing.T) {
 func TestCategoryPageEmptyCategory(t *testing.T) {
 	svc := newCatalogFixture(3)
 
-	page, err := svc.CategoryPage(context.Background(), "empty", 0)
+	page, err := svc.CategoryPage(context.Background(), 2, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 1, page.Pages, "an empty category still has one page")
 	assert.Empty(t, page.Products)
 }
 
-func TestCategoryPageUnknownSlug(t *testing.T) {
+func TestCategoryPageUnknownCategory(t *testing.T) {
 	svc := newCatalogFixture(1)
-	_, err := svc.CategoryPage(context.Background(), "nope", 0)
+	_, err := svc.CategoryPage(context.Background(), 99, 0)
 	require.ErrorIs(t, err, domain.ErrNotFound)
 }
