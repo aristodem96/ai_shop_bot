@@ -199,6 +199,12 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 	if m.From == nil {
 		return
 	}
+	// /id works anywhere: a managers' group needs it to find its own id for
+	// ADMIN_CHAT_ID. In a group, commands may carry the bot's name: /id@bot.
+	if m.Text == "/id" || strings.HasPrefix(m.Text, "/id@") {
+		b.send(ctx, m.Chat.ID, fmt.Sprintf("ID цього чату: <code>%d</code>", m.Chat.ID), nil)
+		return
+	}
 	// A cart is personal. In a group every member would share the buttons of
 	// one message while each had a cart of their own, which cannot work.
 	if m.Chat.Type != telegram.ChatPrivate {
@@ -230,10 +236,6 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 		b.send(ctx, chat, msgHelp, mainMenu())
 	case "/orders", btnOrders:
 		b.sendOrders(ctx, chat, user)
-	case "/id":
-		// For setting ADMIN_CHAT_ID: the operator asks the bot which chat
-		// this is.
-		b.send(ctx, chat, fmt.Sprintf("ID цього чату: <code>%d</code>", chat), nil)
 	case "/new":
 		b.resetConversation(ctx, chat)
 	case "":

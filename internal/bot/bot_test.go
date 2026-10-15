@@ -316,6 +316,17 @@ func TestKitWithoutACar(t *testing.T) {
 	assert.True(t, answer.alert)
 }
 
+func TestIDWorksInGroups(t *testing.T) {
+	b := newTestBot()
+	u := text("/id@shopexampleaibot")
+	u.Message.Chat = telegram.Chat{ID: -1001234567890, Type: "supergroup"}
+	b.Handle(context.Background(), u)
+
+	msg := b.tg.last("sendMessage")
+	assert.Equal(t, int64(-1001234567890), msg.chat)
+	assert.Contains(t, msg.text, "-1001234567890", "a managers' group can find its id for ADMIN_CHAT_ID")
+}
+
 func TestGroupChatsAreRefused(t *testing.T) {
 	b := newTestBot()
 	u := text("/start")
