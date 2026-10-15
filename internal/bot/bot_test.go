@@ -66,7 +66,7 @@ func (f *fakeTelegram) AnswerCallbackQuery(_ context.Context, _, text string, al
 }
 
 func (f *fakeTelegram) methods() []string {
-	var out []string
+	out := make([]string, 0, len(f.calls))
 	for _, c := range f.calls {
 		out = append(out, c.method)
 	}

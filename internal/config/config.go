@@ -15,7 +15,9 @@ import (
 	"time"
 )
 
-const defaultDSN = "postgres://shop:shop@localhost:5433/shop?sslmode=disable"
+// defaultDSN points at the docker compose database. Its password is the
+// public one from docker-compose.yml, not a secret.
+const defaultDSN = "postgres://shop:shop@localhost:5433/shop?sslmode=disable" //nolint:gosec // local development default
 
 // Postgres configures the connection pool.
 type Postgres struct {

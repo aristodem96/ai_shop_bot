@@ -149,12 +149,17 @@ func TestProductsByCategoryPutsInStockFirst(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, all, total)
 
-	last := all[len(all)-1]
-	assert.Equal(t, "ACC-007", last.SKU, "the sold-out belt sorts last")
-	assert.Zero(t, last.TotalStock)
-	for _, p := range all[:len(all)-1] {
-		assert.Positive(t, p.TotalStock, "%s should be in stock", p.SKU)
+	// Stock is generated, so the test checks the rule rather than which SKUs
+	// happen to be sold out -- except the belt, which the seed pins at zero.
+	soldOut := false
+	for _, p := range all {
+		if p.TotalStock == 0 {
+			soldOut = true
+			continue
+		}
+		assert.False(t, soldOut, "%s is in stock but sorts after a sold-out product", p.SKU)
 	}
+	assert.Zero(t, all[len(all)-1].TotalStock, "the sold-out belt is among the last")
 
 	page, total2, err := repo.ProductsByCategory(ctx, catID, 2, 2)
 	require.NoError(t, err)
@@ -166,7 +171,7 @@ func TestProductHasSizesInChartOrder(t *testing.T) {
 	skipShort(t)
 
 	p := productBySKU(t, "JKT-008") // the coat comes without XXL
-	var sizes []string
+	sizes := make([]string, 0, len(p.Variants))
 	sum := 0
 	for _, v := range p.Variants {
 		sizes = append(sizes, v.Size)

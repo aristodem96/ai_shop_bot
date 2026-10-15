@@ -1,0 +1,52 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - bodyclose      # a leaked response body leaks a connection
+    - contextcheck   # catches a dropped or wrong context
+    - errorlint      # enforces errors.Is/As over == and type switches
+    - gocritic
+    - gosec
+    - misspell
+    - nilerr         # returning nil after a non-nil error is almost always a bug
+    - noctx
+    - prealloc
+    - revive
+    - rowserrcheck   # a missed rows.Err() silently truncates a result set
+    - sqlclosecheck
+    - unconvert
+    - unparam
+    - wastedassign
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+    revive:
+      rules:
+        - name: exported
+          arguments: [checkPrivateReceivers]
+
+  exclusions:
+    rules:
+      # Tests deliberately ignore errors from helpers and use literal
+      # fixtures; holding them to the production rules adds noise, not safety.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - unparam
+          - noctx
+          - forcetypeassert
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/aristodem96/ai_shop_bot

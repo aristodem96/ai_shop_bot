@@ -1,0 +1,51 @@
+# Pinned so the volume keeps its name wherever the repository is cloned:
+# compose otherwise names it after the directory, and a rename would look like
+# lost data.
+name: ai_shop_bot
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: shop
+      POSTGRES_DB: shop
+    ports:
+      # 5433 on the host so this stack can run next to another project's
+      # Postgres on the default port.
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop -d shop"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Behind a profile because it needs a token the database does not, so
+  # `docker compose up postgres` works for anyone running the bot with
+  # `make run`. Start it with `make up`.
+  bot:
+    profiles: ["bot"]
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_DSN: postgres://shop:shop@postgres:5432/shop?sslmode=disable
+      # Not ${VAR:?}: compose interpolates services behind inactive profiles
+      # too, so a required variable would break `docker compose up postgres`.
+      # The bot validates its own configuration and names what is missing.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_API_URL: ${TELEGRAM_API_URL:-https://api.telegram.org}
+      BOT_MAX_PENDING: ${BOT_MAX_PENDING:-256}
+      BOT_HANDLER_TIMEOUT: ${BOT_HANDLER_TIMEOUT:-20s}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+    restart: unless-stopped
+    # The bot finishes in-flight updates on SIGTERM; give it the handler
+    # timeout plus a margin before Docker kills it.
+    stop_grace_period: 30s
+
+volumes:
+  pgdata:

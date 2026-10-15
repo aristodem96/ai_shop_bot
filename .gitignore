@@ -1,0 +1,9 @@
+/bin/
+.env
+# generated from .env by the Makefile so that shell variables keep priority
+.env.mk
+*.out
+coverage.html
+.DS_Store
+.idea/
+.vscode/

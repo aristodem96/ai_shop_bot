@@ -116,7 +116,9 @@ poll:
 
 	d.Wait()
 	b.acknowledge(ctx, offset)
-	return nil
+	// Cancellation is how the bot is told to stop, so reaching here is a clean
+	// exit. Returning ctx.Err() would make every graceful shutdown a failure.
+	return nil //nolint:nilerr // the only error on this path is the expected cancellation
 }
 
 // acknowledge confirms the handled updates to Telegram.
@@ -204,16 +206,16 @@ func (b *Bot) handleCallback(ctx context.Context, q *telegram.CallbackQuery) {
 		cc.chat, cc.msg = q.Message.Chat.ID, q.Message.MessageID
 	}
 
-	var (
-		toast string
-		alert bool
-	)
+	var toast string
 	cb, err := parseCallback(q.Data)
 	if err == nil {
 		toast, err = b.route(ctx, cc, cb)
 	}
+	// A refusal is shown as a dialog the user has to dismiss: a toast
+	// vanishes before "this size is sold out" is read. Success is a toast.
+	alert := err != nil
 	if err != nil {
-		toast, alert = b.explain(ctx, err, q.Data)
+		toast = b.explain(ctx, err, q.Data)
 	}
 
 	// Answered last and always, error or not: an unanswered callback leaves a
@@ -267,23 +269,22 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 }
 
 // explain turns an error into what the user is told. Expected outcomes -- a
-// size sold out, a limit reached -- are shown as a dialog the user has to
-// dismiss, since a toast vanishes before it is read. Anything else is a bug or
-// an outage: it is logged, and the user gets a generic apology rather than an
-// error string.
-func (b *Bot) explain(ctx context.Context, err error, data string) (string, bool) {
+// size sold out, a limit reached -- get their own wording. Anything else is a
+// bug or an outage: it is logged, and the user gets a generic apology rather
+// than an error string.
+func (b *Bot) explain(ctx context.Context, err error, data string) string {
 	switch {
 	case errors.Is(err, errBadCallback):
-		return msgStaleButton, true
+		return msgStaleButton
 	case errors.Is(err, domain.ErrOutOfStock):
-		return msgOutOfStock, true
+		return msgOutOfStock
 	case errors.Is(err, domain.ErrQtyLimit):
-		return msgQtyLimit, true
+		return msgQtyLimit
 	case errors.Is(err, domain.ErrCartFull):
-		return msgCartFull, true
+		return msgCartFull
 	case errors.Is(err, domain.ErrNotFound):
-		return msgGone, true
+		return msgGone
 	}
 	b.log.ErrorContext(ctx, "callback failed", slog.String("data", data), slog.Any("error", err))
-	return msgInternalFail, true
+	return msgInternalFail
 }
