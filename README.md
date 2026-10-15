@@ -1,5 +1,7 @@
 # ai_shop_bot
 
+🇺🇦 [Українська версія](README.uk.md)
+
 A Telegram shop for car parts with an AI consultant, written in Go.
 
 A buyer writes the way they would to a person at the counter — *"front brake
