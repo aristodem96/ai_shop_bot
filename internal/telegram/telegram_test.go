@@ -143,3 +143,42 @@ func TestForceReplyEncodes(t *testing.T) {
 	require.NoError(t, c.SendMessage(context.Background(), 5, "Назва?", &ForceReply{ForceReply: true, Placeholder: "Назва"}))
 	assert.Equal(t, map[string]any{"force_reply": true, "input_field_placeholder": "Назва"}, (*got)["reply_markup"])
 }
+
+// A nil keyboard of a concrete type is "no keyboard", not "reply_markup":
+// null, which Telegram rejects together with the message.
+func TestNilKeyboardIsOmitted(t *testing.T) {
+	c, got, _ := stub(t, `{"ok":true,"result":{}}`)
+	var none *InlineKeyboard
+	require.NoError(t, c.SendMessage(context.Background(), 5, "hi", none))
+	_, sent := (*got)["reply_markup"]
+	assert.False(t, sent)
+
+	require.NoError(t, c.SendPhoto(context.Background(), 5, "https://x/p.png", "hi", (*ReplyKeyboard)(nil)))
+	_, sent = (*got)["reply_markup"]
+	assert.False(t, sent)
+}
+
+// A flood wait of a few seconds is sat out, not passed on as a lost message.
+func TestFloodWaitIsRetried(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls == 1 {
+			_, _ = io.WriteString(w, `{"ok":false,"error_code":429,"description":"Too Many Requests: retry after 1","parameters":{"retry_after":1}}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"ok":true,"result":{}}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	start := time.Now()
+	require.NoError(t, NewWithBaseURL(srv.URL, token).SendMessage(context.Background(), 5, "hi", nil))
+	assert.Equal(t, 2, calls)
+	assert.GreaterOrEqual(t, time.Since(start), time.Second, "after the wait Telegram asked for")
+}
+
+func TestLongFloodWaitIsReported(t *testing.T) {
+	c, _, _ := stub(t, `{"ok":false,"error_code":429,"description":"Too Many Requests: retry after 600","parameters":{"retry_after":600}}`)
+	err := c.SendMessage(context.Background(), 5, "hi", nil)
+	require.ErrorContains(t, err, "429", "ten minutes is a limit to report, not to sit out")
+}

@@ -216,7 +216,7 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, html string, mar
 		"parse_mode":           "HTML",
 		"link_preview_options": map[string]any{"is_disabled": true},
 	}
-	if markup != nil {
+	if present(markup) {
 		params["reply_markup"] = markup
 	}
 	return c.call(ctx, "sendMessage", params, nil)
@@ -231,10 +231,28 @@ func (c *Client) SendPhoto(ctx context.Context, chatID int64, photoURL, captionH
 		"caption":    captionHTML,
 		"parse_mode": "HTML",
 	}
-	if markup != nil {
+	if present(markup) {
 		params["reply_markup"] = markup
 	}
 	return c.call(ctx, "sendPhoto", params, nil)
+}
+
+// present reports whether a keyboard was given. A nil *InlineKeyboard in a
+// ReplyMarkup is an interface that is not nil, and it marshals to null,
+// which Telegram rejects with the whole message ("object expected as reply
+// markup"). A caller passing "no keyboard" that way gets no keyboard.
+func present(m ReplyMarkup) bool {
+	switch v := m.(type) {
+	case nil:
+		return false
+	case *InlineKeyboard:
+		return v != nil
+	case *ReplyKeyboard:
+		return v != nil
+	case *ForceReply:
+		return v != nil
+	}
+	return true
 }
 
 // EditMessageText replaces the text and keyboard of a text message.
@@ -365,49 +383,82 @@ type envelope struct {
 	Result      json.RawMessage `json:"result"`
 	ErrorCode   int             `json:"error_code"`
 	Description string          `json:"description"`
+	Parameters  struct {
+		// RetryAfter is how many seconds a flood-limited bot must wait.
+		RetryAfter int `json:"retry_after"`
+	} `json:"parameters"`
 }
+
+// maxRetryAfter is the longest flood wait the client sits out. Telegram asks
+// for a few seconds when a chat gets messages too fast -- a manager tapping
+// through a dialog -- and dropping the message then loses the answer to a
+// tap. A longer wait is a real limit, and the caller hears of it.
+const maxRetryAfter = 10 * time.Second
+
+// floodRetries bounds the waits for one call.
+const floodRetries = 2
 
 func (c *Client) call(ctx context.Context, method string, params map[string]any, out any) error {
 	body, err := json.Marshal(params)
 	if err != nil {
 		return fmt.Errorf("telegram: encode %s: %w", method, err)
 	}
+	for attempt := 0; ; attempt++ {
+		wait, err := c.do(ctx, method, body, out)
+		if wait == 0 || attempt == floodRetries {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(wait):
+		}
+	}
+}
 
+// do makes one call. A short flood wait comes back as wait, with the error
+// to return if the caller does not retry.
+func (c *Client) do(ctx context.Context, method string, body []byte, out any) (wait time.Duration, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.baseURL+"/bot"+c.token+"/"+method, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("telegram: build %s request: %w", method, redact(err))
+		return 0, fmt.Errorf("telegram: build %s request: %w", method, redact(err))
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("telegram: %s: %w", method, redact(err))
+		return 0, fmt.Errorf("telegram: %s: %w", method, redact(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
-		return fmt.Errorf("telegram: read %s response: %w", method, err)
+		return 0, fmt.Errorf("telegram: read %s response: %w", method, err)
 	}
 
 	var env envelope
 	if err := json.Unmarshal(raw, &env); err != nil {
-		return fmt.Errorf("telegram: %s: unexpected response (HTTP %d)", method, resp.StatusCode)
+		return 0, fmt.Errorf("telegram: %s: unexpected response (HTTP %d)", method, resp.StatusCode)
 	}
 	if !env.OK {
 		if strings.Contains(env.Description, "message is not modified") {
-			return ErrNotModified
+			return 0, ErrNotModified
 		}
-		return fmt.Errorf("telegram: %s failed (%d): %s", method, env.ErrorCode, env.Description)
+		err := fmt.Errorf("telegram: %s failed (%d): %s", method, env.ErrorCode, env.Description)
+		retry := time.Duration(env.Parameters.RetryAfter) * time.Second
+		if env.ErrorCode == http.StatusTooManyRequests && retry > 0 && retry <= maxRetryAfter {
+			return retry, err
+		}
+		return 0, err
 	}
 	if out == nil {
-		return nil
+		return 0, nil
 	}
 	if err := json.Unmarshal(env.Result, out); err != nil {
-		return fmt.Errorf("telegram: decode %s result: %w", method, err)
+		return 0, fmt.Errorf("telegram: decode %s result: %w", method, err)
 	}
-	return nil
+	return 0, nil
 }
 
 // redact strips the request URL from a transport error.
