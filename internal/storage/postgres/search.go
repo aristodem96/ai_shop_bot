@@ -35,7 +35,10 @@ func (r *CatalogRepository) Search(ctx context.Context, f service.SearchFilter) 
 	w.add(available)
 
 	if f.Category != "" {
-		w.add("p.category_id = (SELECT id FROM categories WHERE slug = " + w.arg(f.Category) + ")")
+		// A section's slug finds everything under it.
+		ph := w.arg(f.Category)
+		w.add("p.category_id IN (SELECT c.id FROM categories c LEFT JOIN categories s ON s.id = c.parent_id" +
+			" WHERE c.slug = " + ph + " OR s.slug = " + ph + ")")
 	}
 	if f.VehicleID != 0 {
 		w.add(fitsVehicle(w.arg(f.VehicleID)))

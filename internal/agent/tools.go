@@ -50,12 +50,27 @@ type toolbox struct {
 func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, orders Orders, cats []domain.Category) *toolbox {
 	tb := &toolbox{catalog: catalog, cart: cart, garage: garage, kits: kits, orders: orders, now: time.Now,
 		catSlug: make(map[int64]string, len(cats))}
+	// The model sees the tree as "section: sub, sub": a section's slug
+	// searches everything under it, a subcategory's only itself.
 	slugs := make([]string, 0, len(cats))
 	catalogue := make([]string, 0, len(cats))
 	for _, c := range cats {
 		tb.catSlug[c.ID] = c.Slug
 		slugs = append(slugs, c.Slug)
-		catalogue = append(catalogue, c.Slug+" ("+c.Title+")")
+		if c.ParentID != 0 {
+			continue
+		}
+		var subs []string
+		for _, sub := range cats {
+			if sub.ParentID == c.ID {
+				subs = append(subs, sub.Slug)
+			}
+		}
+		entry := c.Slug + " (" + c.Title + ")"
+		if len(subs) > 0 {
+			entry += ": " + strings.Join(subs, ", ")
+		}
+		catalogue = append(catalogue, entry)
 	}
 
 	str := func(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
@@ -99,7 +114,8 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, ord
 		{
 			Name: "search_parts",
 			Description: "Search the catalogue. Returns only parts that can be bought (in stock or on order), cheapest first, or best keyword match " +
-				"first when query is set. Categories: " + strings.Join(catalogue, ", ") + ".",
+				"first when query is set. Categories, as section: its subcategories (a section finds everything under it): " +
+				strings.Join(catalogue, "; ") + ".",
 			Schema: object(map[string]any{
 				"vehicle_id":    integer("Only parts that fit this vehicle; universal products always match."),
 				"category":      map[string]any{"type": "string", "enum": slugs, "description": "Kind of part."},

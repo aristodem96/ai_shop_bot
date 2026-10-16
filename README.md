@@ -434,7 +434,18 @@ actually sends:
 - **most of it is not on the shop's shelf**: a part *on order* sells without
   stock and shows when it arrives;
 - **no photos, often no category**: a card without a photo goes out as text,
-  and rules in the profile sort rows into sections by words in the name.
+  and the category comes from the name.
+
+**Categories are a tree, and the tree sorts the rows.**
+[data/categories.csv](data/categories.csv) holds 13 sections and about 50
+subcategories — brakes, engine, bodywork, steering, wheels — each with the
+word fragments, Ukrainian and Russian, that file a part there. When several
+match, the longest wins: "фильтр масл" (oil filter) beats "масл" (oil),
+"амортизатор багаж" (a boot strut) beats "амортиз" (a shock absorber). On the
+real price list this left 2.6% of 80 942 products uncategorised; the profile
+had no rules at all. The file ships in the binary and is synced on start. The
+bot's menu goes section → subcategory → products, counts what is behind each
+button for the buyer's car, and hides what is empty for it.
 
 Two steps, vehicles first, since a price list's fitments can only point at
 cars the catalogue knows:
@@ -546,7 +557,7 @@ internal/
   importer/            price list profiles, parsing, brand and vehicle matching
   config/              environment configuration
 migrations/            goose migrations, embedded in the binary
-data/vehicles.csv      the vehicle directory
+data/                  the category tree and the vehicle directory
 profiles/              supplier profiles the managers' chat imports with
 docs/import/           an example price list
 ```

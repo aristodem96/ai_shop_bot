@@ -67,6 +67,9 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
+	if err := postgres.SyncCategories(startupCtx, pool); err != nil {
+		return err
+	}
 
 	rdb, err := redisstore.NewClient(startupCtx, cfg.Redis.Addr, cfg.Redis.Password, cfg.Redis.DB)
 	if err != nil {

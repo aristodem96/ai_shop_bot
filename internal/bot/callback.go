@@ -20,6 +20,7 @@ const (
 	actCategories     action = "cats" // edit the message into the category menu
 	actCategory       action = "c"    // c:<category>:<page> edit into a product page
 	actCategoryN      action = "cn"   // cn:<category> send a product page as a new message
+	actCategoryAll    action = "ca"   // ca:<section>:<page> every product of a section
 	actProduct        action = "p"    // p:<product> send a product card
 	actAdd            action = "a"    // a:<product> add one unit to the cart
 	actAnalogues      action = "s"    // s:<product> send interchangeable parts
@@ -45,7 +46,7 @@ const (
 // arity is how many arguments each action takes. Parsing checks it, so a
 // handler can index the arguments without guarding against short input.
 var arity = map[action]int{
-	actCategories: 0, actCategory: 2, actCategoryN: 1, actProduct: 1,
+	actCategories: 0, actCategory: 2, actCategoryN: 1, actCategoryAll: 2, actProduct: 1,
 	actAdd: 1, actAnalogues: 1, actCart: 0, actInc: 1, actDec: 1, actDel: 1,
 	actClear: 0, actForgetCar: 0, actKit: 0, actKitAdd: 0, actNoop: 0,
 	actCheckout: 0, actPay: 0, actEditContacts: 0, actCancelCheckout: 0, actManage: 2,

@@ -7,6 +7,7 @@ import (
 	"encoding/base32"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -31,8 +32,8 @@ type Store interface {
 	// canonical brand name.
 	BrandAliases(ctx context.Context) (map[string]string, error)
 	VehicleModels(ctx context.Context) ([]Model, error)
-	// CategorySlugs lists the categories that exist.
-	CategorySlugs(ctx context.Context) ([]string, error)
+	// Categories lists the category tree with its keywords, in file order.
+	Categories(ctx context.Context) ([]Category, error)
 	// Apply writes the batch in one transaction, or only measures what it
 	// would write when dryRun is set.
 	Apply(ctx context.Context, b *Batch, dryRun bool) (Result, error)
@@ -165,9 +166,18 @@ func Run(ctx context.Context, store Store, p *Profile, path string, opts Options
 
 // Resolve turns parsed offers into catalogue products.
 func Resolve(ctx context.Context, store Store, p *Profile, parsed *Parsed) (*Batch, error) {
-	if err := checkCategories(ctx, store, p); err != nil {
+	cats, err := store.Categories(ctx)
+	if err != nil {
 		return nil, err
 	}
+	if err := checkCategories(cats, p); err != nil {
+		return nil, err
+	}
+	byID := make(map[string]*Category, len(cats))
+	for i := range cats {
+		byID[cats[i].Slug] = &cats[i]
+	}
+	classifier := NewClassifier(cats)
 	brands, err := resolveBrands(ctx, store, parsed.Offers)
 	if err != nil {
 		return nil, err
@@ -210,8 +220,17 @@ func Resolve(ctx context.Context, store Store, p *Profile, parsed *Parsed) (*Bat
 		if pn := domain.NormalizeOEM(o.PartNumber); pn != "" {
 			prod.OEM = []string{pn}
 		}
+		// The profile's rules know this supplier; the tree's keywords know
+		// parts in general. The first say wins, then the category's own
+		// part type and universality fill what the rule left open.
 		if r := matchRule(p.Rules, o); r != nil {
 			prod.Category, prod.PartType, prod.Universal = r.Category, r.PartType, r.Universal
+		} else if c := classifier.Classify(o.Name + " " + o.Category); c != nil {
+			prod.Category = c.Slug
+		}
+		if c := byID[prod.Category]; c != nil {
+			prod.PartType = cmp.Or(prod.PartType, c.PartType)
+			prod.Universal = prod.Universal || c.Universal
 		}
 		categories[prod.Category]++
 
@@ -235,31 +254,33 @@ func Resolve(ctx context.Context, store Store, p *Profile, parsed *Parsed) (*Bat
 	return b, nil
 }
 
-// checkCategories fails before any work when a profile names a category that
-// does not exist: every row of it would land nowhere.
-func checkCategories(ctx context.Context, store Store, p *Profile) error {
-	slugs, err := store.CategorySlugs(ctx)
-	if err != nil {
-		return err
-	}
-	exists := make(map[string]bool, len(slugs))
-	for _, s := range slugs {
-		exists[s] = true
-	}
+// checkCategories fails before any work when a profile files rows where no
+// product can be: in a category that does not exist, or in a section that has
+// subcategories, which the menu shows instead of products.
+func checkCategories(cats []Category, p *Profile) error {
+	leaves := Leaves(cats)
 	for s := range p.CreateCategories {
-		exists[s] = true
+		leaves[s] = true
 	}
-	var errs []error
-	if !exists[p.DefaultCategory] {
-		errs = append(errs, fmt.Errorf("default_category %q does not exist", p.DefaultCategory))
-	}
-	for i, r := range p.Rules {
-		if !exists[r.Category] {
-			errs = append(errs, fmt.Errorf("rules[%d]: category %q does not exist", i, r.Category))
+	check := func(what, slug string) error {
+		if leaves[slug] {
+			return nil
 		}
+		for _, c := range cats {
+			if c.Slug == slug {
+				return fmt.Errorf("%s: %q has subcategories; name one of them", what, slug)
+			}
+		}
+		return fmt.Errorf("%s: no category %q", what, slug)
+	}
+	errs := make([]error, 0, 1+len(p.Rules))
+	errs = append(errs, check("default_category", p.DefaultCategory))
+	for i, r := range p.Rules {
+		errs = append(errs, check(fmt.Sprintf("rules[%d]", i), r.Category))
 	}
 	if err := errors.Join(errs...); err != nil {
-		return fmt.Errorf("importer: %w (add it to create_categories, or use one of %s)", err, strings.Join(slugs, ", "))
+		names := slices.Sorted(maps.Keys(leaves))
+		return fmt.Errorf("importer: %w (categories: %s)", err, strings.Join(names, ", "))
 	}
 	return nil
 }

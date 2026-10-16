@@ -28,6 +28,29 @@ func (f *fakeCatalog) Categories(context.Context) ([]domain.Category, error) {
 	return f.categories, nil
 }
 
+// inCategory mirrors the SQL: a section holds its subcategories' products.
+func (f *fakeCatalog) inCategory(productCat, categoryID int64) bool {
+	if productCat == categoryID {
+		return true
+	}
+	for _, c := range f.categories {
+		if c.ID == productCat && c.ParentID == categoryID {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *fakeCatalog) CategoryCounts(_ context.Context, vehicleID int64) (map[int64]int, error) {
+	out := make(map[int64]int)
+	for _, p := range f.products {
+		if vehicleID == 0 || p.FitsVehicle(vehicleID) {
+			out[p.CategoryID]++
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeCatalog) Category(_ context.Context, id int64) (*domain.Category, error) {
 	for _, c := range f.categories {
 		if c.ID == id {
@@ -41,7 +64,7 @@ func (f *fakeCatalog) ProductsByCategory(_ context.Context, categoryID, vehicleI
 	f.pageVehicles = append(f.pageVehicles, vehicleID)
 	var all []domain.Product
 	for _, p := range f.products {
-		if p.CategoryID == categoryID && (vehicleID == 0 || p.FitsVehicle(vehicleID)) {
+		if f.inCategory(p.CategoryID, categoryID) && (vehicleID == 0 || p.FitsVehicle(vehicleID)) {
 			all = append(all, p)
 		}
 	}

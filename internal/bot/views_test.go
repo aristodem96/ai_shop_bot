@@ -93,3 +93,47 @@ func TestPlural(t *testing.T) {
 		assert.Equal(t, want, plural(n, "день", "дні", "днів"))
 	}
 }
+
+func TestCategoriesViewShowsCounts(t *testing.T) {
+	menu := []service.CategoryEntry{
+		{Category: domain.Category{ID: 1, Title: "Гальмівна система"}, Count: 3301},
+		{Category: domain.Category{ID: 9, Title: "Інше"}, Count: 4},
+	}
+	text, kb := categoriesView(menu, &octavia)
+	assert.Contains(t, text, "Оберіть розділ")
+	assert.Equal(t, "Гальмівна система · 3 301", kb.Rows[0][0].Text, "the count says what is behind a button")
+	assert.Equal(t, encode(actCategory, 1, 0), kb.Rows[0][0].CallbackData)
+
+	text, _ = categoriesView(nil, &octavia)
+	assert.Contains(t, text, "поки нічого немає", "a car the catalogue has nothing for is told so")
+}
+
+func TestSectionView(t *testing.T) {
+	brakes := domain.Category{ID: 1, Title: "Гальмівна система"}
+	pg := &service.ProductPage{Category: brakes, Total: 14, Pages: 1, Children: []service.CategoryEntry{
+		{Category: domain.Category{ID: 11, Title: "Гальмівні колодки", ParentID: 1}, Count: 9},
+		{Category: domain.Category{ID: 12, Title: "Гальмівні диски", ParentID: 1}, Count: 5},
+	}}
+	text, kb := productPageView(pg)
+	assert.Contains(t, text, "Оберіть підкатегорію")
+	assert.Equal(t, []string{
+		encode(actCategory, 11, 0), encode(actCategory, 12, 0), encode(actCategoryAll, 1, 0), encode(actCategories), encode(actCart),
+	}, callbacks(kb))
+	assert.Equal(t, "📋 Усі товари розділу · 14", kb.Rows[2][0].Text)
+}
+
+func TestProductPageBackLeadsUp(t *testing.T) {
+	brakes := domain.Category{ID: 1, Title: "Гальмівна система"}
+	pads := domain.Category{ID: 11, Title: "Гальмівні колодки", ParentID: 1}
+	many := make([]domain.Product, service.PageSize)
+
+	_, kb := productPageView(&service.ProductPage{Category: pads, Parent: &brakes, Products: many, Pages: 2})
+	back := kb.Rows[len(kb.Rows)-1][0]
+	assert.Equal(t, "⬅️ Гальмівна система", back.Text, "a subcategory goes back to its section")
+	assert.Equal(t, encode(actCategory, 1, 0), back.CallbackData)
+	assert.Contains(t, callbacks(kb), encode(actCategory, 11, 1))
+
+	_, kb = productPageView(&service.ProductPage{Category: brakes, All: true, Products: many, Pages: 2})
+	assert.Contains(t, callbacks(kb), encode(actCategoryAll, 1, 1), "paging a whole section stays in it")
+	assert.Equal(t, encode(actCategory, 1, 0), kb.Rows[len(kb.Rows)-1][0].CallbackData, "and goes back to its menu")
+}

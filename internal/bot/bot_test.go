@@ -89,11 +89,11 @@ func (f *fakeTelegram) last(method string) sent {
 // fakeCatalog serves one category with one pair of brake pads.
 type fakeCatalog struct{ pads domain.Product }
 
-func (f *fakeCatalog) Categories(context.Context) ([]domain.Category, error) {
-	return []domain.Category{{ID: 1, Slug: "brakes", Title: "Гальмівна система"}}, nil
+func (f *fakeCatalog) Menu(context.Context, *domain.Vehicle) ([]service.CategoryEntry, error) {
+	return []service.CategoryEntry{{Category: domain.Category{ID: 1, Slug: "brakes", Title: "Гальмівна система"}, Count: 1}}, nil
 }
 
-func (f *fakeCatalog) CategoryPage(_ context.Context, id int64, car *domain.Vehicle, _ int) (*service.ProductPage, error) {
+func (f *fakeCatalog) CategoryPage(_ context.Context, id int64, car *domain.Vehicle, _ int, _ bool) (*service.ProductPage, error) {
 	if id != 1 {
 		return nil, domain.ErrNotFound
 	}

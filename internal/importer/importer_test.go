@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/text/encoding/charmap"
 
+	"github.com/aristodem96/ai_shop_bot/data"
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
 )
 
@@ -118,7 +119,7 @@ func TestParseKeyByBrandAndPartNumber(t *testing.T) {
 type fakeStore struct {
 	aliases map[string]string
 	models  []Model
-	slugs   []string
+	cats    []Category
 }
 
 func (f *fakeStore) BrandAliases(context.Context) (map[string]string, error) {
@@ -128,8 +129,8 @@ func (f *fakeStore) BrandAliases(context.Context) (map[string]string, error) {
 	}
 	return out, nil
 }
-func (f *fakeStore) VehicleModels(context.Context) ([]Model, error)  { return f.models, nil }
-func (f *fakeStore) CategorySlugs(context.Context) ([]string, error) { return f.slugs, nil }
+func (f *fakeStore) VehicleModels(context.Context) ([]Model, error) { return f.models, nil }
+func (f *fakeStore) Categories(context.Context) ([]Category, error) { return f.cats, nil }
 func (f *fakeStore) Apply(context.Context, *Batch, bool) (Result, error) {
 	return Result{}, nil
 }
@@ -143,7 +144,15 @@ func catalogue() *fakeStore {
 			{ID: 3, Make: "Chery", Model: "Tiggo 7"},
 			{ID: 4, Make: "Chery", Model: "Tiggo 4"},
 		},
-		slugs: []string{"brakes", "suspension", "other"},
+		cats: []Category{
+			{Slug: "brakes", Title: "Гальма"},
+			{Slug: "suspension", Title: "Підвіска", Keywords: []string{"амортиз"}},
+			{Slug: "body", Title: "Кузов"},
+			{Slug: "struts", Parent: "body", Title: "Упори", Keywords: []string{"амортизатор багаж"}},
+			{Slug: "filters", Title: "Фільтри"},
+			{Slug: "oil-filters", Parent: "filters", Title: "Масляні", PartType: "oil_filter", Keywords: []string{"фільтр масл"}},
+			{Slug: "other", Title: "Інше"},
+		},
 	}
 }
 
@@ -166,7 +175,7 @@ func TestResolve(t *testing.T) {
 	assert.Empty(t, b.Products[2].Brand, "a missing brand stays missing, it is not invented")
 	assert.Equal(t, []string{"5Q0698151"}, pads.OEM)
 	assert.Equal(t, "brakes", pads.Category)
-	assert.Equal(t, "other", b.Products[2].Category, "no rule matched")
+	assert.Equal(t, "suspension", b.Products[2].Category, "no rule matched; the tree's keywords did")
 	assert.Nil(t, pads.Stock)
 	assert.Equal(t, 3, *pads.LeadDays, "a file without stock is a supplier's list: everything on order")
 	assert.Equal(t, []ModelFit{{ModelID: 1}, {ModelID: 2}}, pads.Fits)
@@ -212,7 +221,7 @@ func TestResolveRejectsUnknownCategory(t *testing.T) {
 	parsed, err := Parse([]Sheet{priceSheet}, p)
 	require.NoError(t, err)
 	_, err = Resolve(context.Background(), catalogue(), p, parsed)
-	require.ErrorContains(t, err, `"filtres" does not exist`)
+	require.ErrorContains(t, err, `no category "filtres"`)
 }
 
 func TestProfileValidate(t *testing.T) {
@@ -287,4 +296,83 @@ func TestExceeded(t *testing.T) {
 	assert.True(t, Exceeded(21, 100, 20))
 	assert.False(t, Exceeded(5, 0, 20), "nothing on sale, nothing to protect")
 	assert.True(t, Exceeded(1, 1, 0), "a zero limit allows none")
+}
+
+func TestResolveRejectsSectionWithSubcategories(t *testing.T) {
+	p := priceList()
+	p.Rules = []Rule{{Contains: []string{"фільтр"}, Category: "filters"}}
+	parsed, err := Parse([]Sheet{priceSheet}, p)
+	require.NoError(t, err)
+	_, err = Resolve(context.Background(), catalogue(), p, parsed)
+	require.ErrorContains(t, err, `"filters" has subcategories`, "products go to a subcategory, not over it")
+}
+
+func TestResolveFilesByTreeKeywords(t *testing.T) {
+	sh := Sheet{Name: "s", Rows: [][]string{
+		{"Назва", "Ціна, грн", "Артикул"},
+		{"Фільтр масляний", "100", "A1"},
+		{"Амортизатор багажника", "100", "A2"},
+		{"Амортизатор передній", "100", "A3"},
+		{"Колодки передні", "100", "A4"},
+		{"Щось незрозуміле", "100", "A5"},
+	}}
+	p := priceList()
+	p.Columns = Columns{Name: "Назва", Price: "Ціна, грн", PartNumber: "Артикул"}
+	b := resolveSheet(t, p, sh)
+
+	got := make([]string, len(b.Products))
+	for i, prod := range b.Products {
+		got[i] = prod.Category
+	}
+	assert.Equal(t, []string{"oil-filters", "struts", "suspension", "brakes", "other"}, got,
+		"the longest keyword wins: a boot strut is not a shock absorber; the profile's rule still comes first")
+	assert.Equal(t, "oil_filter", b.Products[0].PartType, "the category passes on its part type")
+}
+
+func TestParseCategoriesShippedTree(t *testing.T) {
+	cats, err := ParseCategories(data.Categories)
+	require.NoError(t, err, "the shipped tree is valid")
+	leaves := Leaves(cats)
+	assert.True(t, leaves["brake-pads"])
+	assert.False(t, leaves["brakes"], "a section with subcategories holds none itself")
+	assert.True(t, leaves["other"])
+
+	c := NewClassifier(cats)
+	for name, want := range map[string]string{
+		"Фильтр масляный Chery":            "oil-filters",
+		"Амортизатор багажника TIGGO 4":    "body-hardware",
+		"Амортизатор задний":               "shock-absorbers",
+		"Колодки тормозные задние":         "brake-pads",
+		"Насос масляный":                   "engine-parts",
+		"Масло моторное синтетика 5W30":    "engine-oil",
+		"Наконечник рулевой /E5 CTR":       "tie-rods",
+		"Подкрылок передний правый":        "body-panels",
+		"Противотуманка передняя левая":    "lighting",
+		"Термостат Chery (87°C) KIMIKO":    "cooling",
+		"Барабан тормозной Chery KLM":      "brake-drums",
+		"Подшипник муфты кондиционера":     "climate",
+		"Свеча зажигания NGK":              "spark-plugs",
+		"подушка двигуна Lanos передня":    "engine-mounts",
+		"Подшипник вторичного вала":        "gearbox",
+		"диск колісний DAEWOO Lanos 13х5J": "wheels",
+		"Щуп рівня оливи Nexia":            "engine-parts",
+		"Сайлент-блок задньої балки":       "arms",
+	} {
+		got := c.Classify(name)
+		require.NotNil(t, got, name)
+		assert.Equal(t, want, got.Slug, name)
+	}
+}
+
+func TestParseCategoriesRejectsMistakes(t *testing.T) {
+	_, err := ParseCategories([]byte("slug,parent,title,part_type,universal,keywords\n" +
+		"brakes,,Гальма,,,гальм\n" +
+		"brake-pads,brakes,Колодки,,,колодк\n" +
+		"pads-front,brake-pads,Передні,,,\n" +
+		"orphan,nowhere,Сирота,,,\n" +
+		"Bad Slug,,X,,,\n"))
+	require.Error(t, err)
+	for _, want := range []string{`"brakes" has subcategories`, `"brake-pads" is a subcategory`, `parent "nowhere"`, `bad slug`} {
+		assert.ErrorContains(t, err, want)
+	}
 }

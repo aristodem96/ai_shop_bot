@@ -86,7 +86,9 @@ func TestImportExample(t *testing.T) {
 	assert.True(t, imported(t, "10003").FitsVehicle(vehicleByCode(t, "corolla-e210-16")), "2019- overlaps a car made from 2019")
 	brush := imported(t, "10008")
 	assert.True(t, brush.Universal)
-	assert.Equal(t, categoryBySlug(t, "electrical"), brush.CategoryID)
+	assert.Equal(t, categoryBySlug(t, "mirrors-glass"), brush.CategoryID, "the profile's rule")
+	assert.Equal(t, categoryBySlug(t, "brake-pads"), pads.CategoryID, "the tree's keywords")
+	assert.Equal(t, categoryBySlug(t, "arms"), imported(t, "10005").CategoryID)
 
 	// A second run of the same file changes nothing but the timestamps.
 	_, res = importExample(t, exampleFile, false)

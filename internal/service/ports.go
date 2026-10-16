@@ -17,6 +17,9 @@ type CatalogRepository interface {
 	// plus the total count. A non-zero vehicleID limits it to parts that fit
 	// that vehicle, universal ones included.
 	ProductsByCategory(ctx context.Context, categoryID, vehicleID int64, limit, offset int) ([]domain.Product, int, error)
+	// CategoryCounts counts the active products filed directly in each
+	// category, only those that fit the vehicle unless vehicleID is zero.
+	CategoryCounts(ctx context.Context, vehicleID int64) (map[int64]int, error)
 	// Product returns an active product with the vehicles it fits.
 	Product(ctx context.Context, id int64) (*domain.Product, error)
 	// Analogues returns in-stock parts interchangeable with p: the same OEM

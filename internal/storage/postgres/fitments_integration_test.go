@@ -82,3 +82,26 @@ func TestDirectFitmentNoteWinsOverModel(t *testing.T) {
 	assert.Equal(t, "передня вісь, з ABS", p.FitNotes[diesel])
 	assert.Equal(t, "передня вісь", p.FitNotes[vehicleByCode(t, "logan-2-16")])
 }
+
+// The menu counts must agree with the pages they open: both answer "what
+// fits this car", by different queries.
+func TestCategoryCountsMatchPages(t *testing.T) {
+	skipShort(t)
+	ctx := context.Background()
+	repo := NewCatalogRepository(testPool)
+	cats, err := repo.Categories(ctx)
+	require.NoError(t, err)
+
+	for _, vehicle := range []int64{0, vehicleByCode(t, "camry-xv70-25"), vehicleByCode(t, "lanos-15")} {
+		counts, err := repo.CategoryCounts(ctx, vehicle)
+		require.NoError(t, err)
+		for _, c := range cats {
+			if c.ParentID == 0 {
+				continue // a section's page counts its subcategories, checked through them
+			}
+			_, total, err := repo.ProductsByCategory(ctx, c.ID, vehicle, 1, 0)
+			require.NoError(t, err)
+			assert.Equal(t, total, counts[c.ID], "%s for vehicle %d", c.Slug, vehicle)
+		}
+	}
+}

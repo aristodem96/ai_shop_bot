@@ -6,11 +6,14 @@ import (
 	"unicode"
 )
 
-// Category groups products in the catalogue menu.
+// Category groups products in the catalogue menu. Categories form a tree
+// two levels deep: sections, and their subcategories.
 type Category struct {
 	ID    int64
 	Slug  string
 	Title string
+	// ParentID is the section a subcategory belongs to, zero for a section.
+	ParentID int64
 }
 
 // Vehicle is one make, model, generation and engine -- the level at which

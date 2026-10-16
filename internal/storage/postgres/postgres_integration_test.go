@@ -80,6 +80,10 @@ func runWithPostgres(m *testing.M) int {
 	}
 	defer testPool.Close()
 
+	if err := SyncCategories(ctx, testPool); err != nil {
+		fmt.Fprintf(os.Stderr, "could not sync categories: %v\n", err)
+		return 1
+	}
 	if _, err := seed.Run(ctx, testPool); err != nil {
 		fmt.Fprintf(os.Stderr, "could not seed: %v\n", err)
 		return 1

@@ -55,17 +55,22 @@ func (r *ImportRepository) VehicleModels(ctx context.Context) ([]importer.Model,
 	return models, nil
 }
 
-// CategorySlugs lists the categories.
-func (r *ImportRepository) CategorySlugs(ctx context.Context) ([]string, error) {
-	rows, err := r.pool.Query(ctx, `SELECT slug FROM categories ORDER BY position, id`)
+// Categories lists the category tree in menu order, sections before their
+// subcategories.
+func (r *ImportRepository) Categories(ctx context.Context) ([]importer.Category, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT c.slug, coalesce(p.slug, ''), c.title, c.part_type, c.universal, c.keywords
+		FROM categories c
+		LEFT JOIN categories p ON p.id = c.parent_id
+		ORDER BY c.position, c.id`)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: list categories: %w", err)
 	}
-	slugs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	cats, err := pgx.CollectRows(rows, pgx.RowToStructByPos[importer.Category])
 	if err != nil {
 		return nil, fmt.Errorf("postgres: scan categories: %w", err)
 	}
-	return slugs, nil
+	return cats, nil
 }
 
 // errDryRun rolls a dry run back once its counts are taken.

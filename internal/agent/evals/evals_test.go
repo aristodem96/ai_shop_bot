@@ -82,6 +82,10 @@ func run(m *testing.M) int {
 		return 1
 	}
 	defer pool.Close()
+	if err := postgres.SyncCategories(ctx, pool); err != nil {
+		fmt.Fprintf(os.Stderr, "categories: %v\n", err)
+		return 1
+	}
 	if _, err := seed.Run(ctx, pool); err != nil {
 		fmt.Fprintf(os.Stderr, "seed: %v\n", err)
 		return 1

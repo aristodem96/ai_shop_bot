@@ -79,6 +79,9 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
+	if err := postgres.SyncCategories(ctx, pool); err != nil {
+		return err
+	}
 
 	started := time.Now()
 	if *vehicles != "" {

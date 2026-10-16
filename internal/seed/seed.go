@@ -4,6 +4,7 @@
 package seed
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -25,27 +26,39 @@ type Stats struct {
 }
 
 // Run upserts the catalogue in one transaction. It is idempotent: rows are
-// matched on their natural keys (category slug, vehicle code, SKU), so running
-// it again resets the demo to its initial state -- stock included -- without
+// matched on their natural keys (vehicle code, SKU), so running it again
+// resets the demo to its initial state -- stock included -- without
 // duplicating anything or breaking carts and garages that point at it.
+//
+// The category tree must be in the database already: it is the shop's, not
+// the demo's, and is synced from data/categories.csv on every start.
 func Run(ctx context.Context, pool *pgxpool.Pool) (Stats, error) {
 	var st Stats
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-		catIDs := make(map[string]int64, len(categories))
-		catColor := make(map[string]string, len(categories))
-		for i, c := range categories {
-			var id int64
-			err := tx.QueryRow(ctx, `
-				INSERT INTO categories (slug, title, position) VALUES ($1, $2, $3)
-				ON CONFLICT (slug) DO UPDATE SET title = EXCLUDED.title, position = EXCLUDED.position
-				RETURNING id`, c.slug, c.title, i,
-			).Scan(&id)
-			if err != nil {
-				return fmt.Errorf("seed: category %s: %w", c.slug, err)
-			}
-			catIDs[c.slug], catColor[c.slug] = id, c.imageColor
-			st.Categories++
+		catIDs := make(map[string]int64)
+		catColor := make(map[string]string)
+		rows, err := tx.Query(ctx, `
+			SELECT c.slug, c.id, coalesce(s.slug, c.slug)
+			FROM categories c LEFT JOIN categories s ON s.id = c.parent_id`)
+		if err != nil {
+			return fmt.Errorf("seed: list categories: %w", err)
 		}
+		var (
+			slug, section string
+			id            int64
+		)
+		if _, err := pgx.ForEachRow(rows, []any{&slug, &id, &section}, func() error {
+			catIDs[slug], catColor[slug] = id, cmp.Or(sectionColors[section], "555555")
+			return nil
+		}); err != nil {
+			return fmt.Errorf("seed: scan categories: %w", err)
+		}
+		for _, p := range products {
+			if _, ok := catIDs[p.category]; !ok {
+				return fmt.Errorf("seed: product %s is in category %q, which the tree does not have", p.sku, p.category)
+			}
+		}
+		st.Categories = len(catIDs)
 
 		vehicleIDs := make(map[string]int64, len(vehicles))
 		for _, v := range vehicles {

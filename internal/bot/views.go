@@ -35,23 +35,24 @@ func mainMenu() *telegram.ReplyKeyboard {
 	}
 }
 
-func categoriesView(cats []domain.Category, car *domain.Vehicle) (string, *telegram.InlineKeyboard) {
+func categoriesView(menu []service.CategoryEntry, car *domain.Vehicle) (string, *telegram.InlineKeyboard) {
 	text := "<b>Каталог</b>\n"
 	if car != nil {
 		text += "🚗 Для: " + esc(car.Label()) + "\n"
 	} else {
 		text += "Показую всі деталі. Напишіть свою машину, щоб бачити лише сумісні.\n"
 	}
-	text += "\nОберіть категорію:"
+	if len(menu) == 0 {
+		text += "\nДля цього авто в каталозі поки нічого немає."
+	} else {
+		text += "\nОберіть розділ:"
+	}
 
 	kb := &telegram.InlineKeyboard{}
-	// Two per row: category names are short, and six fit without scrolling.
-	for i := 0; i < len(cats); i += 2 {
-		row := []telegram.InlineButton{button(cats[i].Title, actCategory, cats[i].ID, 0)}
-		if i+1 < len(cats) {
-			row = append(row, button(cats[i+1].Title, actCategory, cats[i+1].ID, 0))
-		}
-		kb.Rows = append(kb.Rows, row)
+	// One per row: section names run to 25 characters, and with the count
+	// two of them do not fit a phone's button width.
+	for _, e := range menu {
+		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(entryLabel(e), actCategory, e.Category.ID, 0)})
 	}
 	last := []telegram.InlineButton{button(btnCart, actCart)}
 	if car != nil {
@@ -61,8 +62,22 @@ func categoriesView(cats []domain.Category, car *domain.Vehicle) (string, *teleg
 	return text, kb
 }
 
+// entryLabel is a menu button: the name and how many parts are behind it,
+// so a buyer does not open a section to find one part in it.
+func entryLabel(e service.CategoryEntry) string {
+	return fmt.Sprintf("%s · %s", e.Category.Title, num(e.Count))
+}
+
+// productPageView renders a category: a section's subcategories, or a page
+// of products.
 func productPageView(pg *service.ProductPage) (string, *telegram.InlineKeyboard) {
+	if len(pg.Children) > 0 {
+		return sectionView(pg)
+	}
 	text := fmt.Sprintf("<b>%s</b>", esc(pg.Category.Title))
+	if pg.All {
+		text += " — усі товари"
+	}
 	if pg.Vehicle != nil {
 		text += "\n🚗 " + esc(pg.Vehicle.Label())
 	}
@@ -81,22 +96,57 @@ func productPageView(pg *service.ProductPage) (string, *telegram.InlineKeyboard)
 	}
 
 	if pg.Pages > 1 {
+		// Paging stays in the mode it started in: a whole section, or one
+		// category.
+		act := actCategory
+		if pg.All {
+			act = actCategoryAll
+		}
 		var nav []telegram.InlineButton
 		if pg.Page > 0 {
-			nav = append(nav, button("◀️", actCategory, pg.Category.ID, int64(pg.Page-1)))
+			nav = append(nav, button("◀️", act, pg.Category.ID, int64(pg.Page-1)))
 		}
 		nav = append(nav, button(fmt.Sprintf("%d / %d", pg.Page+1, pg.Pages), actNoop))
 		if pg.Page < pg.Pages-1 {
-			nav = append(nav, button("▶️", actCategory, pg.Category.ID, int64(pg.Page+1)))
+			nav = append(nav, button("▶️", act, pg.Category.ID, int64(pg.Page+1)))
 		}
 		kb.Rows = append(kb.Rows, nav)
 	}
 
-	kb.Rows = append(kb.Rows, []telegram.InlineButton{
-		button("⬅️ Категорії", actCategories),
-		button(btnCart, actCart),
-	})
+	kb.Rows = append(kb.Rows, []telegram.InlineButton{backButton(pg), button(btnCart, actCart)})
 	return text, kb
+}
+
+// sectionView is a section's menu: its subcategories, and everything in it
+// at once.
+func sectionView(pg *service.ProductPage) (string, *telegram.InlineKeyboard) {
+	text := fmt.Sprintf("<b>%s</b>", esc(pg.Category.Title))
+	if pg.Vehicle != nil {
+		text += "\n🚗 " + esc(pg.Vehicle.Label())
+	}
+	text += "\n\nОберіть підкатегорію:"
+
+	kb := &telegram.InlineKeyboard{}
+	for _, e := range pg.Children {
+		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(entryLabel(e), actCategory, e.Category.ID, 0)})
+	}
+	kb.Rows = append(kb.Rows,
+		[]telegram.InlineButton{button("📋 Усі товари розділу · "+num(pg.Total), actCategoryAll, pg.Category.ID, 0)},
+		[]telegram.InlineButton{button("⬅️ Розділи", actCategories), button(btnCart, actCart)},
+	)
+	return text, kb
+}
+
+// backButton leads one level up: from a subcategory to its section, from a
+// section to the list of sections.
+func backButton(pg *service.ProductPage) telegram.InlineButton {
+	switch {
+	case pg.All:
+		return button("⬅️ "+pg.Category.Title, actCategory, pg.Category.ID, 0)
+	case pg.Parent != nil:
+		return button("⬅️ "+pg.Parent.Title, actCategory, pg.Parent.ID, 0)
+	}
+	return button("⬅️ Розділи", actCategories)
 }
 
 // productLabel fits a product on one button. Button text is plain, so it is

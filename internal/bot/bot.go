@@ -35,8 +35,8 @@ type Messenger interface {
 
 // Catalog is what the bot needs from the catalogue service.
 type Catalog interface {
-	Categories(ctx context.Context) ([]domain.Category, error)
-	CategoryPage(ctx context.Context, categoryID int64, car *domain.Vehicle, page int) (*service.ProductPage, error)
+	Menu(ctx context.Context, car *domain.Vehicle) ([]service.CategoryEntry, error)
+	CategoryPage(ctx context.Context, categoryID int64, car *domain.Vehicle, page int, all bool) (*service.ProductPage, error)
 	Product(ctx context.Context, id int64) (*domain.Product, error)
 	Analogues(ctx context.Context, id int64, car *domain.Vehicle) (*domain.Product, []domain.Product, error)
 }
@@ -304,7 +304,9 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 	case actCategories:
 		return "", b.editCategories(ctx, cc)
 	case actCategory:
-		return "", b.editProductPage(ctx, cc, a[0], int(a[1]))
+		return "", b.editProductPage(ctx, cc, a[0], int(a[1]), false)
+	case actCategoryAll:
+		return "", b.editProductPage(ctx, cc, a[0], int(a[1]), true)
 	case actCategoryN:
 		return "", b.sendProductPage(ctx, cc, a[0])
 	case actProduct:

@@ -39,26 +39,28 @@ func (b *Bot) start(ctx context.Context, chat, user int64) {
 }
 
 func (b *Bot) sendCategories(ctx context.Context, chat, user int64) {
-	cats, err := b.catalog.Categories(ctx)
+	car := b.car(ctx, user)
+	menu, err := b.catalog.Menu(ctx, car)
 	if err != nil {
 		b.fail(ctx, chat, "list categories", err)
 		return
 	}
-	text, kb := categoriesView(cats, b.car(ctx, user))
+	text, kb := categoriesView(menu, car)
 	b.send(ctx, chat, text, kb)
 }
 
 func (b *Bot) editCategories(ctx context.Context, cc callbackCtx) error {
-	cats, err := b.catalog.Categories(ctx)
+	car := b.car(ctx, cc.user)
+	menu, err := b.catalog.Menu(ctx, car)
 	if err != nil {
 		return err
 	}
-	text, kb := categoriesView(cats, b.car(ctx, cc.user))
+	text, kb := categoriesView(menu, car)
 	return b.editText(ctx, cc, text, kb)
 }
 
-func (b *Bot) editProductPage(ctx context.Context, cc callbackCtx, categoryID int64, page int) error {
-	pg, err := b.catalog.CategoryPage(ctx, categoryID, b.car(ctx, cc.user), page)
+func (b *Bot) editProductPage(ctx context.Context, cc callbackCtx, categoryID int64, page int, all bool) error {
+	pg, err := b.catalog.CategoryPage(ctx, categoryID, b.car(ctx, cc.user), page, all)
 	if err != nil {
 		return err
 	}
@@ -67,7 +69,7 @@ func (b *Bot) editProductPage(ctx context.Context, cc callbackCtx, categoryID in
 }
 
 func (b *Bot) sendProductPage(ctx context.Context, cc callbackCtx, categoryID int64) error {
-	pg, err := b.catalog.CategoryPage(ctx, categoryID, b.car(ctx, cc.user), 0)
+	pg, err := b.catalog.CategoryPage(ctx, categoryID, b.car(ctx, cc.user), 0, false)
 	if err != nil {
 		return err
 	}
