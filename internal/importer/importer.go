@@ -24,6 +24,22 @@ const maxProblems = 30
 type Model struct {
 	ID          int64
 	Make, Model string
+	// YearFrom and YearTo span its vehicles' production, YearTo zero while
+	// one is still made: "Chery Tiggo (2005–2016)" tells generations apart.
+	YearFrom, YearTo int
+}
+
+// Label names a model for people.
+func (m Model) Label() string {
+	label := m.Make + " " + m.Model
+	switch {
+	case m.YearFrom == 0:
+	case m.YearTo == 0:
+		label += fmt.Sprintf(" (%d–н.ч.)", m.YearFrom)
+	default:
+		label += fmt.Sprintf(" (%d–%d)", m.YearFrom, m.YearTo)
+	}
+	return label
 }
 
 // Store is what an import needs from the database.
@@ -32,6 +48,9 @@ type Store interface {
 	// canonical brand name.
 	BrandAliases(ctx context.Context) (map[string]string, error)
 	VehicleModels(ctx context.Context) ([]Model, error)
+	// VehicleAliases maps a supplier's vehicle names, as vehicleKey keys,
+	// to the models the owner confirmed for them.
+	VehicleAliases(ctx context.Context, source string) (map[string][]int64, error)
 	// Categories lists the category tree with its keywords, in file order.
 	Categories(ctx context.Context) ([]Category, error)
 	// Apply writes the batch in one transaction, or only measures what it
@@ -103,6 +122,8 @@ type ModelFit struct {
 	ModelID          int64
 	YearFrom, YearTo int
 	Position, Note   string
+	// Via is the file's vehicle name it came from, as a vehicleKey.
+	Via string
 }
 
 // NewBrand is a brand no import has met before.
@@ -132,6 +153,9 @@ type Report struct {
 	// number of rows naming them: the profile's "vehicles" map is where they
 	// go.
 	UnmatchedVehicles []Count `json:"unmatched_vehicles,omitempty"`
+	// VehicleExamples are a few product names per unmatched vehicle name:
+	// "Амортизатор багажника TIGGO 4" says what "Chery Tiggo" covers.
+	VehicleExamples map[string][]string `json:"vehicle_examples,omitempty"`
 	// WithoutFitment counts products that fit no known vehicle and are not
 	// universal: a buyer with a car chosen will not see them.
 	WithoutFitment int     `json:"without_fitment"`
@@ -246,11 +270,12 @@ func Resolve(ctx context.Context, store Store, p *Profile, parsed *Parsed) (*Bat
 
 		seen := make(map[int64]bool)
 		for _, f := range o.Fits {
-			for _, id := range vehicles.resolve(f.Vehicle) {
+			for _, id := range vehicles.resolve(f.Vehicle, o.Name) {
 				// Two names of the file may lead to one model.
 				if !seen[id] {
 					seen[id] = true
-					prod.Fits = append(prod.Fits, ModelFit{ModelID: id, YearFrom: f.YearFrom, YearTo: f.YearTo, Position: f.Position, Note: f.Note})
+					prod.Fits = append(prod.Fits, ModelFit{ModelID: id, YearFrom: f.YearFrom, YearTo: f.YearTo,
+						Position: f.Position, Note: f.Note, Via: vehicleKey(f.Vehicle)})
 				}
 			}
 		}
@@ -260,6 +285,7 @@ func Resolve(ctx context.Context, store Store, p *Profile, parsed *Parsed) (*Bat
 		b.Products = append(b.Products, prod)
 	}
 	rep.UnmatchedVehicles = sortedCounts(vehicles.unmatched)
+	rep.VehicleExamples = vehicles.examples
 	rep.Categories = sortedCounts(categories)
 	return b, nil
 }
@@ -386,8 +412,9 @@ func vehicleKey(s string) string {
 type vehicleResolver struct {
 	byName    map[string][]int64 // "make model" key
 	byModel   map[string][]int64 // "model" key, for files that omit the make
-	mapped    map[string][]int64 // the profile's own map
+	mapped    map[string][]int64 // the profile's own map, then the owner's
 	unmatched map[string]int
+	examples  map[string][]string
 }
 
 func newVehicleResolver(ctx context.Context, store Store, p *Profile) (*vehicleResolver, error) {
@@ -400,6 +427,7 @@ func newVehicleResolver(ctx context.Context, store Store, p *Profile) (*vehicleR
 		byModel:   make(map[string][]int64),
 		mapped:    make(map[string][]int64),
 		unmatched: make(map[string]int),
+		examples:  make(map[string][]string),
 	}
 	for _, m := range models {
 		k := vehicleKey(m.Make + m.Model)
@@ -422,14 +450,28 @@ func newVehicleResolver(ctx context.Context, store Store, p *Profile) (*vehicleR
 	if err := errors.Join(errs...); err != nil {
 		return nil, fmt.Errorf("importer: %w", err)
 	}
+	// What the owner confirmed in the chat comes after the profile: a
+	// developer's map in a file is the deliberate override.
+	aliases, err := store.VehicleAliases(ctx, p.Source)
+	if err != nil {
+		return nil, err
+	}
+	for k, ids := range aliases {
+		if _, ok := r.mapped[k]; !ok {
+			r.mapped[k] = ids
+		}
+	}
 	return r, nil
 }
+
+// examplesPerVehicle bounds the product names kept per unmatched name.
+const examplesPerVehicle = 3
 
 // resolve finds the models a vehicle name means: the profile's map first,
 // then an exact "Make Model", then a model name alone if only one make has
 // it. Anything else is reported, not guessed: a wrong fitment sells a part
 // that does not fit.
-func (r *vehicleResolver) resolve(name string) []int64 {
+func (r *vehicleResolver) resolve(name, product string) []int64 {
 	k := vehicleKey(name)
 	if ids, ok := r.mapped[k]; ok {
 		return ids
@@ -441,6 +483,9 @@ func (r *vehicleResolver) resolve(name string) []int64 {
 		return ids
 	}
 	r.unmatched[name]++
+	if ex := r.examples[name]; len(ex) < examplesPerVehicle && !slices.Contains(ex, product) {
+		r.examples[name] = append(ex, product)
+	}
 	return nil
 }
 

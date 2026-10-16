@@ -117,9 +117,14 @@ func TestParseKeyByBrandAndPartNumber(t *testing.T) {
 }
 
 type fakeStore struct {
-	aliases map[string]string
-	models  []Model
-	cats    []Category
+	aliases        map[string]string
+	models         []Model
+	cats           []Category
+	vehicleAliases map[string][]int64
+}
+
+func (f *fakeStore) VehicleAliases(context.Context, string) (map[string][]int64, error) {
+	return f.vehicleAliases, nil
 }
 
 func (f *fakeStore) BrandAliases(context.Context) (map[string]string, error) {
@@ -178,7 +183,8 @@ func TestResolve(t *testing.T) {
 	assert.Equal(t, "suspension", b.Products[2].Category, "no rule matched; the tree's keywords did")
 	assert.Nil(t, pads.Stock)
 	assert.Equal(t, 3, *pads.LeadDays, "a file without stock is a supplier's list: everything on order")
-	assert.Equal(t, []ModelFit{{ModelID: 1}, {ModelID: 2}}, pads.Fits)
+	assert.Equal(t, []ModelFit{{ModelID: 1, Via: "skodaoctaviaa7"}, {ModelID: 2, Via: "volkswagengolfvii"}}, pads.Fits,
+		"each fitment remembers the name it came from")
 	assert.True(t, strings.HasPrefix(pads.SKU, "SP-"))
 	assert.Equal(t, pads.SKU, sku(priceList(), "https://shop/1"), "the code is stable across runs")
 
@@ -194,7 +200,7 @@ func TestResolveVehicleMap(t *testing.T) {
 	b := resolveSheet(t, p, priceSheet)
 
 	shock := b.Products[2]
-	assert.Equal(t, []ModelFit{{ModelID: 3}, {ModelID: 4}}, shock.Fits)
+	assert.Equal(t, []ModelFit{{ModelID: 3, Via: "cherytiggo"}, {ModelID: 4, Via: "cherytiggo"}}, shock.Fits)
 	assert.Empty(t, b.Report.UnmatchedVehicles)
 }
 
@@ -377,4 +383,36 @@ func TestParseCategoriesRejectsMistakes(t *testing.T) {
 	for _, want := range []string{`"brakes" has subcategories`, `"brake-pads" is a subcategory`, `parent "nowhere"`, `bad slug`} {
 		assert.ErrorContains(t, err, want)
 	}
+}
+
+func TestResolveOwnerAliasesAndExamples(t *testing.T) {
+	p := priceList()
+	parsed, err := Parse([]Sheet{priceSheet}, p)
+	require.NoError(t, err)
+
+	store := catalogue()
+	b, err := Resolve(context.Background(), store, p, parsed)
+	require.NoError(t, err)
+	assert.Equal(t, map[string][]string{"Chery Tiggo": {"Амортизатор задній"}}, b.Report.VehicleExamples,
+		"the products of an unknown name say what it covers")
+	assert.Equal(t, []UnknownVehicle{{Name: "Chery Tiggo", Rows: 1, Examples: []string{"Амортизатор задній"}}}, b.Report.Unknown())
+
+	// The owner confirmed "Chery Tiggo" as the Tiggo 7 in the chat.
+	store.vehicleAliases = map[string][]int64{"cherytiggo": {3}}
+	b, err = Resolve(context.Background(), store, p, parsed)
+	require.NoError(t, err)
+	assert.Empty(t, b.Report.UnmatchedVehicles)
+	assert.Equal(t, []ModelFit{{ModelID: 3, Via: "cherytiggo"}}, b.Products[2].Fits)
+
+	// A profile's own map is the deliberate override.
+	p.Vehicles = map[string][]string{"Chery Tiggo": {"Chery Tiggo 4"}}
+	b, err = Resolve(context.Background(), store, p, parsed)
+	require.NoError(t, err)
+	assert.Equal(t, int64(4), b.Products[2].Fits[0].ModelID)
+}
+
+func TestModelLabel(t *testing.T) {
+	assert.Equal(t, "Chery Tiggo (2005–2016)", Model{Make: "Chery", Model: "Tiggo", YearFrom: 2005, YearTo: 2016}.Label())
+	assert.Equal(t, "Chery Tiggo 7 (2016–н.ч.)", Model{Make: "Chery", Model: "Tiggo 7", YearFrom: 2016}.Label())
+	assert.Equal(t, "Chery Tiggo 4", Model{Make: "Chery", Model: "Tiggo 4"}.Label(), "no years, none shown")
 }

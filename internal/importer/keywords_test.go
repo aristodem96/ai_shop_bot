@@ -68,7 +68,7 @@ func keywordService() (*Service, *fakeKeywords) {
 			{ID: 5, Name: "Колодки", Category: "other"},
 		},
 	}
-	return NewService(nil, nil, f, ""), f
+	return NewService(Deps{Keywords: f}, ""), f
 }
 
 func TestPreviewKeyword(t *testing.T) {

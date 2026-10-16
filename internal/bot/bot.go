@@ -92,6 +92,10 @@ type Bot struct {
 	limiter    Limiter
 	files      Files
 
+	// matching is nil until UseVehicleMatching is called.
+	matching  VehicleMatching
+	matchJobs *matchJobs
+
 	// words is nil until UseWords is called.
 	words    Words
 	wordJobs *wordJobs
@@ -225,6 +229,11 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 	if b.isAdmin(m.Chat.ID) {
 		if _, ok := commandArg(m.Text, cmdAdmin); ok {
 			b.send(ctx, m.Chat.ID, msgAdminHelp, nil)
+			return
+		}
+		if _, ok := commandArg(m.Text, cmdCars); ok && b.matching != nil {
+			text, kb := b.carsList(ctx)
+			b.send(ctx, m.Chat.ID, text, kb)
 			return
 		}
 		if b.words != nil && b.handleWordsMessage(ctx, m) {
@@ -381,6 +390,11 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 		default:
 			return b.deleteWord(ctx, cc, a[0])
 		}
+	case actMatchStart, actMatchPick, actMatchMakes, actMatchMake, actMatchBack, actMatchSkip, actMatchStop, actCarDelete:
+		if b.matching == nil || b.imports == nil {
+			return "", errBadCallback
+		}
+		return b.routeMatch(ctx, cc, cb)
 	case actImportProfile, actImportApply, actImportCancel:
 		if b.imports == nil {
 			return "", errBadCallback

@@ -21,12 +21,24 @@ type Service struct {
 	store    Store
 	vehicles VehicleStore
 	keywords KeywordStore
+	aliases  AliasStore
+	matcher  VehicleMatcher
 	dir      string
 }
 
+// Deps are what a Service works with. Matcher may be nil: vehicle names are
+// then matched by hand only.
+type Deps struct {
+	Prices   Store
+	Vehicles VehicleStore
+	Keywords KeywordStore
+	Aliases  AliasStore
+	Matcher  VehicleMatcher
+}
+
 // NewService returns a Service reading profiles from dir.
-func NewService(store Store, vehicles VehicleStore, keywords KeywordStore, dir string) *Service {
-	return &Service{store: store, vehicles: vehicles, keywords: keywords, dir: dir}
+func NewService(d Deps, dir string) *Service {
+	return &Service{store: d.Prices, vehicles: d.Vehicles, keywords: d.Keywords, aliases: d.Aliases, matcher: d.Matcher, dir: dir}
 }
 
 // Profiles lists the profile names, sorted.
@@ -47,20 +59,24 @@ func (s *Service) Profiles() ([]string, error) {
 
 // Prices imports a price list with the named profile.
 func (s *Service) Prices(ctx context.Context, profile, path string, opts Options) (*Report, Result, error) {
-	// The name comes from a chat. Only names that are files in the
-	// directory are opened, so "../../etc/x" never becomes a path.
-	names, err := s.Profiles()
-	if err != nil {
-		return nil, Result{}, err
-	}
-	if !slices.Contains(names, profile) {
-		return nil, Result{}, fmt.Errorf("%w: %q", ErrUnknownProfile, profile)
-	}
-	p, err := LoadProfile(filepath.Join(s.dir, profile+".json"))
+	p, err := s.profile(profile)
 	if err != nil {
 		return nil, Result{}, err
 	}
 	return Run(ctx, s.store, p, path, opts)
+}
+
+// profile loads a profile by the name a chat gave. Only names that are files
+// in the directory are opened, so "../../etc/x" never becomes a path.
+func (s *Service) profile(name string) (*Profile, error) {
+	names, err := s.Profiles()
+	if err != nil {
+		return nil, err
+	}
+	if !slices.Contains(names, name) {
+		return nil, fmt.Errorf("%w: %q", ErrUnknownProfile, name)
+	}
+	return LoadProfile(filepath.Join(s.dir, name+".json"))
 }
 
 // Vehicles loads a vehicle directory.

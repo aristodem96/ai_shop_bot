@@ -14,7 +14,7 @@ func TestOwnerKeywordSurvivesSync(t *testing.T) {
 	skipShort(t)
 	ctx := context.Background()
 	repo := NewImportRepository(testPool)
-	svc := importer.NewService(repo, repo, repo, "")
+	svc := importer.NewService(importer.Deps{Prices: repo, Vehicles: repo, Keywords: repo, Aliases: repo}, "")
 
 	// Two products the tree does not know, sitting in "other".
 	var ids [2]int64

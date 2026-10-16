@@ -198,3 +198,45 @@ func TestImportStopsOnTruncatedFile(t *testing.T) {
 	require.NoError(t, err, "a supplier that really dropped them is one explicit step away")
 	assert.Equal(t, 5, res.Deactivated)
 }
+
+func TestVehicleAliasMakesAndTakesFitments(t *testing.T) {
+	skipShort(t)
+	cleanImports(t)
+	ctx := context.Background()
+	repo := NewImportRepository(testPool)
+	t.Cleanup(func() { _, _ = testPool.Exec(ctx, `DELETE FROM vehicle_aliases`) })
+
+	rep, _ := importExample(t, exampleFile, false)
+	require.Contains(t, rep.UnmatchedVehicles, importer.Count{Name: "Lada Priora", N: 1})
+	assert.Equal(t, []string{"Тяга стабілізатора"}, rep.VehicleExamples["Lada Priora"])
+	tie := imported(t, "10006")
+	lanos := vehicleByCode(t, "lanos-15")
+	require.False(t, tie.FitsVehicle(lanos))
+
+	// The owner maps the supplier's "Lada Priora" in the chat. (To the
+	// Lanos: the test catalogue has no Lada, and any model shows the path.)
+	var lanosModel int64
+	require.NoError(t, testPool.QueryRow(ctx,
+		`SELECT id FROM vehicle_models WHERE make = 'Daewoo' AND model = 'Lanos'`).Scan(&lanosModel))
+	require.NoError(t, repo.AddVehicleAlias(ctx, "demo-stock", "Lada Priora", "ladapriora", []int64{lanosModel}))
+	require.NoError(t, repo.AddVehicleAlias(ctx, "demo-stock", "Lada Priora", "ladapriora", []int64{lanosModel}),
+		"confirming twice changes nothing")
+
+	rep, _ = importExample(t, exampleFile, false)
+	assert.Empty(t, rep.UnmatchedVehicles)
+	assert.True(t, imported(t, "10006").FitsVehicle(lanos), "the next import turns the mapping into a fitment")
+
+	aliases, err := repo.ListVehicleAliases(ctx)
+	require.NoError(t, err)
+	require.Len(t, aliases, 1)
+	assert.Equal(t, importer.VehicleAlias{ID: aliases[0].ID, Source: "demo-stock", Name: "Lada Priora", Model: "Daewoo Lanos"}, aliases[0])
+
+	removed, err := repo.RemoveVehicleAlias(ctx, aliases[0].ID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, removed.Fitments)
+	assert.False(t, imported(t, "10006").FitsVehicle(lanos), "and removing it takes the fitment away at once")
+	assert.True(t, imported(t, "10001").FitsVehicle(vehicleByCode(t, "golf-7-16tdi")), "fitments from other names stay")
+
+	_, err = repo.RemoveVehicleAlias(ctx, aliases[0].ID)
+	require.ErrorIs(t, err, importer.ErrNoAlias)
+}

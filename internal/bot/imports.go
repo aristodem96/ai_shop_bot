@@ -42,6 +42,8 @@ type importJob struct {
 	profile string // empty while not chosen
 	cars    bool   // the vehicle directory rather than a price list
 	created time.Time
+	// report is the last preview's, for mapping its unknown vehicles.
+	report *importer.Report
 }
 
 func (j *importJob) chosen() bool { return j.cars || j.profile != "" }
@@ -176,7 +178,10 @@ func (b *Bot) runImport(ctx context.Context, job *importJob, opts importer.Optio
 		return vehicleImportView(job.id, name, problems, res, err, opts.DryRun)
 	}
 	rep, res, err := b.imports.Prices(ctx, job.profile, job.path, opts)
-	return priceImportView(job.id, name, job.profile, rep, res, err, opts)
+	if opts.DryRun && rep != nil {
+		job.report = rep
+	}
+	return priceImportView(job.id, name, job.profile, rep, res, err, opts, b.matching != nil)
 }
 
 // chooseImport is the button that picks a profile for an uploaded file.

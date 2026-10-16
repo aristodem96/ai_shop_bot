@@ -500,6 +500,20 @@ brands are new — a misspelling shows up there first — and which vehicle name
 match no model. A name is never guessed into a model: a wrong fitment sells a
 part that does not fit.
 
+**Unknown vehicle names are mapped in the chat, a model suggesting.** Under
+the report, "🚗 Map vehicles" sends the names, a few product names from
+each ("Амортизатор багажника TIGGO 4"), and the directory with ids to Claude
+in one request, and the owner confirms its proposal name by name, or picks a
+make and model by hand. The model may answer only with ids from the list it
+was given; any other is dropped before the owner sees it. On real names it
+read "Шевроле Лачетті" as the Lacetti and "Haval H3/H5" as two models,
+answered "not in the directory" for a car that is not, and once proposed
+two Aveo generations where the owner would pick one — which is why every
+mapping waits for a button. Confirmed names apply to that supplier's next
+files without asking; `/cars` lists them, and removing one takes away the
+fitments it made at once, since each fitment records the name it came
+from.
+
 Rows travel by `COPY` into temporary tables and are merged in one transaction,
 so the shop sees the old price list or the new one, never half of each.
 81 654 rows load in about 5 seconds. A re-import updates in place and takes

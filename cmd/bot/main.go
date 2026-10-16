@@ -24,6 +24,7 @@ import (
 	"github.com/aristodem96/ai_shop_bot/internal/bot"
 	"github.com/aristodem96/ai_shop_bot/internal/config"
 	"github.com/aristodem96/ai_shop_bot/internal/importer"
+	"github.com/aristodem96/ai_shop_bot/internal/llm"
 	"github.com/aristodem96/ai_shop_bot/internal/llm/claude"
 	"github.com/aristodem96/ai_shop_bot/internal/observability"
 	"github.com/aristodem96/ai_shop_bot/internal/payment/monobank"
@@ -31,6 +32,7 @@ import (
 	"github.com/aristodem96/ai_shop_bot/internal/storage/postgres"
 	redisstore "github.com/aristodem96/ai_shop_bot/internal/storage/redis"
 	"github.com/aristodem96/ai_shop_bot/internal/telegram"
+	"github.com/aristodem96/ai_shop_bot/internal/vehiclematch"
 )
 
 func main() {
@@ -151,9 +153,12 @@ func run() error {
 	}
 
 	// --- the consultant ----------------------------------------------------
+	// One model client serves the consultant and vehicle matching; nil runs
+	// the bot without either.
+	var model llm.Client
 	if cfg.LLM.Provider != "none" {
-		consultant, err := agent.New(startupCtx,
-			claude.New(claude.Config{APIKey: cfg.LLM.APIKey, Model: cfg.LLM.Model, Effort: cfg.LLM.Effort}),
+		model = claude.New(claude.Config{APIKey: cfg.LLM.APIKey, Model: cfg.LLM.Model, Effort: cfg.LLM.Effort})
+		consultant, err := agent.New(startupCtx, model,
 			catalog, cart, garage, kits, orderRepo,
 			redisstore.NewHistory(rdb, cfg.Agent.HistoryTTL),
 			agent.Config{MaxSteps: cfg.Agent.MaxSteps, MaxHistory: cfg.Agent.MaxHistory, Timeout: cfg.Agent.Timeout},
@@ -167,11 +172,16 @@ func run() error {
 	// --- catalogue imports from the managers' chat ----------------------------
 	if cfg.Payments.AdminChatID != 0 {
 		importRepo := postgres.NewImportRepository(pool)
-		imports := importer.NewService(importRepo, importRepo, importRepo, cfg.ImportProfilesDir)
+		deps := importer.Deps{Prices: importRepo, Vehicles: importRepo, Keywords: importRepo, Aliases: importRepo}
+		if model != nil {
+			deps.Matcher = vehiclematch.New(model)
+		}
+		imports := importer.NewService(deps, cfg.ImportProfilesDir)
 		if err := b.UseImports(imports, tg, cfg.ImportDir, cfg.Payments.AdminChatID); err != nil {
 			return err
 		}
 		b.UseWords(imports)
+		b.UseVehicleMatching(imports)
 		if err := tg.SetChatCommands(startupCtx, cfg.Payments.AdminChatID, bot.AdminMenu(cfg.Payments.AdminChatID)); err != nil {
 			log.Warn("could not register the managers' command menu", slog.Any("error", err))
 		}

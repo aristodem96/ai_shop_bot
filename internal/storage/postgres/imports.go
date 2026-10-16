@@ -42,9 +42,16 @@ func (r *ImportRepository) BrandAliases(ctx context.Context) (map[string]string,
 	return out, nil
 }
 
-// VehicleModels lists the models of the catalogue.
+// VehicleModels lists the models of the catalogue with the span of their
+// vehicles' production, by make and model.
 func (r *ImportRepository) VehicleModels(ctx context.Context) ([]importer.Model, error) {
-	rows, err := r.pool.Query(ctx, `SELECT id, make, model FROM vehicle_models ORDER BY id`)
+	rows, err := r.pool.Query(ctx, `
+		SELECT m.id, m.make, m.model, coalesce(min(v.year_from), 0),
+			CASE WHEN bool_or(v.id IS NOT NULL AND v.year_to IS NULL) THEN 0 ELSE coalesce(max(v.year_to), 0) END
+		FROM vehicle_models m
+		LEFT JOIN vehicles v ON v.make = m.make AND v.model = m.model
+		GROUP BY m.id
+		ORDER BY m.make, m.model, m.id`)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: list vehicle models: %w", err)
 	}
@@ -163,8 +170,8 @@ func (r *ImportRepository) Apply(ctx context.Context, b *importer.Batch, dryRun 
 			return fmt.Errorf("postgres: clear fitments: %w", err)
 		}
 		tag, err := tx.Exec(ctx, `
-			INSERT INTO product_model_fitments (product_id, model_id, year_from, year_to, position, note)
-			SELECT p.id, f.model_id, nullif(f.year_from, 0), nullif(f.year_to, 0), f.position, f.note
+			INSERT INTO product_model_fitments (product_id, model_id, year_from, year_to, position, note, via)
+			SELECT p.id, f.model_id, nullif(f.year_from, 0), nullif(f.year_to, 0), f.position, f.note, f.via
 			FROM import_fits f
 			JOIN products p ON p.source = $1 AND p.external_id = f.external_id
 			ON CONFLICT DO NOTHING`, b.Source)
@@ -259,7 +266,7 @@ func stage(ctx context.Context, tx pgx.Tx, products []importer.Product) error {
 			stock int, lead_days int, image text, category text, part_type text, universal boolean
 		) ON COMMIT DROP;
 		CREATE TEMP TABLE import_fits (
-			external_id text, model_id bigint, year_from int, year_to int, position text, note text
+			external_id text, model_id bigint, year_from int, year_to int, position text, note text, via text
 		) ON COMMIT DROP`); err != nil {
 		return fmt.Errorf("postgres: create staging tables: %w", err)
 	}
@@ -283,11 +290,11 @@ func stage(ctx context.Context, tx pgx.Tx, products []importer.Product) error {
 	var fits [][]any
 	for _, p := range products {
 		for _, f := range p.Fits {
-			fits = append(fits, []any{p.ExternalID, f.ModelID, f.YearFrom, f.YearTo, f.Position, f.Note})
+			fits = append(fits, []any{p.ExternalID, f.ModelID, f.YearFrom, f.YearTo, f.Position, f.Note, f.Via})
 		}
 	}
 	if _, err := tx.CopyFrom(ctx, pgx.Identifier{"import_fits"},
-		[]string{"external_id", "model_id", "year_from", "year_to", "position", "note"},
+		[]string{"external_id", "model_id", "year_from", "year_to", "position", "note", "via"},
 		pgx.CopyFromRows(fits)); err != nil {
 		return fmt.Errorf("postgres: copy fitments: %w", err)
 	}

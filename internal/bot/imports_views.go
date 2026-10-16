@@ -17,7 +17,7 @@ const importListed = 10
 // priceImportView renders a price list run. A dry run that went through
 // offers "apply"; a run stopped by the deactivation limit offers forcing it.
 // Anything else leaves nothing to decide, and no buttons.
-func priceImportView(id int64, file, profile string, rep *importer.Report, res importer.Result, err error, opts importer.Options) (string, *telegram.InlineKeyboard) {
+func priceImportView(id int64, file, profile string, rep *importer.Report, res importer.Result, err error, opts importer.Options, matchable bool) (string, *telegram.InlineKeyboard) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "📄 <b>%s</b> · профіль «%s»\n", esc(file), esc(profile))
 
@@ -58,7 +58,15 @@ func priceImportView(id int64, file, profile string, rep *importer.Report, res i
 		fmt.Fprintf(&b, "\n<b>Буде:</b> ➕ %s нових · ✏️ %s оновлено · 🚫 %s знято з продажу · 🔗 %s сумісностей\n"+
 			"\nЦе перевірка, каталог ще не змінено.",
 			num(res.Inserted), num(res.Updated), num(res.Deactivated), num(res.Fitments))
-		return b.String(), applyKeyboard(id)
+		kb := applyKeyboard(id)
+		if matchable && rep != nil && len(rep.UnmatchedVehicles) > 0 {
+			// Mapping first, then applying: the mapped names become fitments
+			// only on a run after them.
+			kb.Rows = append([][]telegram.InlineButton{{
+				button(fmt.Sprintf("🚗 Зіставити авто (%s)", num(len(rep.UnmatchedVehicles))), actMatchStart, id),
+			}}, kb.Rows...)
+		}
+		return b.String(), kb
 	}
 	fmt.Fprintf(&b, "\n✅ <b>Застосовано:</b> ➕ %s нових · ✏️ %s оновлено · 🚫 %s знято з продажу · 🔗 %s сумісностей\n"+
 		"Запис №%d у журналі імпортів.",
