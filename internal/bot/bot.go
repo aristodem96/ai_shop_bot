@@ -95,6 +95,7 @@ type Bot struct {
 	// matching is nil until UseVehicleMatching is called.
 	matching  VehicleMatching
 	matchJobs *matchJobs
+	carDrafts *carDrafts
 
 	// words is nil until UseWords is called.
 	words    Words
@@ -234,6 +235,9 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 		if _, ok := commandArg(m.Text, cmdCars); ok && b.matching != nil {
 			text, kb := b.carsList(ctx)
 			b.send(ctx, m.Chat.ID, text, kb)
+			return
+		}
+		if b.matching != nil && b.handleCarText(ctx, m) {
 			return
 		}
 		if b.words != nil && b.handleWordsMessage(ctx, m) {
@@ -390,7 +394,12 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 		default:
 			return b.deleteWord(ctx, cc, a[0])
 		}
-	case actMatchStart, actMatchPick, actMatchMakes, actMatchMake, actMatchBack, actMatchSkip, actMatchStop, actCarDelete:
+	case actCarAdd, actCarToggle, actCarText, actCarBack:
+		if b.matching == nil {
+			return "", errBadCallback
+		}
+		return b.routeCar(ctx, cc, cb)
+	case actMatchStart, actMatchPick, actMatchMakes, actMatchMake, actMatchBack, actMatchSkip, actMatchStop, actCarDelete, actMatchAdd:
 		if b.matching == nil || b.imports == nil {
 			return "", errBadCallback
 		}

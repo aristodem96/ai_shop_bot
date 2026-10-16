@@ -49,11 +49,16 @@ const (
 	actWordRemove     action = "wr"   // wr:<keyword> forget it, move its products back
 	actWordKeep       action = "wz"   // wz:<keyword> keep it, back to the list
 	actMatchStart     action = "vm"   // vm:<import job> map the report's unknown vehicle names
-	actMatchPick      action = "vp"   // vp:<session>:<model, 0 for all suggested> confirm
+	actMatchPick      action = "vp"   // vp:<session>:<item>:<model, 0 for all suggested> confirm
 	actMatchMakes     action = "vo"   // vo:<session> pick by hand: the makes
 	actMatchMake      action = "vk"   // vk:<session>:<make index> the make's models
 	actMatchBack      action = "vb"   // vb:<session> back to the current name
-	actMatchSkip      action = "vs"   // vs:<session> leave the name unmapped
+	actMatchSkip      action = "vs"   // vs:<session>:<item> leave the name unmapped
+	actMatchAdd       action = "va"   // va:<session>:<item> add the vehicle to the directory
+	actCarAdd         action = "cy"   // cy:<draft> write the kept vehicles
+	actCarToggle      action = "cw"   // cw:<draft>:<index> drop or keep one vehicle
+	actCarText        action = "ct"   // ct:<draft> correct, or type, by reply
+	actCarBack        action = "cb"   // cb:<draft> back to matching, or drop the draft
 	actMatchStop      action = "ve"   // ve:<session> end the session
 	actCarDelete      action = "vd"   // vd:<alias> forget a mapping and its fitments
 	actNoop           action = "x"    // a label that only looks like a button
@@ -69,8 +74,9 @@ var arity = map[action]int{
 	actImportProfile: 2, actImportApply: 2, actImportCancel: 1,
 	actWordPick: 2, actWordNew: 2, actWordBack: 1, actWordApply: 1, actWordCancel: 1, actWordDelete: 1,
 	actWordRemove: 1, actWordKeep: 1,
-	actMatchStart: 1, actMatchPick: 2, actMatchMakes: 1, actMatchMake: 2, actMatchBack: 1,
-	actMatchSkip: 1, actMatchStop: 1, actCarDelete: 1,
+	actMatchStart: 1, actMatchPick: 3, actMatchMakes: 1, actMatchMake: 2, actMatchBack: 1,
+	actMatchSkip: 2, actMatchStop: 1, actCarDelete: 1, actMatchAdd: 2,
+	actCarAdd: 1, actCarToggle: 2, actCarText: 1, actCarBack: 1,
 }
 
 // maxCallbackData is Telegram's limit on callback_data, in bytes.

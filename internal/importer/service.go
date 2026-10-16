@@ -23,22 +23,25 @@ type Service struct {
 	keywords KeywordStore
 	aliases  AliasStore
 	matcher  VehicleMatcher
+	proposer VehicleProposer
 	dir      string
 }
 
-// Deps are what a Service works with. Matcher may be nil: vehicle names are
-// then matched by hand only.
+// Deps are what a Service works with. Matcher and Proposer may be nil:
+// vehicle names are then matched, and vehicles added, by hand only.
 type Deps struct {
 	Prices   Store
 	Vehicles VehicleStore
 	Keywords KeywordStore
 	Aliases  AliasStore
 	Matcher  VehicleMatcher
+	Proposer VehicleProposer
 }
 
 // NewService returns a Service reading profiles from dir.
 func NewService(d Deps, dir string) *Service {
-	return &Service{store: d.Prices, vehicles: d.Vehicles, keywords: d.Keywords, aliases: d.Aliases, matcher: d.Matcher, dir: dir}
+	return &Service{store: d.Prices, vehicles: d.Vehicles, keywords: d.Keywords, aliases: d.Aliases,
+		matcher: d.Matcher, proposer: d.Proposer, dir: dir}
 }
 
 // Profiles lists the profile names, sorted.

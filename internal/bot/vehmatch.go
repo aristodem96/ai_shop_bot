@@ -20,6 +20,9 @@ type VehicleMatching interface {
 	SuggestVehicles(ctx context.Context, unknown []importer.UnknownVehicle) (map[string]importer.VehicleSuggestion, error)
 	VehicleModels(ctx context.Context) ([]importer.Model, error)
 	AddVehicleAlias(ctx context.Context, profile, name string, modelIDs []int64) error
+	CanPropose() bool
+	ProposeVehicles(ctx context.Context, req importer.ProposeRequest) (*importer.VehicleProposal, error)
+	AddVehicles(ctx context.Context, vs []importer.Vehicle) ([]int64, error)
 	VehicleAliases(ctx context.Context) ([]importer.VehicleAlias, error)
 	RemoveVehicleAlias(ctx context.Context, id int64) (*importer.VehicleAlias, error)
 }
@@ -75,6 +78,7 @@ type matchJobs struct {
 func (b *Bot) UseVehicleMatching(m VehicleMatching) {
 	b.matching = m
 	b.matchJobs = &matchJobs{jobs: make(map[int64]*matchJob)}
+	b.carDrafts = newCarDrafts()
 }
 
 // routeMatch dispatches the vehicle matching buttons.
@@ -84,7 +88,7 @@ func (b *Bot) routeMatch(ctx context.Context, cc callbackCtx, cb callback) (stri
 	case actMatchStart:
 		return b.startMatch(ctx, cc, a[0])
 	case actMatchPick:
-		return b.pickMatch(ctx, cc, a[0], a[1])
+		return b.pickMatch(ctx, cc, a[0], a[1], a[2])
 	case actMatchMakes:
 		return b.matchMakes(ctx, cc, a[0])
 	case actMatchMake:
@@ -92,7 +96,9 @@ func (b *Bot) routeMatch(ctx context.Context, cc callbackCtx, cb callback) (stri
 	case actMatchBack:
 		return b.backToMatch(ctx, cc, a[0])
 	case actMatchSkip:
-		return b.skipMatch(ctx, cc, a[0])
+		return b.skipMatch(ctx, cc, a[0], a[1])
+	case actMatchAdd:
+		return b.addFromMatch(ctx, cc, a[0], a[1])
 	case actMatchStop:
 		return b.stopMatch(ctx, cc, a[0])
 	default:
@@ -145,14 +151,16 @@ func (b *Bot) startMatch(ctx context.Context, cc callbackCtx, importID int64) (s
 }
 
 // pickMatch confirms models for the current name: one, or with model zero
-// all the suggested ones.
-func (b *Bot) pickMatch(ctx context.Context, cc callbackCtx, id, modelID int64) (string, error) {
-	job, err := b.matchStep(ctx, cc, id)
+// all the suggested ones. item is the name the button was shown with: a
+// second tap on it, landing after the session moved on, must not confirm
+// the next name with the same choice.
+func (b *Bot) pickMatch(ctx context.Context, cc callbackCtx, id, item, modelID int64) (string, error) {
+	job, err := b.matchItemStep(ctx, cc, id, item)
 	if err != nil || job == nil {
-		return "", err
+		return msgMatchStale, err
 	}
-	item := job.current()
-	ids := item.suggested
+	cur := job.current()
+	ids := cur.suggested
 	if modelID != 0 {
 		if _, ok := job.model(modelID); !ok {
 			return "", errBadCallback
@@ -162,17 +170,17 @@ func (b *Bot) pickMatch(ctx context.Context, cc callbackCtx, id, modelID int64) 
 	if len(ids) == 0 {
 		return "", errBadCallback
 	}
-	if err := b.matching.AddVehicleAlias(ctx, job.profile, item.Name, ids); err != nil {
+	if err := b.matching.AddVehicleAlias(ctx, job.profile, cur.Name, ids); err != nil {
 		return "", err
 	}
 	job.matched++
-	return "✅ " + item.Name, b.nextMatch(ctx, cc, job)
+	return "✅ " + cur.Name, b.nextMatch(ctx, cc, job)
 }
 
-func (b *Bot) skipMatch(ctx context.Context, cc callbackCtx, id int64) (string, error) {
-	job, err := b.matchStep(ctx, cc, id)
+func (b *Bot) skipMatch(ctx context.Context, cc callbackCtx, id, item int64) (string, error) {
+	job, err := b.matchItemStep(ctx, cc, id, item)
 	if err != nil || job == nil {
-		return "", err
+		return msgMatchStale, err
 	}
 	job.skipped++
 	return "", b.nextMatch(ctx, cc, job)
@@ -245,6 +253,16 @@ func (b *Bot) finishMatch(ctx context.Context, cc callbackCtx, job *matchJob) er
 	}
 	b.previewImport(ctx, ij)
 	return nil
+}
+
+// matchItemStep is matchStep for a button about one name: it finds nothing
+// when the session has moved past that name.
+func (b *Bot) matchItemStep(ctx context.Context, cc callbackCtx, id, item int64) (*matchJob, error) {
+	job, err := b.matchStep(ctx, cc, id)
+	if err != nil || job == nil || int64(job.idx) != item {
+		return nil, err
+	}
+	return job, nil
 }
 
 // matchStep fetches a session for a button; a stale one loses its buttons.

@@ -57,3 +57,27 @@ func TestSuggestNothingToAsk(t *testing.T) {
 	assert.Nil(t, got)
 	assert.Empty(t, fake.Requests, "no names, no bill")
 }
+
+func TestProposeVehicles(t *testing.T) {
+	fake := llm.NewFake(llm.Call("c1", proposeTool, map[string]any{
+		"vehicles": []map[string]any{
+			{"make": "Peugeot", "model": "308 T7", "year_from": 2007, "year_to": 2013, "engine": "1.6 HDi", "fuel": "diesel"},
+		},
+		"note": "перше покоління 308",
+	}))
+	got, err := New(fake).ProposeVehicles(context.Background(), importer.ProposeRequest{
+		Name: "Peugeot 308", Examples: []string{"Кульова опора"},
+		Previous:   []importer.Vehicle{{Make: "Peugeot", Model: "308 T7", YearFrom: 2007, YearTo: 2014, Engine: "1.6 VTi", Fuel: "petrol"}},
+		Correction: "тільки дизель, до 2013",
+	}, models)
+	require.NoError(t, err)
+	assert.Equal(t, &importer.VehicleProposal{Note: "перше покоління 308", Vehicles: []importer.Vehicle{
+		{Make: "Peugeot", Model: "308 T7", YearFrom: 2007, YearTo: 2013, Engine: "1.6 HDi", Fuel: "diesel"},
+	}}, got)
+
+	text := fake.Requests[0].Messages[0].Text
+	assert.Contains(t, text, "Chery Tiggo | 2005-2016", "the directory's spelling is the model's guide")
+	assert.Contains(t, text, `Vehicle to add: "Peugeot 308"`)
+	assert.Contains(t, text, "Peugeot 308 T7 | 2007-2014 | 1.6 VTi | petrol", "a correction is made on the previous proposal")
+	assert.Contains(t, text, `The owner's correction: "тільки дизель, до 2013"`)
+}

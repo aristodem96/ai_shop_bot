@@ -28,6 +28,8 @@ type fakeImports struct {
 	profiles []string
 	runs     []importRun
 	err      error // returned by Prices
+	// unmatched replaces the report's unknown vehicle names when set.
+	unmatched []importer.Count
 }
 
 func (f *fakeImports) Profiles() ([]string, error) { return f.profiles, nil }
@@ -41,6 +43,9 @@ func (f *fakeImports) Prices(_ context.Context, profile, path string, opts impor
 		UnmatchedVehicles: []importer.Count{{Name: "Lada Priora", N: 3}},
 		Categories:        []importer.Count{{Name: "brakes", N: 80942}},
 		Unsorted:          2, Unrecognised: []string{"Ящик під магнітолу", "Бігунок"}}
+	if f.unmatched != nil {
+		rep.UnmatchedVehicles = f.unmatched
+	}
 	res := importer.Result{Inserted: 12, Updated: 80930, Fitments: 88341}
 	if !opts.DryRun {
 		res.RunID = 7

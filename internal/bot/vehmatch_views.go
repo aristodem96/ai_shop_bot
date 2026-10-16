@@ -32,11 +32,11 @@ func matchItemView(job *matchJob, canSuggest bool) (string, *telegram.InlineKeyb
 			}
 		}
 		if len(item.suggested) > 1 {
-			kb.Rows = append(kb.Rows, []telegram.InlineButton{button(fmt.Sprintf("✅ Усі запропоновані (%d)", len(item.suggested)), actMatchPick, job.id, 0)})
+			kb.Rows = append(kb.Rows, []telegram.InlineButton{button(fmt.Sprintf("✅ Усі запропоновані (%d)", len(item.suggested)), actMatchPick, job.id, int64(job.idx), 0)})
 		}
 		for _, id := range item.suggested {
 			if m, ok := job.model(id); ok {
-				kb.Rows = append(kb.Rows, []telegram.InlineButton{button("✅ "+m.Label(), actMatchPick, job.id, id)})
+				kb.Rows = append(kb.Rows, []telegram.InlineButton{button("✅ "+m.Label(), actMatchPick, job.id, int64(job.idx), id)})
 			}
 		}
 	case job.aiError:
@@ -45,14 +45,14 @@ func matchItemView(job *matchJob, canSuggest bool) (string, *telegram.InlineKeyb
 		if item.note != "" {
 			fmt.Fprintf(&b, "💡 %s\n", esc(item.note))
 		}
-		b.WriteString("Відповідника в довіднику не знайшов. Оберіть вручну, або додайте авто в довідник і пропустіть.\n")
+		b.WriteString("Відповідника в довіднику не знайшов. Оберіть вручну або додайте це авто в довідник.\n")
 	default:
 		b.WriteString("Оберіть модель з довідника або пропустіть.\n")
 	}
 
 	kb.Rows = append(kb.Rows,
-		[]telegram.InlineButton{button("✏️ Інша модель", actMatchMakes, job.id), button("⏭ Пропустити", actMatchSkip, job.id)},
-		[]telegram.InlineButton{button("⏹ Завершити", actMatchStop, job.id)},
+		[]telegram.InlineButton{button("✏️ Інша модель", actMatchMakes, job.id), button("➕ Додати в довідник", actMatchAdd, job.id, int64(job.idx))},
+		[]telegram.InlineButton{button("⏭ Пропустити", actMatchSkip, job.id, int64(job.idx)), button("⏹ Завершити", actMatchStop, job.id)},
 	)
 	return b.String(), kb
 }
@@ -76,7 +76,7 @@ func modelsKeyboard(job *matchJob, mk string) *telegram.InlineKeyboard {
 	kb := &telegram.InlineKeyboard{}
 	for _, m := range job.models {
 		if m.Make == mk {
-			kb.Rows = append(kb.Rows, []telegram.InlineButton{button(m.Label(), actMatchPick, job.id, m.ID)})
+			kb.Rows = append(kb.Rows, []telegram.InlineButton{button(m.Label(), actMatchPick, job.id, int64(job.idx), m.ID)})
 		}
 	}
 	kb.Rows = append(kb.Rows, []telegram.InlineButton{button("⬅️ Марки", actMatchMakes, job.id), button("⬅️ До назви", actMatchBack, job.id)})

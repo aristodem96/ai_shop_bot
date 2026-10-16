@@ -174,7 +174,8 @@ func run() error {
 		importRepo := postgres.NewImportRepository(pool)
 		deps := importer.Deps{Prices: importRepo, Vehicles: importRepo, Keywords: importRepo, Aliases: importRepo}
 		if model != nil {
-			deps.Matcher = vehiclematch.New(model)
+			matcher := vehiclematch.New(model)
+			deps.Matcher, deps.Proposer = matcher, matcher
 		}
 		imports := importer.NewService(deps, cfg.ImportProfilesDir)
 		if err := b.UseImports(imports, tg, cfg.ImportDir, cfg.Payments.AdminChatID); err != nil {

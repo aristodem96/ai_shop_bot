@@ -137,13 +137,7 @@ func isComment(row []string) bool {
 func parseVehicle(get func([]string, string) string, row []string) (Vehicle, error) {
 	v := Vehicle{
 		Make: get(row, "make"), Model: get(row, "model"), Engine: get(row, "engine"),
-		Fuel: strings.ToLower(get(row, "fuel")), OilViscosity: get(row, "oil_viscosity"),
-	}
-	if v.Make == "" || v.Model == "" || v.Engine == "" {
-		return v, errors.New("потрібні марка, модель і двигун")
-	}
-	if !fuels[v.Fuel] {
-		return v, fmt.Errorf("пальне %q — не petrol, diesel, hybrid чи electric", v.Fuel)
+		Fuel: get(row, "fuel"), OilViscosity: get(row, "oil_viscosity"),
 	}
 	var err error
 	if v.YearFrom, err = parseYear(get(row, "year_from")); err != nil || v.YearFrom == 0 {
@@ -152,14 +146,74 @@ func parseVehicle(get func([]string, string) string, row []string) (Vehicle, err
 	if v.YearTo, err = parseYear(get(row, "year_to")); err != nil {
 		return v, err
 	}
-	if v.YearTo != 0 && v.YearTo < v.YearFrom {
-		return v, fmt.Errorf("роки %d–%d йдуть навпаки", v.YearFrom, v.YearTo)
-	}
 	if s := get(row, "oil_volume_l"); s != "" {
 		v.OilVolume, err = strconv.ParseFloat(strings.ReplaceAll(s, ",", "."), 64)
 		if err != nil || v.OilVolume <= 0 || v.OilVolume >= 100 {
 			return v, fmt.Errorf("незрозумілий oil_volume_l %q", s)
 		}
 	}
-	return v, nil
+	return v, v.Normalize()
+}
+
+// Normalize tidies a vehicle and checks it is one the directory can hold.
+// The file, the owner's typing and a model's proposal all pass through it,
+// so the directory has one standard whatever wrote the row.
+func (v *Vehicle) Normalize() error {
+	v.Make, v.Model, v.Engine = clean(v.Make), clean(v.Model), clean(v.Engine)
+	v.Fuel = strings.ToLower(clean(v.Fuel))
+	if f, ok := fuelWords[v.Fuel]; ok {
+		v.Fuel = f
+	}
+	switch {
+	case v.Make == "" || v.Model == "" || v.Engine == "":
+		return errors.New("потрібні марка, модель і двигун")
+	case !fuels[v.Fuel]:
+		return fmt.Errorf("пальне %q — не бензин, дизель, гібрид чи електро", v.Fuel)
+	case v.YearFrom < 1950 || v.YearFrom > 2100:
+		return fmt.Errorf("незрозумілий рік початку %d", v.YearFrom)
+	case v.YearTo != 0 && v.YearTo < v.YearFrom:
+		return fmt.Errorf("роки %d–%d йдуть навпаки", v.YearFrom, v.YearTo)
+	}
+	return nil
+}
+
+// fuelWords lets people write fuel as they say it.
+var fuelWords = map[string]string{
+	"бензин": "petrol", "дизель": "diesel", "гібрид": "hybrid", "електро": "electric",
+	"електричний": "electric", "газ/бензин": "petrol", "бензиновий": "petrol", "дизельний": "diesel",
+}
+
+// FuelName is the Ukrainian name of a fuel, for messages.
+func FuelName(fuel string) string {
+	switch fuel {
+	case "petrol":
+		return "бензин"
+	case "diesel":
+		return "дизель"
+	case "hybrid":
+		return "гібрид"
+	case "electric":
+		return "електро"
+	}
+	return fuel
+}
+
+// ParseVehicleLine reads one vehicle typed by hand, comma-separated: "Peugeot,
+// 308 T7, 2007, 2013, 1.6 HDi, дизель". The second year may be empty or
+// "н.ч." for a car still produced. It is the fallback when no model is there
+// to read free text.
+func ParseVehicleLine(s string) (Vehicle, error) {
+	parts := strings.Split(s, ",")
+	if len(parts) != 6 {
+		return Vehicle{}, errors.New("потрібно 6 частин через кому: марка, модель, рік від, рік до, двигун, пальне")
+	}
+	v := Vehicle{Make: parts[0], Model: parts[1], Engine: parts[4], Fuel: parts[5]}
+	var err error
+	if v.YearFrom, err = parseYear(parts[2]); err != nil || v.YearFrom == 0 {
+		return v, fmt.Errorf("незрозумілий рік початку %q", clean(parts[2]))
+	}
+	if v.YearTo, err = parseYear(parts[3]); err != nil {
+		return v, err
+	}
+	return v, v.Normalize()
 }
