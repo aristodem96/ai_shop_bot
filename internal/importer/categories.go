@@ -138,8 +138,9 @@ type keyword struct {
 func NewClassifier(cats []Category) *Classifier {
 	c := &Classifier{}
 	for i := range cats {
-		for _, w := range cats[i].Keywords {
-			c.words = append(c.words, keyword{word: w, cat: &cats[i]})
+		cat := &cats[i]
+		for _, w := range cat.Keywords {
+			c.words = append(c.words, keyword{word: w, cat: cat})
 		}
 	}
 	// Stable: equal lengths keep file order.

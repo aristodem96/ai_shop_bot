@@ -173,6 +173,16 @@ type ReplyKeyboard struct {
 
 func (*ReplyKeyboard) replyMarkup() {}
 
+// ForceReply opens a reply to the message in the user's app. In a group a bot
+// in privacy mode sees only commands and replies to itself, so a question
+// whose answer is plain text has to be asked this way.
+type ForceReply struct {
+	ForceReply  bool   `json:"force_reply"`
+	Placeholder string `json:"input_field_placeholder,omitempty"`
+}
+
+func (*ForceReply) replyMarkup() {}
+
 // KeyboardButton is a reply keyboard button. With RequestContact set, a press
 // shares the user's phone number instead of sending the text.
 type KeyboardButton struct {

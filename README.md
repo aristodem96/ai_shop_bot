@@ -447,6 +447,15 @@ had no rules at all. The file ships in the binary and is synced on start. The
 bot's menu goes section → subcategory → products, counts what is behind each
 button for the buyer's car, and hides what is empty for it.
 
+**The owner teaches it new words, in the chat.** The import report lists the
+names no category recognised. `/word вал распредел` in the managers' chat
+counts the products with that fragment, asks for a category by buttons — or
+a new subcategory or section, named in a reply — and previews what would
+move before anything does: "37 products, 35 of them from Other; 2 stay, a
+longer word files them elsewhere". Apply stores the word and moves them;
+`/words` lists the owner's words with a delete button each. They are kept
+apart from the file's, so a deploy that syncs the file does not erase them.
+
 Two steps, vehicles first, since a price list's fitments can only point at
 cars the catalogue knows:
 

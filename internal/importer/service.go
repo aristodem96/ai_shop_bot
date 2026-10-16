@@ -20,12 +20,13 @@ var ErrUnknownProfile = errors.New("importer: no such profile")
 type Service struct {
 	store    Store
 	vehicles VehicleStore
+	keywords KeywordStore
 	dir      string
 }
 
 // NewService returns a Service reading profiles from dir.
-func NewService(store Store, vehicles VehicleStore, dir string) *Service {
-	return &Service{store: store, vehicles: vehicles, dir: dir}
+func NewService(store Store, vehicles VehicleStore, keywords KeywordStore, dir string) *Service {
+	return &Service{store: store, vehicles: vehicles, keywords: keywords, dir: dir}
 }
 
 // Profiles lists the profile names, sorted.

@@ -18,10 +18,13 @@ import (
 	"github.com/aristodem96/ai_shop_bot/migrations"
 )
 
-// foreignKeyViolation is the SQLSTATE of a broken FOREIGN KEY. Matching on the
+// The SQLSTATEs of a broken FOREIGN KEY and UNIQUE constraint. Matching on the
 // code rather than the message keeps the mapping stable across server versions
 // and locales.
-const foreignKeyViolation = "23503"
+const (
+	foreignKeyViolation = "23503"
+	uniqueViolation     = "23505"
+)
 
 // NewPool opens and verifies a connection pool.
 func NewPool(ctx context.Context, dsn string, maxConns int32) (*pgxpool.Pool, error) {
@@ -86,4 +89,9 @@ func Migrate(ctx context.Context, dsn string, log *slog.Logger) error {
 func isForeignKeyViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation
 }

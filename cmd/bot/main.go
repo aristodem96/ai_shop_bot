@@ -167,10 +167,11 @@ func run() error {
 	// --- catalogue imports from the managers' chat ----------------------------
 	if cfg.Payments.AdminChatID != 0 {
 		importRepo := postgres.NewImportRepository(pool)
-		imports := importer.NewService(importRepo, importRepo, cfg.ImportProfilesDir)
+		imports := importer.NewService(importRepo, importRepo, importRepo, cfg.ImportProfilesDir)
 		if err := b.UseImports(imports, tg, cfg.ImportDir, cfg.Payments.AdminChatID); err != nil {
 			return err
 		}
+		b.UseWords(imports)
 	} else {
 		log.Warn("ADMIN_CHAT_ID is not set: price lists cannot be uploaded in Telegram")
 	}

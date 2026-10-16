@@ -92,6 +92,10 @@ type Bot struct {
 	limiter    Limiter
 	files      Files
 
+	// words is nil until UseWords is called.
+	words    Words
+	wordJobs *wordJobs
+
 	// imports is nil until UseImports is called.
 	imports     Imports
 	importFiles Files
@@ -216,6 +220,9 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 	// a group.
 	if m.Document != nil && b.imports != nil && b.isAdmin(m.Chat.ID) {
 		b.receiveImport(ctx, m)
+		return
+	}
+	if b.words != nil && b.isAdmin(m.Chat.ID) && b.handleWordsMessage(ctx, m) {
 		return
 	}
 	// A cart is personal. In a group every member would share the buttons of
@@ -346,6 +353,24 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 		return "", b.cancelCheckout(ctx, cc)
 	case actManage:
 		return b.manage(ctx, cc, a[0], a[1])
+	case actWordPick, actWordNew, actWordBack, actWordApply, actWordCancel, actWordDelete:
+		if b.words == nil {
+			return "", errBadCallback
+		}
+		switch cb.act {
+		case actWordPick:
+			return b.pickWordCategory(ctx, cc, a[0], a[1])
+		case actWordNew:
+			return b.newWordCategory(ctx, cc, a[0], a[1])
+		case actWordBack:
+			return b.backToSections(ctx, cc, a[0])
+		case actWordApply:
+			return b.applyWord(ctx, cc, a[0])
+		case actWordCancel:
+			return b.cancelWord(ctx, cc, a[0])
+		default:
+			return b.deleteWord(ctx, cc, a[0])
+		}
 	case actImportProfile, actImportApply, actImportCancel:
 		if b.imports == nil {
 			return "", errBadCallback

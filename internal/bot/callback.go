@@ -40,6 +40,12 @@ const (
 	actImportProfile  action = "ip"   // ip:<job>:<choice> what an uploaded file is
 	actImportApply    action = "ia"   // ia:<job>:<force> apply a checked file
 	actImportCancel   action = "ix"   // ix:<job> drop an uploaded file
+	actWordPick       action = "wk"   // wk:<job>:<category index> file a word there, or open the section
+	actWordNew        action = "wn"   // wn:<job>:<section index or -1> a new subcategory or section
+	actWordBack       action = "wb"   // wb:<job> back to the sections
+	actWordApply      action = "wa"   // wa:<job> store the word, move the products
+	actWordCancel     action = "wx"   // wx:<job> drop the change
+	actWordDelete     action = "wd"   // wd:<keyword> forget an owner's word
 	actNoop           action = "x"    // a label that only looks like a button
 )
 
@@ -51,6 +57,7 @@ var arity = map[action]int{
 	actClear: 0, actForgetCar: 0, actKit: 0, actKitAdd: 0, actNoop: 0,
 	actCheckout: 0, actPay: 0, actEditContacts: 0, actCancelCheckout: 0, actManage: 2,
 	actImportProfile: 2, actImportApply: 2, actImportCancel: 1,
+	actWordPick: 2, actWordNew: 2, actWordBack: 1, actWordApply: 1, actWordCancel: 1, actWordDelete: 1,
 }
 
 // maxCallbackData is Telegram's limit on callback_data, in bytes.

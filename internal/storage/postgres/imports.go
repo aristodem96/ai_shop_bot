@@ -56,10 +56,12 @@ func (r *ImportRepository) VehicleModels(ctx context.Context) ([]importer.Model,
 }
 
 // Categories lists the category tree in menu order, sections before their
-// subcategories.
+// subcategories, each with the file's keywords and then the owner's.
 func (r *ImportRepository) Categories(ctx context.Context) ([]importer.Category, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT c.slug, coalesce(p.slug, ''), c.title, c.part_type, c.universal, c.keywords
+		SELECT c.slug, coalesce(p.slug, ''), c.title, c.part_type, c.universal,
+			c.keywords || coalesce((SELECT array_agg(k.word ORDER BY k.id)
+				FROM category_keywords k WHERE k.category_id = c.id), '{}')
 		FROM categories c
 		LEFT JOIN categories p ON p.id = c.parent_id
 		ORDER BY c.position, c.id`)
