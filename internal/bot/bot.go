@@ -222,8 +222,14 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 		b.receiveImport(ctx, m)
 		return
 	}
-	if b.words != nil && b.isAdmin(m.Chat.ID) && b.handleWordsMessage(ctx, m) {
-		return
+	if b.isAdmin(m.Chat.ID) {
+		if _, ok := commandArg(m.Text, cmdAdmin); ok {
+			b.send(ctx, m.Chat.ID, msgAdminHelp, nil)
+			return
+		}
+		if b.words != nil && b.handleWordsMessage(ctx, m) {
+			return
+		}
 	}
 	// A cart is personal. In a group every member would share the buttons of
 	// one message while each had a cart of their own, which cannot work.

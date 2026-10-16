@@ -1,6 +1,10 @@
 package bot
 
-import "github.com/aristodem96/ai_shop_bot/internal/telegram"
+import (
+	"slices"
+
+	"github.com/aristodem96/ai_shop_bot/internal/telegram"
+)
 
 // Texts of the reply keyboard buttons. A press sends the text as an ordinary
 // message, so the router matches on these exact strings.
@@ -22,6 +26,40 @@ var Commands = []telegram.Command{
 	{Command: "new", Description: "Почати розмову з консультантом заново"},
 	{Command: "help", Description: "Як користуватися"},
 }
+
+// cmdAdmin is the managers' help.
+const cmdAdmin = "/admin"
+
+// adminCommands are the managers' chat's own.
+var adminCommands = []telegram.Command{
+	{Command: "admin", Description: "Що вміє бот для менеджерів"},
+	{Command: "word", Description: "Віднести слово з назв товарів до категорії"},
+	{Command: "words", Description: "Слова, які ви додали"},
+	{Command: "id", Description: "ID цього чату"},
+}
+
+// AdminMenu is the command menu of the managers' chat. A private chat with
+// the owner is also where the owner shops, so it keeps the buyer's commands;
+// a managers' group gets only its own.
+func AdminMenu(adminChat int64) []telegram.Command {
+	if adminChat > 0 {
+		return append(slices.Clone(Commands), adminCommands...)
+	}
+	return adminCommands
+}
+
+const msgAdminHelp = `<b>Для менеджерів</b>
+
+📄 <b>Прайс постачальника</b> — надішліть сюди файл .xlsx або .csv. У підписі — назва профілю постачальника (якщо профіль один, підпис не потрібен). Я перевірю файл, покажу звіт і кнопку «Застосувати».
+
+🚗 <b>Довідник авто</b> — файл .csv з підписом «авто».
+
+🔤 <b>Категорії</b> — у звіті прайсу є товари, які я не впізнав. <code>/word слово</code> відносить слово до категорії (або нової), спершу показавши, що переїде.
+<code>/words</code> — слова, які ви додали, з кнопкою видалення.
+
+🛒 <b>Замовлення</b> — оплачені приходять сюди самі, з кнопками «Підтвердити», «Відправлено», «Скасувати».
+
+<code>/id</code> — ID цього чату.`
 
 const (
 	msgWelcome = `Привіт! Я консультант магазину автозапчастин 🔧

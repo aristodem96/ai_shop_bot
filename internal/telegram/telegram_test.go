@@ -127,3 +127,19 @@ func TestMessageWithPhotoDecodes(t *testing.T) {
 	assert.Equal(t, "big", u.Message.Photo[1].FileID)
 	assert.Equal(t, "що це?", u.Message.Caption)
 }
+
+func TestSetChatCommandsScopesToTheChat(t *testing.T) {
+	c, got, path := stub(t, `{"ok":true,"result":true}`)
+
+	err := c.SetChatCommands(context.Background(), -100500, []Command{{Command: "word", Description: "Слово"}})
+	require.NoError(t, err)
+	assert.Equal(t, "/bot"+token+"/setMyCommands", *path)
+	assert.Equal(t, map[string]any{"type": "chat", "chat_id": float64(-100500)}, (*got)["scope"],
+		"only that chat's menu changes; buyers keep theirs")
+}
+
+func TestForceReplyEncodes(t *testing.T) {
+	c, got, _ := stub(t, `{"ok":true,"result":{}}`)
+	require.NoError(t, c.SendMessage(context.Background(), 5, "Назва?", &ForceReply{ForceReply: true, Placeholder: "Назва"}))
+	assert.Equal(t, map[string]any{"force_reply": true, "input_field_placeholder": "Назва"}, (*got)["reply_markup"])
+}

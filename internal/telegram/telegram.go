@@ -350,6 +350,16 @@ func (c *Client) SetCommands(ctx context.Context, commands []Command) error {
 	return c.call(ctx, "setMyCommands", map[string]any{"commands": commands}, nil)
 }
 
+// SetChatCommands registers the command menu of one chat, which replaces the
+// default menu there: the managers' chat gets its own commands while buyers
+// keep theirs.
+func (c *Client) SetChatCommands(ctx context.Context, chatID int64, commands []Command) error {
+	return c.call(ctx, "setMyCommands", map[string]any{
+		"commands": commands,
+		"scope":    map[string]any{"type": "chat", "chat_id": chatID},
+	}, nil)
+}
+
 type envelope struct {
 	OK          bool            `json:"ok"`
 	Result      json.RawMessage `json:"result"`

@@ -472,7 +472,9 @@ profile. The bot runs the dry run and answers with its report and two
 buttons, *Apply* and *Cancel*. Profiles are the files in
 [profiles/](profiles/), mounted into the container, so adding a supplier
 needs no rebuild. Only the managers' chat can upload, and its buttons are
-checked against it like the order buttons are.
+checked against it like the order buttons are. That chat has a command menu
+of its own — `/admin` explains what managers can do there — while buyers
+keep theirs.
 
 A **profile** is a JSON file per supplier: which column is the name, price,
 brand, part number and vehicle, the words that sort rows into categories, the

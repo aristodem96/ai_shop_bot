@@ -193,3 +193,35 @@ func TestWordAlreadyKnown(t *testing.T) {
 	assert.Contains(t, msg.text, "Двигун › Деталі двигуна — 2", "and where its products are")
 	assert.Nil(t, msg.markup, "nothing to choose")
 }
+
+func TestAdminMenu(t *testing.T) {
+	group := AdminMenu(-100500)
+	assert.Equal(t, "admin", group[0].Command)
+	assert.NotContains(t, commandNames(group), "cart", "a managers' group does not shop")
+
+	private := AdminMenu(77)
+	assert.Contains(t, commandNames(private), "cart", "an owner's own chat is also where they shop")
+	assert.Contains(t, commandNames(private), "word")
+	assert.Len(t, Commands, 7, "the buyers' menu is left as it was")
+}
+
+func TestAdminHelpOnlyForManagers(t *testing.T) {
+	b, _ := newWordsBot(t)
+	ctx := context.Background()
+
+	b.Handle(ctx, say(managers, "/admin@shop_bot"))
+	assert.Equal(t, msgAdminHelp, b.tg.last("sendMessage").text)
+
+	u := say(chat, "/admin")
+	u.Message.Chat.Type = telegram.ChatPrivate
+	b.Handle(ctx, u)
+	assert.NotEqual(t, msgAdminHelp, b.tg.last("sendMessage").text, "a buyer is not shown the managers' tools")
+}
+
+func commandNames(cmds []telegram.Command) []string {
+	out := make([]string, len(cmds))
+	for i, c := range cmds {
+		out[i] = c.Command
+	}
+	return out
+}

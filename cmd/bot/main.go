@@ -172,6 +172,9 @@ func run() error {
 			return err
 		}
 		b.UseWords(imports)
+		if err := tg.SetChatCommands(startupCtx, cfg.Payments.AdminChatID, bot.AdminMenu(cfg.Payments.AdminChatID)); err != nil {
+			log.Warn("could not register the managers' command menu", slog.Any("error", err))
+		}
 	} else {
 		log.Warn("ADMIN_CHAT_ID is not set: price lists cannot be uploaded in Telegram")
 	}
