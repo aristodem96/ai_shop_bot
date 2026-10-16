@@ -154,6 +154,11 @@ func printReport(w *strings.Builder, r *importer.Report) {
 		printList(w, r.NewBrands)
 	}
 
+	if r.Unsorted > 0 {
+		fmt.Fprintf(w, "\nProducts no category recognised: %d (filed in the default; a keyword from these names belongs in data/categories.csv)\n", r.Unsorted)
+		printList(w, r.Unrecognised)
+	}
+
 	if r.WithoutFitment > 0 {
 		fmt.Fprintf(w, "\nProducts that fit no known vehicle: %d (hidden from buyers with a car chosen)\n", r.WithoutFitment)
 	}

@@ -39,7 +39,8 @@ func (f *fakeImports) Prices(_ context.Context, profile, path string, opts impor
 		Problems:          []importer.Problem{{Row: importer.RowRef{Sheet: "Chery", Line: 9}, Reason: "немає назви"}},
 		NewBrands:         []string{"Mogen", "<KYB>"},
 		UnmatchedVehicles: []importer.Count{{Name: "Lada Priora", N: 3}},
-		Categories:        []importer.Count{{Name: "brakes", N: 80942}}}
+		Categories:        []importer.Count{{Name: "brakes", N: 80942}},
+		Unsorted:          2, Unrecognised: []string{"Ящик під магнітолу", "Бігунок"}}
 	res := importer.Result{Inserted: 12, Updated: 80930, Fitments: 88341}
 	if !opts.DryRun {
 		res.RunID = 7
@@ -91,7 +92,7 @@ func TestImportPreviewThenApply(t *testing.T) {
 	assert.Equal(t, managers, preview.chat)
 	for _, want := range []string{
 		"price.xlsx", "профіль «chinaavto»", "Рядків: 81 654", "Chery, рядок 9: немає назви",
-		"&lt;KYB&gt;", "Lada Priora (3)", "➕ 12 нових", "✏️ 80 930 оновлено", "каталог ще не змінено",
+		"&lt;KYB&gt;", "Lada Priora (3)", "Не впізнав категорію: 2", "Ящик під магнітолу, Бігунок", "➕ 12 нових", "✏️ 80 930 оновлено", "каталог ще не змінено",
 	} {
 		assert.Contains(t, preview.text, want)
 	}

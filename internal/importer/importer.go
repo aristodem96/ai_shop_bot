@@ -136,6 +136,11 @@ type Report struct {
 	// universal: a buyer with a car chosen will not see them.
 	WithoutFitment int     `json:"without_fitment"`
 	Categories     []Count `json:"categories"`
+	// Unsorted counts products neither a profile rule nor the tree's
+	// keywords recognised, filed in the default category, and Unrecognised
+	// shows the first few names: they are what a new keyword is made from.
+	Unsorted     int      `json:"unsorted"`
+	Unrecognised []string `json:"unrecognised,omitempty"`
 }
 
 // Result is what Apply wrote.
@@ -227,6 +232,11 @@ func Resolve(ctx context.Context, store Store, p *Profile, parsed *Parsed) (*Bat
 			prod.Category, prod.PartType, prod.Universal = r.Category, r.PartType, r.Universal
 		} else if c := classifier.Classify(o.Name + " " + o.Category); c != nil {
 			prod.Category = c.Slug
+		} else {
+			rep.Unsorted++
+			if len(rep.Unrecognised) < maxProblems && !slices.Contains(rep.Unrecognised, o.Name) {
+				rep.Unrecognised = append(rep.Unrecognised, o.Name)
+			}
 		}
 		if c := byID[prod.Category]; c != nil {
 			prod.PartType = cmp.Or(prod.PartType, c.PartType)

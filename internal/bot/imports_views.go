@@ -96,6 +96,11 @@ func writeImportReport(b *strings.Builder, rep *importer.Report) {
 		fmt.Fprintf(b, "\n📦 Без жодного авто: %s — покупці з обраною машиною їх не побачать.\n", num(rep.WithoutFitment))
 	}
 
+	if rep.Unsorted > 0 {
+		fmt.Fprintf(b, "\n❓ <b>Не впізнав категорію: %s</b> — пішли в «Інше»\n%s\n", num(rep.Unsorted), esc(listed(rep.Unrecognised)))
+		b.WriteString("<i>Слово з такої назви варто додати до потрібної категорії.</i>\n")
+	}
+
 	if len(rep.Categories) > 0 {
 		cats := make([]string, len(rep.Categories))
 		for i, c := range rep.Categories {

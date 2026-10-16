@@ -327,6 +327,8 @@ func TestResolveFilesByTreeKeywords(t *testing.T) {
 	assert.Equal(t, []string{"oil-filters", "struts", "suspension", "brakes", "other"}, got,
 		"the longest keyword wins: a boot strut is not a shock absorber; the profile's rule still comes first")
 	assert.Equal(t, "oil_filter", b.Products[0].PartType, "the category passes on its part type")
+	assert.Equal(t, 1, b.Report.Unsorted)
+	assert.Equal(t, []string{"Щось незрозуміле"}, b.Report.Unrecognised, "the names to make keywords from")
 }
 
 func TestParseCategoriesShippedTree(t *testing.T) {
