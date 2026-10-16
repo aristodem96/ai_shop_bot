@@ -22,7 +22,8 @@ type Words interface {
 	PreviewKeyword(ctx context.Context, word, slug string, create *importer.NewCategory) (*importer.KeywordChange, error)
 	ApplyKeyword(ctx context.Context, word, slug string, create *importer.NewCategory) (*importer.KeywordChange, error)
 	OwnerKeywords(ctx context.Context) ([]importer.OwnerKeyword, error)
-	RemoveKeyword(ctx context.Context, id int64) (*importer.OwnerKeyword, error)
+	PreviewRemoval(ctx context.Context, id int64) (*importer.KeywordRemoval, error)
+	RemoveKeyword(ctx context.Context, id int64) (*importer.KeywordRemoval, error)
 }
 
 // Commands of the managers' chat. Latin: Telegram treats only Latin as a
@@ -237,23 +238,52 @@ func (b *Bot) cancelWord(ctx context.Context, cc callbackCtx, id int64) (string,
 	return msgImportCancelled, b.editText(ctx, cc, msgWordCancelled, nil)
 }
 
-// deleteWord removes one of the owner's words from the /words list.
+// deleteWord is 🗑 on the /words list: it shows where the word's products
+// would go, and asks.
 func (b *Bot) deleteWord(ctx context.Context, cc callbackCtx, id int64) (string, error) {
 	if !b.isAdmin(cc.chat) {
 		return "", errBadCallback
 	}
-	kw, err := b.words.RemoveKeyword(ctx, id)
+	rm, err := b.words.PreviewRemoval(ctx, id)
 	if errors.Is(err, importer.ErrBadKeyword) {
-		return "Цього слова вже немає.", nil
+		return msgWordGone, b.showWordsList(ctx, cc)
 	}
 	if err != nil {
 		return "", err
 	}
-	text, kb := b.wordsList(ctx)
-	if err := b.editText(ctx, cc, text, kb); err != nil {
+	text, kb := wordRemovalView(rm)
+	return "", b.editText(ctx, cc, text, kb)
+}
+
+// confirmDeleteWord forgets the word and moves its products back.
+func (b *Bot) confirmDeleteWord(ctx context.Context, cc callbackCtx, id int64) (string, error) {
+	if !b.isAdmin(cc.chat) {
+		return "", errBadCallback
+	}
+	rm, err := b.words.RemoveKeyword(ctx, id)
+	if errors.Is(err, importer.ErrBadKeyword) {
+		return msgWordGone, b.showWordsList(ctx, cc)
+	}
+	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("Видалено «%s». Товари лишаються на місці до наступного імпорту.", kw.Word), nil
+	if err := b.showWordsList(ctx, cc); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(msgWordRemoved, rm.Keyword.Word, len(rm.Back)), nil
+}
+
+// keepWord is "cancel" under a removal: back to the list.
+func (b *Bot) keepWord(ctx context.Context, cc callbackCtx) (string, error) {
+	if !b.isAdmin(cc.chat) {
+		return "", errBadCallback
+	}
+	return "", b.showWordsList(ctx, cc)
+}
+
+func (b *Bot) showWordsList(ctx context.Context, cc callbackCtx) error {
+	text, kb := b.wordsList(ctx)
+	return b.editText(ctx, cc, text, kb)
 }
 
 func (b *Bot) wordsList(ctx context.Context) (string, *telegram.InlineKeyboard) {

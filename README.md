@@ -453,7 +453,8 @@ counts the products with that fragment, asks for a category by buttons — or
 a new subcategory or section, named in a reply — and previews what would
 move before anything does: "37 products, 35 of them from Other; 2 stay, a
 longer word files them elsewhere". Apply stores the word and moves them;
-`/words` lists the owner's words with a delete button each. They are kept
+`/words` lists the owner's words with a delete button each, which
+previews too: the word's products go where the tree without it files them. They are kept
 apart from the file's, so a deploy that syncs the file does not erase them.
 
 Two steps, vehicles first, since a price list's fitments can only point at

@@ -126,6 +126,27 @@ func wordsListView(kws []importer.OwnerKeyword) (string, *telegram.InlineKeyboar
 	if extra := len(kws) - wordsListLimit; extra > 0 {
 		fmt.Fprintf(&b, "… і ще %s\n", num(extra))
 	}
-	b.WriteString("\n🗑 прибирає слово; товари лишаються на місці до наступного імпорту.")
+	b.WriteString("\n🗑 прибирає слово — спершу покажу, куди повернуться його товари.")
 	return b.String(), kb
+}
+
+// wordRemovalView shows where forgetting a word sends its products.
+func wordRemovalView(rm *importer.KeywordRemoval) (string, *telegram.InlineKeyboard) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "🗑 Прибрати «%s» (→ %s)?\n\n", esc(rm.Keyword.Word), esc(rm.Keyword.Category))
+	if len(rm.Back) == 0 {
+		b.WriteString("Товари не переїдуть: усі, що зараз там, туди веде й інше слово.\n")
+	} else {
+		fmt.Fprintf(&b, "<b>Повернуться товарів: %s</b> — туди, де були б без цього слова:\n", num(len(rm.Back)))
+		for _, c := range rm.To[:min(len(rm.To), wordWhereListed)] {
+			fmt.Fprintf(&b, "• %s — %s\n", esc(c.Name), num(c.N))
+		}
+		if extra := len(rm.To) - wordWhereListed; extra > 0 {
+			fmt.Fprintf(&b, "• … і ще в %s категорій\n", num(extra))
+		}
+	}
+	return b.String(), &telegram.InlineKeyboard{Rows: [][]telegram.InlineButton{{
+		button("🗑 Прибрати", actWordRemove, rm.Keyword.ID),
+		button("⬅️ Залишити", actWordKeep, rm.Keyword.ID),
+	}}}
 }

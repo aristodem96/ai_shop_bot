@@ -88,24 +88,45 @@ func (r *ImportRepository) OwnerKeywords(ctx context.Context) ([]importer.OwnerK
 	return kws, nil
 }
 
-// RemoveKeyword deletes one of the owner's words and returns it.
-func (r *ImportRepository) RemoveKeyword(ctx context.Context, id int64) (*importer.OwnerKeyword, error) {
+// RemoveKeyword deletes one of the owner's words and moves its products
+// back, all or nothing. A moved product takes its new category's part type
+// and universality.
+func (r *ImportRepository) RemoveKeyword(ctx context.Context, id int64, moves []importer.Move) (*importer.OwnerKeyword, error) {
 	var kw importer.OwnerKeyword
-	err := r.pool.QueryRow(ctx, `
-		WITH k AS (DELETE FROM category_keywords WHERE id = $1 RETURNING id, word, category_id)
-		SELECT k.id, k.word, coalesce(s.title || ' › ', '') || c.title
-		FROM k JOIN categories c ON c.id = k.category_id
-		LEFT JOIN categories s ON s.id = c.parent_id`, id).Scan(&kw.ID, &kw.Word, &kw.Category)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, importer.ErrBadKeyword
-	}
+	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `
+			WITH k AS (DELETE FROM category_keywords WHERE id = $1 RETURNING id, word, category_id)
+			SELECT k.id, k.word, coalesce(s.title || ' › ', '') || c.title, c.slug
+			FROM k JOIN categories c ON c.id = k.category_id
+			LEFT JOIN categories s ON s.id = c.parent_id`, id).Scan(&kw.ID, &kw.Word, &kw.Category, &kw.Slug)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return importer.ErrBadKeyword
+		}
+		if err != nil {
+			return fmt.Errorf("postgres: remove keyword %d: %w", id, err)
+		}
+		ids := make([]int64, len(moves))
+		slugs := make([]string, len(moves))
+		for i, m := range moves {
+			ids[i], slugs[i] = m.ProductID, m.Category
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE products p SET category_id = c.id, part_type = c.part_type, universal = c.universal,
+				updated_at = now()
+			FROM unnest($1::bigint[], $2::text[]) AS x(id, slug)
+			JOIN categories c ON c.slug = x.slug
+			WHERE p.id = x.id`, ids, slugs); err != nil {
+			return fmt.Errorf("postgres: move products back: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("postgres: remove keyword %d: %w", id, err)
+		return nil, err
 	}
 	return &kw, nil
 }
 
-const ownerKeywordColumns = `k.id, k.word, coalesce(s.title || ' › ', '') || c.title
+const ownerKeywordColumns = `k.id, k.word, coalesce(s.title || ' › ', '') || c.title, c.slug
 	FROM category_keywords k
 	JOIN categories c ON c.id = k.category_id
 	LEFT JOIN categories s ON s.id = c.parent_id`

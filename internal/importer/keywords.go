@@ -40,6 +40,13 @@ type OwnerKeyword struct {
 	ID       int64
 	Word     string
 	Category string // "Section › Subcategory"
+	Slug     string // the category's
+}
+
+// Move is a product going to another category.
+type Move struct {
+	ProductID int64
+	Category  string // slug
 }
 
 // KeywordStore is what keyword changes need from the database.
@@ -52,7 +59,21 @@ type KeywordStore interface {
 	// transaction.
 	AddKeyword(ctx context.Context, word, slug string, create *NewCategory, move []int64) error
 	OwnerKeywords(ctx context.Context) ([]OwnerKeyword, error)
-	RemoveKeyword(ctx context.Context, id int64) (*OwnerKeyword, error)
+	// RemoveKeyword deletes the owner's word and applies moves, in one
+	// transaction.
+	RemoveKeyword(ctx context.Context, id int64, moves []Move) (*OwnerKeyword, error)
+}
+
+// KeywordRemoval is what forgetting a word would do: its products go where
+// the tree without the word files them, as if it had never been added.
+type KeywordRemoval struct {
+	Keyword OwnerKeyword
+	// Back are the products that move; To counts them by destination,
+	// "Section › Subcategory", most first.
+	Back []ProductRef
+	To   []Count
+	// moves pairs each product with its destination, for the store.
+	moves []Move
 }
 
 // KeywordChange is what adding a word would do.
@@ -236,10 +257,75 @@ func (s *Service) OwnerKeywords(ctx context.Context) ([]OwnerKeyword, error) {
 	return s.keywords.OwnerKeywords(ctx)
 }
 
-// RemoveKeyword forgets a word. Products it filed stay where they are until
-// the next import of their price list files them again.
-func (s *Service) RemoveKeyword(ctx context.Context, id int64) (*OwnerKeyword, error) {
-	return s.keywords.RemoveKeyword(ctx, id)
+// PreviewRemoval works out where forgetting a word sends its products. The
+// tree without the word decides, the same classifier an import runs, so a
+// product lands where it would be had the word never been added -- not
+// where it was before, which an import since may have changed. What the
+// tree does not recognise goes to the default category.
+func (s *Service) PreviewRemoval(ctx context.Context, id int64) (*KeywordRemoval, error) {
+	kws, err := s.keywords.OwnerKeywords(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var kw *OwnerKeyword
+	for i := range kws {
+		if kws[i].ID == id {
+			kw = &kws[i]
+		}
+	}
+	if kw == nil {
+		return nil, ErrBadKeyword
+	}
+	cats, err := s.keywords.Categories(ctx)
+	if err != nil {
+		return nil, err
+	}
+	bySlug := make(map[string]Category, len(cats))
+	for i := range cats {
+		cats[i].Keywords = slices.DeleteFunc(cats[i].Keywords, func(w string) bool { return w == kw.Word })
+		bySlug[cats[i].Slug] = cats[i]
+	}
+
+	refs, err := s.keywords.ProductsContaining(ctx, kw.Word)
+	if err != nil {
+		return nil, err
+	}
+	rm := &KeywordRemoval{Keyword: *kw}
+	classifier := NewClassifier(cats)
+	to := make(map[string]int)
+	for _, r := range refs {
+		// Only what the word filed: a product with the word that sits
+		// elsewhere got there by a longer word or a rule, and stays.
+		if r.Category != kw.Slug {
+			continue
+		}
+		dest := defaultCategory
+		if c := classifier.Classify(r.Name); c != nil {
+			dest = c.Slug
+		}
+		if dest == r.Category {
+			continue
+		}
+		rm.Back = append(rm.Back, r)
+		rm.moves = append(rm.moves, Move{ProductID: r.ID, Category: dest})
+		to[Path(cats, bySlug[dest])]++
+	}
+	rm.To = sortedCounts(to)
+	return rm, nil
+}
+
+// RemoveKeyword forgets a word and sends its products where the tree
+// without it files them. The removal is worked out again first: the
+// catalogue may have changed since the preview.
+func (s *Service) RemoveKeyword(ctx context.Context, id int64) (*KeywordRemoval, error) {
+	rm, err := s.PreviewRemoval(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.keywords.RemoveKeyword(ctx, id, rm.moves); err != nil {
+		return nil, err
+	}
+	return rm, nil
 }
 
 // Categories lists the tree, for the owner to pick from.

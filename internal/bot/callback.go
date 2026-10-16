@@ -45,7 +45,9 @@ const (
 	actWordBack       action = "wb"   // wb:<job> back to the sections
 	actWordApply      action = "wa"   // wa:<job> store the word, move the products
 	actWordCancel     action = "wx"   // wx:<job> drop the change
-	actWordDelete     action = "wd"   // wd:<keyword> forget an owner's word
+	actWordDelete     action = "wd"   // wd:<keyword> preview forgetting an owner's word
+	actWordRemove     action = "wr"   // wr:<keyword> forget it, move its products back
+	actWordKeep       action = "wz"   // wz:<keyword> keep it, back to the list
 	actNoop           action = "x"    // a label that only looks like a button
 )
 
@@ -58,6 +60,7 @@ var arity = map[action]int{
 	actCheckout: 0, actPay: 0, actEditContacts: 0, actCancelCheckout: 0, actManage: 2,
 	actImportProfile: 2, actImportApply: 2, actImportCancel: 1,
 	actWordPick: 2, actWordNew: 2, actWordBack: 1, actWordApply: 1, actWordCancel: 1, actWordDelete: 1,
+	actWordRemove: 1, actWordKeep: 1,
 }
 
 // maxCallbackData is Telegram's limit on callback_data, in bytes.

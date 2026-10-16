@@ -18,7 +18,7 @@ func TestOwnerKeywordSurvivesSync(t *testing.T) {
 
 	// Two products the tree does not know, sitting in "other".
 	var ids [2]int64
-	for i, name := range []string{"Спойлер-антикрило тюнінгове", "Антикрило карбонове"} {
+	for i, name := range []string{"Спойлер-антикрило тюнінгове", "Антикрила комплект 2 шт"} {
 		require.NoError(t, testPool.QueryRow(ctx, `
 			INSERT INTO products (sku, category_id, name, brand, price, stock)
 			VALUES ($1, (SELECT id FROM categories WHERE slug = 'other'), $2, 'Testbrand', 100000, 1)
@@ -66,7 +66,19 @@ func TestOwnerKeywordSurvivesSync(t *testing.T) {
 
 	removed, err := svc.RemoveKeyword(ctx, kws[0].ID)
 	require.NoError(t, err)
-	assert.Equal(t, "антикрил", removed.Word)
+	assert.Equal(t, "антикрил", removed.Keyword.Word)
+	assert.Len(t, removed.Back, 2)
+	categoryOf := func(id int64) string {
+		var s string
+		require.NoError(t, testPool.QueryRow(ctx, `
+			SELECT c.slug FROM products p JOIN categories c ON c.id = p.category_id WHERE p.id = $1`, id).Scan(&s))
+		return s
+	}
+	// Not back to where they were, but to where the tree without the word
+	// files them: the tree knows "спойлер", so the spoiler is bodywork now.
+	assert.Equal(t, "body-panels", categoryOf(ids[0]), "the products move with the word, not at the next import")
+	assert.Equal(t, "other", categoryOf(ids[1]), "and what the tree does not know goes to other")
+
 	_, err = svc.RemoveKeyword(ctx, kws[0].ID)
 	require.ErrorIs(t, err, importer.ErrBadKeyword, "a second press finds nothing")
 }

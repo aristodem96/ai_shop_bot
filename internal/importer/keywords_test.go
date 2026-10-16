@@ -14,6 +14,8 @@ type fakeKeywords struct {
 	added    []string
 	moved    []int64
 	created  *NewCategory
+	owner    []OwnerKeyword
+	removed  []Move
 }
 
 func (f *fakeKeywords) Categories(context.Context) ([]Category, error) {
@@ -39,8 +41,12 @@ func (f *fakeKeywords) AddKeyword(_ context.Context, word, slug string, create *
 	f.added, f.moved, f.created = append(f.added, word+"→"+slug), move, create
 	return nil
 }
-func (f *fakeKeywords) OwnerKeywords(context.Context) ([]OwnerKeyword, error)       { return nil, nil }
-func (f *fakeKeywords) RemoveKeyword(context.Context, int64) (*OwnerKeyword, error) { return nil, nil }
+func (f *fakeKeywords) OwnerKeywords(context.Context) ([]OwnerKeyword, error) { return f.owner, nil }
+
+func (f *fakeKeywords) RemoveKeyword(_ context.Context, id int64, moves []Move) (*OwnerKeyword, error) {
+	f.removed = moves
+	return &OwnerKeyword{ID: id}, nil
+}
 
 func containsFold(s, sub string) bool {
 	return NewClassifier([]Category{{Slug: "x", Keywords: []string{sub}}}).Classify(s) != nil
@@ -137,4 +143,32 @@ func TestKeywordInfo(t *testing.T) {
 	info, err = s.KeywordInfo(ctx, "распредвал")
 	require.NoError(t, err)
 	assert.Equal(t, "Двигун › Деталі двигуна", info.TakenBy, "a word the tree has is said so at once")
+}
+
+func TestRemovalSendsProductsWhereTheTreeWithoutTheWordWould(t *testing.T) {
+	s, f := keywordService()
+	// The owner filed "вал распредел" under engine-parts; products 1 and 4
+	// are there by it, product 6 by the file's "распредвал" as well.
+	f.cats[1].Keywords = append(f.cats[1].Keywords, "вал распредел")
+	f.owner = []OwnerKeyword{{ID: 9, Word: "вал распредел", Slug: "engine-parts", Category: "Двигун › Деталі двигуна"}}
+	f.products = []ProductRef{
+		{ID: 1, Name: "Вал распределительный TIGGO 2", Category: "engine-parts"},
+		{ID: 3, Name: "Шестерня распредвала вал распределительный", Category: "timing"},
+		{ID: 4, Name: "Вал распределительный (оригинал)", Category: "engine-parts"},
+		{ID: 6, Name: "Вал распределительный, распредвал в зборі", Category: "engine-parts"},
+	}
+
+	rm, err := s.PreviewRemoval(context.Background(), 9)
+	require.NoError(t, err)
+	assert.Equal(t, []Count{{Name: "Інше", N: 2}}, rm.To, "back to where they would be without the word")
+	require.Len(t, rm.Back, 2)
+	assert.Equal(t, []int64{1, 4}, []int64{rm.Back[0].ID, rm.Back[1].ID},
+		"the gear stays under its longer word, and 6 stays: another word keeps it there")
+
+	_, err = s.RemoveKeyword(context.Background(), 9)
+	require.NoError(t, err)
+	assert.Equal(t, []Move{{ProductID: 1, Category: "other"}, {ProductID: 4, Category: "other"}}, f.removed)
+
+	_, err = s.PreviewRemoval(context.Background(), 404)
+	require.ErrorIs(t, err, ErrBadKeyword)
 }

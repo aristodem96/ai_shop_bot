@@ -57,9 +57,17 @@ func (f *fakeWords) OwnerKeywords(context.Context) ([]importer.OwnerKeyword, err
 	return f.keywords, nil
 }
 
-func (f *fakeWords) RemoveKeyword(_ context.Context, id int64) (*importer.OwnerKeyword, error) {
+func (f *fakeWords) PreviewRemoval(_ context.Context, id int64) (*importer.KeywordRemoval, error) {
+	return &importer.KeywordRemoval{
+		Keyword: importer.OwnerKeyword{ID: id, Word: "вал распредел", Category: "Двигун › Деталі двигуна"},
+		Back:    []importer.ProductRef{{ID: 1}, {ID: 2}, {ID: 3}},
+		To:      []importer.Count{{Name: "Інше", N: 2}, {Name: "Двигун › Ремені й ГРМ", N: 1}},
+	}, nil
+}
+
+func (f *fakeWords) RemoveKeyword(ctx context.Context, id int64) (*importer.KeywordRemoval, error) {
 	f.removed = append(f.removed, id)
-	return &importer.OwnerKeyword{ID: id, Word: "вал распредел"}, nil
+	return f.PreviewRemoval(ctx, id)
 }
 
 func newWordsBot(t *testing.T) (testBot, *fakeWords) {
@@ -144,8 +152,19 @@ func TestWordsListAndDelete(t *testing.T) {
 	assert.Equal(t, []string{encode(actWordDelete, 7)}, callbacks(list.markup))
 
 	b.Handle(ctx, pressIn(managers, encode(actWordDelete, 7)))
+	assert.Empty(t, w.removed, "🗑 asks first")
+	preview := b.tg.last("editMessageText")
+	assert.Contains(t, preview.text, "Повернуться товарів: 3")
+	assert.Contains(t, preview.text, "• Інше — 2\n• Двигун › Ремені й ГРМ — 1")
+	assert.Equal(t, []string{encode(actWordRemove, 7), encode(actWordKeep, 7)}, callbacks(preview.markup))
+
+	b.Handle(ctx, pressIn(managers, encode(actWordKeep, 7)))
+	assert.Empty(t, w.removed, "keeping changes nothing")
+	assert.Contains(t, b.tg.last("editMessageText").text, "Ваші слова")
+
+	b.Handle(ctx, pressIn(managers, encode(actWordRemove, 7)))
 	assert.Equal(t, []int64{7}, w.removed)
-	assert.Contains(t, b.tg.last("answerCallbackQuery").text, "Видалено «вал распредел»")
+	assert.Equal(t, "Прибрано «вал распредел». Повернулося товарів: 3.", b.tg.last("answerCallbackQuery").text)
 }
 
 func TestWordsOnlyInManagersChat(t *testing.T) {
@@ -159,7 +178,7 @@ func TestWordsOnlyInManagersChat(t *testing.T) {
 
 	b.Handle(ctx, say(managers, "/word вал распредел"))
 	b.Handle(ctx, pressIn(chat, encode(actWordApply, 1)))
-	b.Handle(ctx, pressIn(chat, encode(actWordDelete, 7)))
+	b.Handle(ctx, pressIn(chat, encode(actWordRemove, 7)))
 	assert.Empty(t, w.applied, "a forged button from another chat changes nothing")
 	assert.Empty(t, w.removed)
 }

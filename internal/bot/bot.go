@@ -359,7 +359,7 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 		return "", b.cancelCheckout(ctx, cc)
 	case actManage:
 		return b.manage(ctx, cc, a[0], a[1])
-	case actWordPick, actWordNew, actWordBack, actWordApply, actWordCancel, actWordDelete:
+	case actWordPick, actWordNew, actWordBack, actWordApply, actWordCancel, actWordDelete, actWordRemove, actWordKeep:
 		if b.words == nil {
 			return "", errBadCallback
 		}
@@ -374,6 +374,10 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 			return b.applyWord(ctx, cc, a[0])
 		case actWordCancel:
 			return b.cancelWord(ctx, cc, a[0])
+		case actWordRemove:
+			return b.confirmDeleteWord(ctx, cc, a[0])
+		case actWordKeep:
+			return b.keepWord(ctx, cc)
 		default:
 			return b.deleteWord(ctx, cc, a[0])
 		}
