@@ -122,3 +122,19 @@ func TestUniqueSlug(t *testing.T) {
 	assert.Equal(t, "shchytky-ta-shchyty", uniqueSlug("Щитки та щити", nil))
 	assert.Equal(t, "custom-4x4", uniqueSlug("4x4", nil), "a slug starts with a letter")
 }
+
+func TestKeywordInfo(t *testing.T) {
+	s, _ := keywordService()
+	ctx := context.Background()
+
+	info, err := s.KeywordInfo(ctx, "вал распредел")
+	require.NoError(t, err)
+	assert.Empty(t, info.TakenBy)
+	assert.Equal(t, 4, info.Total)
+	assert.Equal(t, 2, info.InDefault)
+	assert.Equal(t, []Count{{Name: "Інше", N: 2}, {Name: "Двигун › Деталі двигуна", N: 1}, {Name: "Двигун › Ремені й ГРМ", N: 1}}, info.Where)
+
+	info, err = s.KeywordInfo(ctx, "распредвал")
+	require.NoError(t, err)
+	assert.Equal(t, "Двигун › Деталі двигуна", info.TakenBy, "a word the tree has is said so at once")
+}

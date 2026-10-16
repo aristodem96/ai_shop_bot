@@ -14,6 +14,7 @@ import (
 
 // fakeWords answers from a three-node tree and records what it is asked.
 type fakeWords struct {
+	taken    string // the category the word already leads to
 	applied  []string
 	created  *importer.NewCategory
 	removed  []int64
@@ -28,7 +29,10 @@ var wordTree = []importer.Category{
 
 func (f *fakeWords) Categories(context.Context) ([]importer.Category, error) { return wordTree, nil }
 
-func (f *fakeWords) KeywordMatches(context.Context, string) (int, int, error) { return 39, 37, nil }
+func (f *fakeWords) KeywordInfo(_ context.Context, word string) (*importer.KeywordInfo, error) {
+	return &importer.KeywordInfo{Word: strings.ToLower(word), Total: 39, InDefault: 37, TakenBy: f.taken,
+		Where: []importer.Count{{Name: "Інше", N: 37}, {Name: "Двигун › Деталі двигуна", N: 2}}}, nil
+}
 
 func (f *fakeWords) PreviewKeyword(_ context.Context, word, slug string, create *importer.NewCategory) (*importer.KeywordChange, error) {
 	target := importer.Category{Slug: slug, Parent: "engine", Title: "Деталі двигуна"}
@@ -78,7 +82,8 @@ func TestWordIntoExistingSubcategory(t *testing.T) {
 
 	b.Handle(ctx, say(managers, "/word@shop_bot Вал Распредел"))
 	start := b.tg.last("sendMessage")
-	assert.Contains(t, start.text, "«вал распредел»: у назвах 39 товарів, з них 37 зараз в «Інше»")
+	assert.Contains(t, start.text, "«вал распредел»: у назвах 39 товарів")
+	assert.Contains(t, start.text, "Зараз вони в:\n• Інше — 37\n• Двигун › Деталі двигуна — 2", "where they are before choosing")
 	assert.Equal(t, []string{
 		encode(actWordPick, 1, 0), encode(actWordPick, 1, 2), encode(actWordNew, 1, -1), encode(actWordCancel, 1),
 	}, callbacks(start.markup), "every section, a new one, cancel")
@@ -176,4 +181,15 @@ func countSent(b testBot, method, contains string) int {
 		}
 	}
 	return n
+}
+
+func TestWordAlreadyKnown(t *testing.T) {
+	b, w := newWordsBot(t)
+	w.taken = "Двигун › Деталі двигуна"
+
+	b.Handle(context.Background(), say(managers, "/word вал распредел"))
+	msg := b.tg.last("sendMessage")
+	assert.Contains(t, msg.text, "вже є: веде в <b>Двигун › Деталі двигуна</b>")
+	assert.Contains(t, msg.text, "Двигун › Деталі двигуна — 2", "and where its products are")
+	assert.Nil(t, msg.markup, "nothing to choose")
 }

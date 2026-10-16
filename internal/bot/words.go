@@ -18,7 +18,7 @@ import (
 // preview of what moves, and Apply.
 type Words interface {
 	Categories(ctx context.Context) ([]importer.Category, error)
-	KeywordMatches(ctx context.Context, word string) (total, inDefault int, err error)
+	KeywordInfo(ctx context.Context, word string) (*importer.KeywordInfo, error)
 	PreviewKeyword(ctx context.Context, word, slug string, create *importer.NewCategory) (*importer.KeywordChange, error)
 	ApplyKeyword(ctx context.Context, word, slug string, create *importer.NewCategory) (*importer.KeywordChange, error)
 	OwnerKeywords(ctx context.Context) ([]importer.OwnerKeyword, error)
@@ -107,9 +107,15 @@ func (b *Bot) startWord(ctx context.Context, chat int64, arg string) {
 		b.send(ctx, chat, "❌ "+esc(err.Error()), nil)
 		return
 	}
-	total, inDefault, err := b.words.KeywordMatches(ctx, word)
+	info, err := b.words.KeywordInfo(ctx, word)
 	if err != nil {
-		b.fail(ctx, chat, "count keyword matches", err)
+		b.fail(ctx, chat, "look a keyword up", err)
+		return
+	}
+	if info.TakenBy != "" {
+		// Nothing to choose: the word is filed. Where the products are
+		// says whether it works; /words is where the owner's can go.
+		b.send(ctx, chat, wordTakenText(info), nil)
 		return
 	}
 	cats, err := b.words.Categories(ctx)
@@ -118,7 +124,7 @@ func (b *Bot) startWord(ctx context.Context, chat int64, arg string) {
 		return
 	}
 	job := b.wordJobs.add(&wordJob{chat: chat, word: word, created: time.Now()})
-	b.send(ctx, chat, wordStartText(word, total, inDefault), sectionsKeyboard(job.id, cats))
+	b.send(ctx, chat, wordStartText(info), sectionsKeyboard(job.id, cats))
 }
 
 // pickWordCategory is a category button. A section with subcategories
@@ -190,7 +196,7 @@ func (b *Bot) previewWord(ctx context.Context, chat int64, job *wordJob, msg int
 		b.fail(ctx, chat, "list categories", err)
 		return
 	}
-	text, kb := wordPreviewView(job.id, ch, categoryPath(cats, ch.Target))
+	text, kb := wordPreviewView(job.id, ch, importer.Path(cats, ch.Target))
 	if msg != 0 {
 		if err := b.tg.EditMessageText(ctx, chat, msg, text, kb); err == nil {
 			return
@@ -219,7 +225,7 @@ func (b *Bot) applyWord(ctx context.Context, cc callbackCtx, id int64) (string, 
 	if err != nil {
 		return "", err
 	}
-	return "", b.editText(ctx, cc, fmt.Sprintf(msgWordApplied, esc(ch.Word), esc(categoryPath(cats, ch.Target)), num(len(ch.Move))), nil)
+	return "", b.editText(ctx, cc, fmt.Sprintf(msgWordApplied, esc(ch.Word), esc(importer.Path(cats, ch.Target)), num(len(ch.Move))), nil)
 }
 
 func (b *Bot) cancelWord(ctx context.Context, cc callbackCtx, id int64) (string, error) {
@@ -292,17 +298,6 @@ func hasChildren(cats []importer.Category, slug string) bool {
 		}
 	}
 	return false
-}
-
-// categoryPath names a category the way the menu shows it: "Двигун › Деталі
-// двигуна".
-func categoryPath(cats []importer.Category, c importer.Category) string {
-	for _, p := range cats {
-		if c.Parent != "" && p.Slug == c.Parent {
-			return p.Title + " › " + c.Title
-		}
-	}
-	return c.Title
 }
 
 func (s *wordJobs) add(job *wordJob) *wordJob {

@@ -11,15 +11,36 @@ import (
 // wordExamples bounds the product names a preview lists.
 const wordExamples = 8
 
-func wordStartText(word string, total, inDefault int) string {
-	text := fmt.Sprintf("🔤 «%s»: у назвах %s товарів", esc(word), num(total))
-	switch {
-	case total == 0:
-		text = fmt.Sprintf("🔤 Товарів зі словом «%s» зараз немає. Його все одно можна додати — спрацює на наступних імпортах.", esc(word))
-	case inDefault > 0:
-		text += fmt.Sprintf(", з них %s зараз в «Інше»", num(inDefault))
+// wordWhereListed bounds the categories "where they are now" lists.
+const wordWhereListed = 5
+
+func wordStartText(info *importer.KeywordInfo) string {
+	if info.Total == 0 {
+		return fmt.Sprintf("🔤 Товарів зі словом «%s» зараз немає. Його все одно можна додати — спрацює на наступних імпортах.\n\nКуди віднести?", esc(info.Word))
 	}
-	return text + ".\n\nКуди їх віднести?"
+	return fmt.Sprintf("🔤 «%s»: у назвах %s товарів.\n%s\nКуди їх віднести?", esc(info.Word), num(info.Total), whereText(info))
+}
+
+// wordTakenText answers a word the tree already has.
+func wordTakenText(info *importer.KeywordInfo) string {
+	text := fmt.Sprintf("🔤 Слово «%s» вже є: веде в <b>%s</b>.\n", esc(info.Word), esc(info.TakenBy))
+	if info.Total > 0 {
+		text += fmt.Sprintf("\nТоварів з ним: %s.\n%s", num(info.Total), whereText(info))
+	}
+	return text + "\nЩоб змінити — /words (слова, які додали ви) або інше, точніше слово."
+}
+
+// whereText lists where the products with a word are now.
+func whereText(info *importer.KeywordInfo) string {
+	var b strings.Builder
+	b.WriteString("Зараз вони в:\n")
+	for _, c := range info.Where[:min(len(info.Where), wordWhereListed)] {
+		fmt.Fprintf(&b, "• %s — %s\n", esc(c.Name), num(c.N))
+	}
+	if extra := len(info.Where) - wordWhereListed; extra > 0 {
+		fmt.Fprintf(&b, "• … і ще в %s категоріях\n", num(extra))
+	}
+	return b.String()
 }
 
 // sectionsKeyboard lists every section, empty ones too: the owner may be

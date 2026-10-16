@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -85,22 +86,67 @@ func NormalizeKeyword(s string) (string, error) {
 	return w, nil
 }
 
-// KeywordMatches counts the products a word would touch, before a category
-// is chosen: the owner sees whether the word is the one they mean.
-func (s *Service) KeywordMatches(ctx context.Context, word string) (total, inDefault int, err error) {
-	if word, err = NormalizeKeyword(word); err != nil {
-		return 0, 0, err
+// KeywordInfo is what a word means now, before a category is chosen.
+type KeywordInfo struct {
+	Word string
+	// Total products have the word in their name; Where says which
+	// categories hold them now, "Section › Subcategory", most first, and
+	// InDefault how many sit in the default one.
+	Total     int
+	InDefault int
+	Where     []Count
+	// TakenBy names the category the word already leads to, if any: then
+	// there is nothing to choose.
+	TakenBy string
+}
+
+// KeywordInfo tells the owner what a word touches before they pick a
+// category: whether the word is the one they mean, where those products are
+// now, and whether the tree knows the word already.
+func (s *Service) KeywordInfo(ctx context.Context, word string) (*KeywordInfo, error) {
+	word, err := NormalizeKeyword(word)
+	if err != nil {
+		return nil, err
+	}
+	cats, err := s.keywords.Categories(ctx)
+	if err != nil {
+		return nil, err
+	}
+	info := &KeywordInfo{Word: word}
+	for _, c := range cats {
+		if slices.Contains(c.Keywords, word) {
+			info.TakenBy = Path(cats, c)
+		}
 	}
 	refs, err := s.keywords.ProductsContaining(ctx, word)
 	if err != nil {
-		return 0, 0, err
+		return nil, err
 	}
+	bySlug := make(map[string]Category, len(cats))
+	for _, c := range cats {
+		bySlug[c.Slug] = c
+	}
+	where := make(map[string]int)
 	for _, r := range refs {
+		where[Path(cats, bySlug[r.Category])]++
 		if r.Category == defaultCategory {
-			inDefault++
+			info.InDefault++
 		}
 	}
-	return len(refs), inDefault, nil
+	info.Total = len(refs)
+	info.Where = sortedCounts(where)
+	return info, nil
+}
+
+// Path names a category the way the menu shows it: "Двигун › Деталі
+// двигуна".
+func Path(cats []Category, c Category) string {
+	for _, p := range cats {
+		if c.Parent != "" && p.Slug == c.Parent {
+			return p.Title + " › " + c.Title
+		}
+	}
+	return c.Title
 }
 
 // PreviewKeyword works out what filing word under the category slug would
@@ -115,10 +161,8 @@ func (s *Service) PreviewKeyword(ctx context.Context, word, slug string, create 
 		return nil, err
 	}
 	for _, c := range cats {
-		for _, k := range c.Keywords {
-			if k == word {
-				return nil, fmt.Errorf("%w: «%s»", ErrKeywordTaken, c.Title)
-			}
+		if slices.Contains(c.Keywords, word) {
+			return nil, fmt.Errorf("%w: «%s»", ErrKeywordTaken, Path(cats, c))
 		}
 	}
 
