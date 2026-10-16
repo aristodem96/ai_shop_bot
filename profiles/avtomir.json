@@ -1,0 +1,17 @@
+{
+  "source": "avtomir-demo",
+  "sku_prefix": "AM",
+  "columns": {
+    "external_id": "Код товару",
+    "part_number": "Кат. номер",
+    "brand": "Бренд",
+    "name": "Найменування товару",
+    "price": "Ціна роздріб, грн",
+    "stock": "Наявність",
+    "vehicle": "Застосовність",
+    "years": "Рік",
+    "position": "Сторона"
+  },
+  "default_category": "other",
+  "deactivate_missing": true
+}
