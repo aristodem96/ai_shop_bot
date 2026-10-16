@@ -95,8 +95,14 @@ up: ## Start Postgres, Redis and the bot in Docker
 docker-seed: ## Load (or reset) the demo catalogue from inside the bot image
 	docker compose --profile bot run --rm --no-deps --entrypoint /seed bot
 
+# down keeps the data: stopping the stack is common, wiping its database is
+# not, and the two must not be one keystroke apart.
 .PHONY: down
-down: ## Stop the stack and drop volumes
+down: ## Stop the stack; the database and Redis are kept
+	docker compose --profile bot down
+
+.PHONY: reset
+reset: ## Stop the stack and DELETE its data (database, Redis) to start from scratch
 	docker compose --profile bot down -v
 
 .PHONY: logs

@@ -31,8 +31,8 @@ cloudflared tunnel --url http://localhost:8090      # or: ngrok http 8090
 make up        # recreates the bot with the new setting; the database stays
 ```
 
-(`make down` is the opposite: it stops the stack **and deletes its volumes**,
-database included. Use it to start from scratch, not to restart.)
+(`make down` stops the stack and keeps its data. `make reset` stops it **and
+deletes its volumes**, database included: use it only to start from scratch.)
 
 Monobank only delivers to `https://` addresses, which every tunnel provides.
 
