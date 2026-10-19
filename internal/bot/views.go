@@ -45,7 +45,7 @@ func categoriesView(menu []service.CategoryEntry, car *domain.Vehicle, prog *dom
 		}
 	}
 	if len(menu) == 0 {
-		text += "\nДля цього авто в каталозі поки нічого немає."
+		text += "\nДля цього авто в каталозі поки нічого немає. Напишіть, яку деталь шукаєте, — консультант пошукає."
 	} else {
 		text += "\nОберіть розділ:"
 	}
@@ -185,7 +185,7 @@ func backButton(pg *service.ProductPage) telegram.InlineButton {
 }
 
 // msgOnOrderLegend explains the parts on order under a category.
-const msgOnOrderLegend = "🔎 — під замовлення: таких немає на складі, ціну й термін назве менеджер після запиту."
+const msgOnOrderLegend = "🔎 — під замовлення: на складі немає, але можемо привезти. Натисніть, і менеджер назве ціну й термін."
 
 // orderPartLabel fits a part on order on one button, marked apart from the
 // stock: it has no price yet.
@@ -202,7 +202,7 @@ func productLabel(p domain.Product) string {
 	case p.OnOrder:
 		label += " · 🚚"
 	default:
-		label += " · немає"
+		label += " · ❌ немає"
 	}
 	return label
 }
@@ -358,7 +358,8 @@ func analoguesView(p *domain.Product, analogues []domain.Product) (string, *tele
 	for _, a := range analogues {
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(productLabel(a), actProduct, a.ID)})
 	}
-	return fmt.Sprintf("Аналоги: <b>%s</b> (%s):", esc(p.Name), esc(p.Brand)), kb
+	kb.Rows = append(kb.Rows, []telegram.InlineButton{button("⬅️ До категорії", actCategoryN, p.CategoryID)})
+	return fmt.Sprintf("🔁 Аналоги для <b>%s</b> (%s):", esc(p.Name), esc(p.Brand)), kb
 }
 
 // carView answers "🚗 My car" when one is saved.
@@ -449,7 +450,7 @@ func consultantView(text string, products []domain.Product, parts []domain.Catal
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(productLabel(p), actProduct, p.ID)})
 	}
 	for _, p := range parts {
-		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(catalogPartLabel(p), actRequest, p.ID)})
+		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(orderPartLabel(p), actRequest, p.ID)})
 	}
 	if carSaved {
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{
@@ -495,7 +496,7 @@ func cartView(c *domain.Cart) (string, *telegram.InlineKeyboard) {
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{
 			button("➖", actDec, l.ProductID),
 			// The label opens the product card.
-			button(fmt.Sprintf("№%s ×%d", n, l.Qty), actProduct, l.ProductID),
+			button(fmt.Sprintf("№%s · %d шт", n, l.Qty), actProduct, l.ProductID),
 			button("➕", actInc, l.ProductID),
 			button("🗑", actDel, l.ProductID),
 		})

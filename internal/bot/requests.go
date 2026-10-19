@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
@@ -251,9 +250,4 @@ func (b *Bot) markAdminRequest(ctx context.Context, req *domain.PartRequest, lab
 // labelKeyboard is a single button that only says what happened.
 func labelKeyboard(label string) *telegram.InlineKeyboard {
 	return &telegram.InlineKeyboard{Rows: [][]telegram.InlineButton{{button(label, actNoop)}}}
-}
-
-// catalogPartLabel is the button under the consultant's answer.
-func catalogPartLabel(p domain.CatalogPart) string {
-	return strings.TrimSpace("🚚 "+p.Brand+" "+p.Number) + " — під замовлення"
 }

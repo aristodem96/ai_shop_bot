@@ -28,6 +28,14 @@ func leadDaysLabel(n int) string {
 	return plural(n, "день", "дні", "днів")
 }
 
+// arrivalLabel says when a quoted part is at the shop.
+func arrivalLabel(n int) string {
+	if n == 0 {
+		return "у день оплати"
+	}
+	return "через " + plural(n, "день", "дні", "днів") + " після оплати"
+}
+
 // partLines is a part as the messages of a request show it.
 func partLines(name, brand, number string) string {
 	return fmt.Sprintf("%s\n<b>%s %s</b>", esc(name), esc(brand), esc(number))
@@ -36,14 +44,14 @@ func partLines(name, brand, number string) string {
 // requestQtyView explains ordering and asks how many.
 func requestQtyView(p *domain.CatalogPart, car *domain.Vehicle, fits *enrich.Fits) (string, *telegram.InlineKeyboard) {
 	var b strings.Builder
-	b.WriteString("🚚 <b>Під замовлення</b>\n")
+	b.WriteString("🔎 <b>Під замовлення</b>\n")
 	b.WriteString(partLines(p.Name, p.Brand, p.Number))
 	if car != nil {
 		fmt.Fprintf(&b, "\nАвто: %s", esc(car.Label()))
 	}
 	b.WriteString(fitsBlock(fits))
-	b.WriteString("\n\nЦієї деталі немає на складі. Менеджер знайде її в постачальників і надішле ціну й термін, " +
-		"а ви вирішите, чи замовляти.\n\nСкільки штук потрібно?")
+	b.WriteString("\n\nЦієї деталі немає на складі. Менеджер знайде її в постачальників і надішле сюди ціну й термін, " +
+		"а ви вирішите, чи замовляти. Запит ні до чого не зобов'язує.\n\nСкільки штук потрібно?")
 	row := make([]telegram.InlineButton, 0, len(requestQtys))
 	for _, n := range requestQtys {
 		row = append(row, button(fmt.Sprintf("%d шт", n), actRequestQty, p.ID, n))
@@ -74,11 +82,11 @@ func adminRequestView(r *domain.PartRequest) (string, *telegram.InlineKeyboard) 
 // quoteView offers the buyer the price.
 func quoteView(r *domain.PartRequest) (string, *telegram.InlineKeyboard) {
 	text := fmt.Sprintf("✅ <b>Знайшли деталь за запитом №%d</b>\n%s\n\nЦіна: %s × %d = <b>%s</b>\n"+
-		"Доставка до магазину: %s після оплати\n\nЦіна діє 24 години. Оформіть замовлення: самовивіз з магазину або Нова Пошта.",
-		r.ID, partLines(r.Name, r.Brand, r.Number), r.Price, r.Qty, r.Total(), leadDaysLabel(r.LeadDays))
+		"Буде в магазині: %s\n\nЦіна діє 24 години. Додайте деталь у кошик і оформіть замовлення — самовивіз з магазину або Нова Пошта.",
+		r.ID, partLines(r.Name, r.Brand, r.Number), r.Price, r.Qty, r.Total(), arrivalLabel(r.LeadDays))
 	return text, &telegram.InlineKeyboard{Rows: [][]telegram.InlineButton{{
-		button("🛒 Оформити", actRequestBuy, r.ID),
-		button("Відмовитись", actRequestDecline, r.ID),
+		button("🛒 Додати в кошик", actRequestBuy, r.ID),
+		button("✖️ Не потрібно", actRequestDecline, r.ID),
 	}}}
 }
 
