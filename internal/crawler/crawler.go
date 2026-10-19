@@ -245,6 +245,10 @@ func (c *Crawler) Crawl(ctx context.Context, modID int64) error {
 	if err != nil {
 		return err
 	}
+	// The tree is walked: from here on the buyer can see a percentage.
+	if err := c.store.Progress(ctx, modID, len(leaves), 0, 0); err != nil {
+		c.log.WarnContext(ctx, "could not save crawl progress", slog.Any("error", err))
+	}
 	var (
 		mu            sync.Mutex
 		done, failed  int

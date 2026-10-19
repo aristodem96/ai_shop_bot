@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
@@ -30,6 +31,28 @@ func (b *Bot) progress(ctx context.Context, car *domain.Vehicle) *domain.Catalog
 		return nil
 	}
 	return p
+}
+
+// progressToast answers "refresh": the screen may not change between two
+// taps -- a catalogue's first minutes are spent finding its sections -- and
+// a tap that seems to do nothing reads as broken.
+func (b *Bot) progressToast(ctx context.Context, user int64) string {
+	p := b.progress(ctx, b.car(ctx, user))
+	switch {
+	case p == nil:
+		return ""
+	case p.State == "done" && p.Filed < p.Parts:
+		return "Каталог завантажено, розділи ще заповнюються: " + num(p.Filed) + " з " + num(p.Parts) + " деталей"
+	case p.State == "done":
+		return "✅ Каталог готовий"
+	case p.State == "running" && p.SectionsTotal > 0:
+		return fmt.Sprintf("⏳ Ще завантажується: %d%%. Я напишу, коли буде готово.", p.SectionsDone*100/p.SectionsTotal)
+	case p.State == "running":
+		return "⏳ Ще завантажується: збираю розділи каталогу. Я напишу, коли буде готово."
+	case p.State == "failed":
+		return "⚠️ Не вдалося завантажити, пробую ще раз"
+	}
+	return "⏳ Каталог у черзі на завантаження. Я напишу, коли буде готово."
 }
 
 // CatalogueReady tells a buyer that the parts catalogue of a car they

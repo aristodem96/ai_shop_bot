@@ -31,6 +31,7 @@ const (
 	actClear          action = "cx"   // empty the cart
 	actForgetCar      action = "gx"   // forget the car
 	actCarScreen      action = "gr"   // the buyer's car screen again, its catalogue's progress updated
+	actMenuRefresh    action = "gu"   // the catalogue's menu again, its progress updated
 	actKit            action = "tk"   // send the maintenance kit for the buyer's car
 	actKitAdd         action = "ta"   // add the whole kit to the cart
 	actCheckout       action = "co"   // start the checkout
@@ -94,7 +95,7 @@ const (
 var arity = map[action]int{
 	actCategories: 0, actCategory: 2, actCategoryN: 1, actCategoryAll: 2, actProduct: 1,
 	actAdd: 1, actAnalogues: 1, actCart: 0, actInc: 1, actDec: 1, actDel: 1,
-	actClear: 0, actForgetCar: 0, actCarScreen: 0, actKit: 0, actKitAdd: 0, actNoop: 0,
+	actClear: 0, actForgetCar: 0, actCarScreen: 0, actMenuRefresh: 0, actKit: 0, actKitAdd: 0, actNoop: 0,
 	actCheckout: 0, actPay: 0, actEditContacts: 0, actCancelCheckout: 0, actManage: 2,
 	actImportApply: 2, actImportCancel: 1,
 	actSetupField: 2, actSetupColumn: 3, actSetupNext: 1, actSetupLead: 2, actSetupMarkup: 2, actSetupSupplier: 2,

@@ -44,9 +44,12 @@ func categoriesView(menu []service.CategoryEntry, car *domain.Vehicle, prog *dom
 			text += line + "\n"
 		}
 	}
-	if len(menu) == 0 {
+	switch {
+	case len(menu) == 0 && prog != nil && !prog.Loaded():
+		text += "\nДеталі з'являться тут, щойно каталог завантажиться, — я напишу вам. А поки напишіть, яку деталь шукаєте, і консультант пошукає."
+	case len(menu) == 0:
 		text += "\nДля цього авто в каталозі поки нічого немає. Напишіть, яку деталь шукаєте, — консультант пошукає."
-	} else {
+	default:
 		text += "\nОберіть розділ:"
 	}
 
@@ -57,7 +60,7 @@ func categoriesView(menu []service.CategoryEntry, car *domain.Vehicle, prog *dom
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(entryLabel(e), actCategory, e.Category.ID, 0)})
 	}
 	if prog != nil && (!prog.Loaded() || prog.Filed < prog.Parts) {
-		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(btnRefresh, actCategories)})
+		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(btnRefresh, actMenuRefresh)})
 	}
 	kb.Rows = append(kb.Rows, []telegram.InlineButton{button(btnCart, actCart)})
 	return text, kb
@@ -81,7 +84,7 @@ func progressLine(p *domain.CatalogProgress) string {
 		return line
 	case "running":
 		if p.SectionsTotal == 0 {
-			return "⏳ Каталог деталей завантажується…"
+			return "⏳ Каталог деталей завантажується: збираю розділи…"
 		}
 		return fmt.Sprintf("⏳ Каталог деталей завантажується: %d%% (%s деталей)",
 			p.SectionsDone*100/p.SectionsTotal, num(p.Parts))
