@@ -28,7 +28,7 @@ func TestCatalogParts(t *testing.T) {
 	mod := autodb.Modification{ID: 18537, Name: "CHEVROLET LACETTI (J200) 1.6",
 		Attrs: map[string][]string{"ConstructionInterval": {"03.2005 -"}}}
 	vehicleID, err := NewDirectoryRepository(testPool).UpsertVehicle(ctx,
-		directory.ToVehicle("CHEVROLET", autodb.Model{Name: "LACETTI (J200)"}, mod), mod.ID)
+		directory.ToVehicle("CHEVROLET", autodb.Model{Name: "LACETTI (J200)"}, mod), mod.ID, 0)
 	require.NoError(t, err)
 
 	repo := NewCatalogPartRepository(testPool)

@@ -100,7 +100,7 @@ func run() error {
 	)
 	if cfg.AutoDB.User != "" {
 		api := autodb.New(autodb.Config{BaseURL: cfg.AutoDB.URL, User: cfg.AutoDB.User, Password: cfg.AutoDB.Password})
-		dir = directory.New(api, postgres.NewDirectoryRepository(pool), log)
+		dir = directory.New(api, postgres.NewDirectoryRepository(pool), log).WithFallback(vehicleRepo)
 		vehicles = dir
 		crawl = crawler.New(api, postgres.NewCrawlRepository(pool), crawler.Config{}, log)
 	}

@@ -45,9 +45,9 @@ func TestDirectoryCache(t *testing.T) {
 	assert.Equal(t, []autodb.Modification{mod}, mods, "attributes survive the round trip")
 
 	v := directory.ToVehicle("CHEVROLET", model, mod)
-	id, err := repo.UpsertVehicle(ctx, v, mod.ID)
+	id, err := repo.UpsertVehicle(ctx, v, mod.ID, 0)
 	require.NoError(t, err)
-	again, err := repo.UpsertVehicle(ctx, v, mod.ID)
+	again, err := repo.UpsertVehicle(ctx, v, mod.ID, 0)
 	require.NoError(t, err)
 	assert.Equal(t, id, again, "a modification is one vehicle however often it is found")
 

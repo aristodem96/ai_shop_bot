@@ -152,7 +152,7 @@ func (r *DirectoryRepository) SaveModifications(ctx context.Context, modelID int
 // UpsertVehicle writes a modification as a vehicle. One already written --
 // by its Auto-DB id, or as the same make, model, engine and year -- is
 // reused, not doubled.
-func (r *DirectoryRepository) UpsertVehicle(ctx context.Context, v domain.Vehicle, modID int64) (int64, error) {
+func (r *DirectoryRepository) UpsertVehicle(ctx context.Context, v domain.Vehicle, modID, shopModelID int64) (int64, error) {
 	var id int64
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `
@@ -175,12 +175,41 @@ func (r *DirectoryRepository) UpsertVehicle(ctx context.Context, v domain.Vehicl
 		if err != nil {
 			return fmt.Errorf("postgres: upsert vehicle of autodb %d: %w", modID, err)
 		}
+		// Linked on every upsert: a model the shop adds later is picked up
+		// by the next buyer who names the car.
+		if _, err := tx.Exec(ctx, `UPDATE vehicles SET model_id = $2 WHERE id = $1 AND autodb_mod_id IS NOT NULL`,
+			id, nullableID(shopModelID)); err != nil {
+			return fmt.Errorf("postgres: link vehicle %d to the shop's model: %w", id, err)
+		}
 		return nil
 	})
 	return id, err
 }
 
+// ShopModels lists the shop's own models that price lists fit parts to.
+func (r *DirectoryRepository) ShopModels(ctx context.Context) ([]directory.ShopModel, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT m.id, m.make, m.model FROM vehicle_models m
+		WHERE EXISTS (SELECT 1 FROM product_model_fitments f WHERE f.model_id = m.id)`)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: shop models: %w", err)
+	}
+	models, err := pgx.CollectRows(rows, pgx.RowToStructByPos[directory.ShopModel])
+	if err != nil {
+		return nil, fmt.Errorf("postgres: scan shop models: %w", err)
+	}
+	return models, nil
+}
+
 // Vehicle returns a vehicle by id.
 func (r *DirectoryRepository) Vehicle(ctx context.Context, id int64) (*domain.Vehicle, error) {
 	return r.vehicles.Vehicle(ctx, id)
+}
+
+// nullableID writes a zero id as NULL.
+func nullableID(id int64) *int64 {
+	if id == 0 {
+		return nil
+	}
+	return &id
 }

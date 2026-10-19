@@ -64,10 +64,13 @@ type memStore struct {
 	models   map[int64][]autodb.Model
 	mods     map[int64][]autodb.Modification
 	vehicles map[int64]domain.Vehicle // by mod id
+	links    map[int64]int64          // mod id -> shop model
+	shop     []ShopModel
 }
 
 func newMemStore() *memStore {
-	return &memStore{models: map[int64][]autodb.Model{}, mods: map[int64][]autodb.Modification{}, vehicles: map[int64]domain.Vehicle{}}
+	return &memStore{models: map[int64][]autodb.Model{}, mods: map[int64][]autodb.Modification{}, vehicles: map[int64]domain.Vehicle{},
+		links: map[int64]int64{}, shop: []ShopModel{{ID: 153, Make: "Chevrolet", Model: "Lacetti"}}}
 }
 
 func (s *memStore) Makes(context.Context) ([]autodb.Make, error) { return s.makes, nil }
@@ -91,8 +94,10 @@ func (s *memStore) SaveModifications(_ context.Context, id int64, m []autodb.Mod
 	s.mods[id] = m
 	return nil
 }
-func (s *memStore) UpsertVehicle(_ context.Context, v domain.Vehicle, modID int64) (int64, error) {
+func (s *memStore) ShopModels(context.Context) ([]ShopModel, error) { return s.shop, nil }
+func (s *memStore) UpsertVehicle(_ context.Context, v domain.Vehicle, modID, shopModel int64) (int64, error) {
 	s.vehicles[modID] = v
+	s.links[modID] = shopModel
 	return modID, nil
 }
 func (s *memStore) Vehicle(_ context.Context, id int64) (*domain.Vehicle, error) {
@@ -149,6 +154,66 @@ func TestFindVehicles(t *testing.T) {
 	assert.Equal(t, 1, api.calls["mods"])
 }
 
+func TestFoundVehiclesLinkToTheShopsModel(t *testing.T) {
+	d, _, store := newDirectory()
+	_, err := d.FindVehicles(context.Background(), service.VehicleQuery{Make: "Chevrolet", Model: "Lacetti", Engine: "1.6"}, 10)
+	require.NoError(t, err)
+	assert.Equal(t, int64(153), store.links[18537], "LACETTI (J200) is the shop's Lacetti, so price list fitments reach it")
+}
+
+func TestLinkModel(t *testing.T) {
+	shop := []ShopModel{
+		{ID: 1, Make: "Chevrolet", Model: "Aveo T250"}, {ID: 2, Make: "Chevrolet", Model: "Aveo T200"},
+		{ID: 3, Make: "Chevrolet", Model: "Lacetti"}, {ID: 4, Make: "Volkswagen", Model: "Golf"},
+		{ID: 5, Make: "Geely", Model: "CK"}, {ID: 6, Make: "Geely", Model: "CK 2"},
+	}
+	for name, want := range map[[2]string]int64{
+		{"CHEVROLET", "LACETTI (J200)"}:                3,
+		{"CHEVROLET", "AVEO / KALOS Hatchback (T200)"}: 2,
+		{"CHEVROLET", "AVEO Saloon (T250, T255)"}:      1,
+		{"VW", "GOLF V (1K1)"}:                         4,
+		{"GEELY", "CK (..)"}:                           5,
+		{"CHEVROLET", "EPICA (KL1_)"}:                  0,
+		{"DAEWOO", "LACETTI"}:                          0,
+	} {
+		assert.Equal(t, want, LinkModel(name[0], name[1], shop), name)
+	}
+}
+
+type fakeOwnList struct{}
+
+func (fakeOwnList) FindVehicles(_ context.Context, q service.VehicleQuery, _ int) ([]domain.Vehicle, error) {
+	if q.Make == "Chery" {
+		return []domain.Vehicle{{ID: 7, Make: "Chery", Model: "Tiggo"}}, nil
+	}
+	return nil, nil
+}
+func (fakeOwnList) Makes(context.Context) ([]string, error) {
+	return []string{"Chery", "Chevrolet", "Volkswagen"}, nil
+}
+func (fakeOwnList) Vehicle(context.Context, int64) (*domain.Vehicle, error) {
+	return nil, domain.ErrNotFound
+}
+
+func TestFallbackToTheShopsList(t *testing.T) {
+	d, _, _ := newDirectory()
+	d.WithFallback(fakeOwnList{})
+	ctx := context.Background()
+
+	got, err := d.FindVehicles(ctx, service.VehicleQuery{Make: "Chery", Model: "Tiggo"}, 10)
+	require.NoError(t, err)
+	require.Len(t, got, 1, "a make the catalogue lacks comes from the shop's list")
+	assert.Equal(t, int64(7), got[0].ID)
+
+	got, err = d.FindVehicles(ctx, service.VehicleQuery{Make: "Chevrolet", Model: "Lacetti", Engine: "1.6"}, 10)
+	require.NoError(t, err)
+	assert.Equal(t, int64(18537), got[0].ID, "one the catalogue has comes from the catalogue")
+
+	makes, err := d.Makes(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Chery", "Chevrolet", "Mercedes-Benz", "VW"}, makes, "Volkswagen is VW, said once")
+}
+
 func TestFindVehiclesNeedsAMake(t *testing.T) {
 	d, api, _ := newDirectory()
 	got, err := d.FindVehicles(context.Background(), service.VehicleQuery{Model: "Lacetti"}, 10)
@@ -176,5 +241,6 @@ func TestTitleCase(t *testing.T) {
 	assert.Equal(t, "Chevrolet", titleCase("CHEVROLET"))
 	assert.Equal(t, "VW", titleCase("VW"))
 	assert.Equal(t, "Golf V (1K1)", titleCase("GOLF V (1K1)"))
+	assert.Equal(t, "Mercedes-Benz", titleCase("MERCEDES-BENZ"))
 	assert.Equal(t, "Lacetti Универсал (J200)", titleCase("LACETTI универсал (J200)"))
 }

@@ -42,8 +42,19 @@ type Store interface {
 	Modifications(ctx context.Context, modelID int64) ([]autodb.Modification, bool, error)
 	SaveModifications(ctx context.Context, modelID int64, mods []autodb.Modification) error
 	// UpsertVehicle writes a modification as a vehicle and returns its id.
-	UpsertVehicle(ctx context.Context, v domain.Vehicle, modID int64) (int64, error)
+	// shopModelID links it to the shop's model it is, 0 for none.
+	UpsertVehicle(ctx context.Context, v domain.Vehicle, modID, shopModelID int64) (int64, error)
+	// ShopModels lists the shop's own models of a make that price lists fit
+	// parts to.
+	ShopModels(ctx context.Context) ([]ShopModel, error)
 	Vehicle(ctx context.Context, id int64) (*domain.Vehicle, error)
+}
+
+// ShopModel is a model of the shop's own vehicle list.
+type ShopModel struct {
+	ID    int64
+	Make  string
+	Model string
 }
 
 // Directory finds vehicles in the Auto-DB catalogue.
@@ -51,11 +62,21 @@ type Directory struct {
 	api   API
 	store Store
 	log   *slog.Logger
+	// fallback finds what the catalogue lacks: the shop's own list.
+	fallback service.VehicleRepository
 }
 
 // New returns a Directory.
 func New(api API, store Store, log *slog.Logger) *Directory {
 	return &Directory{api: api, store: store, log: log}
+}
+
+// WithFallback makes the shop's own vehicle list answer for the cars the
+// catalogue does not have. Auto-DB has no Chery, BYD or JAC, which a shop
+// selling Chinese parts lives on.
+func (d *Directory) WithFallback(r service.VehicleRepository) *Directory {
+	d.fallback = r
+	return d
 }
 
 // maxModels bounds the models one lookup reads modifications of: "Golf"
@@ -68,6 +89,14 @@ const maxModels = 4
 // matched as a fragment, generation codes and all: "lacetti" finds
 // "LACETTI (J200)" and its estate.
 func (d *Directory) FindVehicles(ctx context.Context, q service.VehicleQuery, limit int) ([]domain.Vehicle, error) {
+	found, err := d.fromCatalog(ctx, q, limit)
+	if err != nil || len(found) > 0 || d.fallback == nil {
+		return found, err
+	}
+	return d.fallback.FindVehicles(ctx, q, limit)
+}
+
+func (d *Directory) fromCatalog(ctx context.Context, q service.VehicleQuery, limit int) ([]domain.Vehicle, error) {
 	if strings.TrimSpace(q.Make) == "" {
 		return nil, nil
 	}
@@ -90,18 +119,23 @@ func (d *Directory) FindVehicles(ctx context.Context, q service.VehicleQuery, li
 		picked = picked[:maxModels]
 	}
 
+	shop, err := d.store.ShopModels(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var out []domain.Vehicle
 	for _, m := range picked {
 		mods, err := d.modifications(ctx, m.ID)
 		if err != nil {
 			return nil, err
 		}
+		shopModel := LinkModel(mk.Name, m.Name, shop)
 		for _, mod := range mods {
 			v := ToVehicle(mk.Name, m, mod)
 			if !engineMatches(q.Engine, mod, v) || !yearIn(q.Year, v) {
 				continue
 			}
-			id, err := d.store.UpsertVehicle(ctx, v, mod.ID)
+			id, err := d.store.UpsertVehicle(ctx, v, mod.ID, shopModel)
 			if err != nil {
 				return nil, err
 			}
@@ -115,16 +149,31 @@ func (d *Directory) FindVehicles(ctx context.Context, q service.VehicleQuery, li
 	return out, nil
 }
 
-// Makes lists the makes the directory covers.
+// Makes lists the makes the directory covers, the shop's own included.
 func (d *Directory) Makes(ctx context.Context) ([]string, error) {
 	makes, err := d.makes(ctx)
 	if err != nil {
 		return nil, err
 	}
-	names := make([]string, len(makes))
-	for i, m := range makes {
-		names[i] = m.Name
+	names := make([]string, 0, len(makes))
+	seen := make(map[string]bool, len(makes))
+	for _, m := range makes {
+		names = append(names, titleCase(m.Name))
+		seen[canonMake(m.Name)] = true
 	}
+	if d.fallback != nil {
+		own, err := d.fallback.Makes(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, n := range own {
+			if !seen[canonMake(n)] {
+				names = append(names, n)
+				seen[canonMake(n)] = true
+			}
+		}
+	}
+	slices.Sort(names)
 	return names, nil
 }
 
@@ -206,10 +255,7 @@ func (d *Directory) findMake(ctx context.Context, name string) (autodb.Make, boo
 	if err != nil {
 		return autodb.Make{}, false, err
 	}
-	want := key(name)
-	if s, ok := makeSynonyms[want]; ok {
-		want = s
-	}
+	want := canonMake(name)
 	var prefixed []autodb.Make
 	for _, m := range makes {
 		k := key(m.Name)
@@ -340,6 +386,54 @@ func parseInterval(s string) (from, to int) {
 }
 
 // key compares names by letters and digits only, in lower case.
+// canonMake is a make's key with buyers' and price lists' names mapped to
+// the catalogue's: "Volkswagen" and "VW" are one make.
+func canonMake(s string) string {
+	k := key(s)
+	if c, ok := makeSynonyms[k]; ok {
+		return c
+	}
+	return k
+}
+
+// LinkModel finds the shop's model an Auto-DB model is: the one whose every
+// word is a word of the catalogue's name, the most specific when several
+// are. "LACETTI (J200)" is the shop's "Lacetti"; "AVEO / KALOS Hatchback
+// (T200)" is "Aveo T200" and not "Aveo T250". Zero when none is.
+func LinkModel(makeName, modelName string, shop []ShopModel) int64 {
+	words := map[string]bool{}
+	for _, w := range splitWords(modelName) {
+		words[w] = true
+	}
+	mk := canonMake(makeName)
+	var (
+		best      int64
+		bestScore int
+	)
+	for _, m := range shop {
+		if canonMake(m.Make) != mk {
+			continue
+		}
+		score := 0
+		for _, w := range splitWords(m.Model) {
+			if !words[w] {
+				score = 0
+				break
+			}
+			score += len(w)
+		}
+		if score > bestScore {
+			best, bestScore = m.ID, score
+		}
+	}
+	return best
+}
+
+// splitWords cuts a name into lower-case words of letters and digits.
+func splitWords(s string) []string {
+	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+}
+
 func key(s string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(s) {
@@ -360,12 +454,14 @@ func titleCase(s string) string {
 		if strings.ContainsAny(core, "0123456789") || len([]rune(core)) <= 3 {
 			continue
 		}
+		// Each part of a hyphenated word: "Mercedes-Benz", "Rolls-Royce".
 		r := []rune(strings.ToLower(w))
+		start := true
 		for j, c := range r {
-			if unicode.IsLetter(c) {
+			if unicode.IsLetter(c) && start {
 				r[j] = unicode.ToUpper(c)
-				break
 			}
+			start = c == '-' || (start && !unicode.IsLetter(c))
 		}
 		words[i] = string(r)
 	}

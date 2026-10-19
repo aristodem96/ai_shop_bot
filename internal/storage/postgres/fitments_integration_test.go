@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/aristodem96/ai_shop_bot/internal/directory"
+	"github.com/aristodem96/ai_shop_bot/internal/domain"
 	"github.com/aristodem96/ai_shop_bot/internal/service"
 )
 
@@ -104,4 +106,34 @@ func TestCategoryCountsMatchPages(t *testing.T) {
 			assert.Equal(t, total, counts[c.ID], "%s for vehicle %d", c.Slug, vehicle)
 		}
 	}
+}
+
+// A price list fits parts to the shop's "Octavia A7"; a buyer's car from
+// Auto-DB is "Octavia III (5E3)". Linked, the fitment reaches it.
+func TestModelFitmentReachesALinkedCatalogueVehicle(t *testing.T) {
+	skipShort(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(ctx, `DELETE FROM vehicles WHERE autodb_mod_id IS NOT NULL`)
+	})
+	id := modelFitted(t, "TST-LINKED", "Skoda", "Octavia A7", ptr(2015), nil, "")
+	var shopModel int64
+	require.NoError(t, testPool.QueryRow(ctx, `SELECT id FROM vehicle_models WHERE make = 'Skoda' AND model = 'Octavia A7'`).Scan(&shopModel))
+
+	dir := NewDirectoryRepository(testPool)
+	v := domain.Vehicle{Make: "Skoda", Model: "Octavia III (5E3)", YearFrom: 2012, YearTo: 2020, Engine: "1.4 TSI", Fuel: "petrol", Cylinders: 4}
+	linked, err := dir.UpsertVehicle(ctx, v, 70001, shopModel)
+	require.NoError(t, err)
+	v.Engine = "1.6 TDI"
+	unlinked, err := dir.UpsertVehicle(ctx, v, 70002, 0)
+	require.NoError(t, err)
+
+	p, err := NewCatalogRepository(testPool).Product(ctx, id)
+	require.NoError(t, err)
+	assert.True(t, p.FitsVehicle(linked))
+	assert.False(t, p.FitsVehicle(unlinked))
+
+	models, err := dir.ShopModels(ctx)
+	require.NoError(t, err)
+	assert.Contains(t, models, directory.ShopModel{ID: shopModel, Make: "Skoda", Model: "Octavia A7"}, "a model with price list fitments")
 }

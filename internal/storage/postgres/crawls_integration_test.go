@@ -29,7 +29,7 @@ func TestAutoDBFitments(t *testing.T) {
 	model := autodb.Model{ID: 5403, Name: "LACETTI (J200)"}
 	mod := autodb.Modification{ID: 18537, Name: "CHEVROLET LACETTI (J200) 1.6",
 		Attrs: map[string][]string{"ConstructionInterval": {"03.2005 -"}, "Capacity": {"1.6 l"}, "FuelType": {"бензин"}}}
-	vehicleID, err := NewDirectoryRepository(testPool).UpsertVehicle(ctx, directory.ToVehicle("CHEVROLET", model, mod), mod.ID)
+	vehicleID, err := NewDirectoryRepository(testPool).UpsertVehicle(ctx, directory.ToVehicle("CHEVROLET", model, mod), mod.ID, 0)
 	require.NoError(t, err)
 
 	// What Auto-DB lists for it.
@@ -89,7 +89,7 @@ func TestCrawlQueue(t *testing.T) {
 	})
 	vehicleID, err := NewDirectoryRepository(testPool).UpsertVehicle(ctx,
 		directory.ToVehicle("VW", autodb.Model{Name: "GOLF V (1K1)"}, autodb.Modification{ID: 9001, Name: "VW GOLF V (1K1) 1.6",
-			Attrs: map[string][]string{"ConstructionInterval": {"10.2003 - 02.2009"}}}), 9001)
+			Attrs: map[string][]string{"ConstructionInterval": {"10.2003 - 02.2009"}}}), 9001, 0)
 	require.NoError(t, err)
 
 	require.NoError(t, repo.Enqueue(ctx, vehicleID, time.Hour))
