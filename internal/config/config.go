@@ -122,6 +122,17 @@ type Bot struct {
 	// PickupAddress is where buyers collect orders, with the shop's hours;
 	// empty offers Nova Poshta only.
 	PickupAddress string
+
+	// AutoDB is the parts catalogue the bot reads vehicles and fitments
+	// from; an empty user turns it off.
+	AutoDB AutoDB
+}
+
+// AutoDB is the Auto-DB Pro API account.
+type AutoDB struct {
+	URL      string
+	User     string
+	Password string
 }
 
 // LoadBot reads the bot configuration.
@@ -148,7 +159,12 @@ func LoadBot() (*Bot, error) {
 		Timezone:          envString("BOT_TIMEZONE", "Europe/Kyiv"),
 		ImportProfilesDir: envString("IMPORT_PROFILES_DIR", "profiles"),
 		PickupAddress:     envString("SHOP_PICKUP_ADDRESS", ""),
-		ImportDir:         envString("IMPORT_DIR", filepath.Join(os.TempDir(), "ai_shop_bot-imports")),
+		AutoDB: AutoDB{
+			URL:      envString("AUTODB_API_URL", "https://auto-db.pro/api/v1/"),
+			User:     envString("AUTODB_USER", ""),
+			Password: envString("AUTODB_PASSWORD", ""),
+		},
+		ImportDir: envString("IMPORT_DIR", filepath.Join(os.TempDir(), "ai_shop_bot-imports")),
 		Redis: Redis{
 			Addr:     envString("REDIS_ADDR", "localhost:6380"),
 			Password: envString("REDIS_PASSWORD", ""),
