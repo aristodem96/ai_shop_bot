@@ -94,7 +94,9 @@ func TestConsultantAnswerWithCards(t *testing.T) {
 
 	assert.Equal(t, []string{"колодки на октавію"}, c.asked)
 	msg := tg.last("sendMessage")
-	assert.Equal(t, "Ось &lt;колодки&gt; &amp; ще дещо", msg.text, "model output is escaped, never trusted as HTML")
+	assert.True(t, strings.HasPrefix(msg.text, "Ось &lt;колодки&gt; &amp; ще дещо\n\n"), "model output is escaped, never trusted as HTML")
+	assert.Contains(t, msg.text, "<b>1.</b> Колодки гальмівні передні · AutoLine — <b>1\u202f450 грн</b> ⚠️ останні 2 шт.",
+		"the products listed in full under the answer")
 	assert.Equal(t, []string{encode(actProduct, padsID)}, callbacks(msg.markup),
 		"a card per product that still exists")
 	assert.Contains(t, tg.methods(), "sendChatAction", "the buyer sees typing while the model works")
@@ -247,7 +249,7 @@ func TestConsultantCardsWithoutText(t *testing.T) {
 	b, tg := withConsultant(c, fakeLimiter{allow: true})
 
 	b.Handle(context.Background(), text("колодки"))
-	assert.Equal(t, msgHereYouGo, tg.last("sendMessage").text, "Telegram rejects an empty message")
+	assert.True(t, strings.HasPrefix(tg.last("sendMessage").text, msgHereYouGo+"\n\n"), "Telegram rejects an empty message")
 }
 
 func TestCatalogueAsksForACarFirst(t *testing.T) {

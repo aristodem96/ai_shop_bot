@@ -118,17 +118,15 @@ func productPageView(pg *service.ProductPage) (string, *telegram.InlineKeyboard)
 	default:
 		text += "\n\nОберіть товар:"
 	}
+	list, rows := listing(pg.Page*service.PageSize+1, pg.Products, pg.OnOrder)
+	if list != "" {
+		text += "\n\n" + list
+	}
 	if len(pg.OnOrder) > 0 {
 		text += "\n\n" + msgOnOrderLegend
 	}
 
-	kb := &telegram.InlineKeyboard{}
-	for _, p := range pg.Products {
-		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(productLabel(p), actProduct, p.ID)})
-	}
-	for _, p := range pg.OnOrder {
-		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(orderPartLabel(p), actRequest, p.ID)})
-	}
+	kb := &telegram.InlineKeyboard{Rows: rows}
 
 	if pg.Pages > 1 {
 		// Paging stays in the mode it started in: a whole section, or one
@@ -187,22 +185,58 @@ func backButton(pg *service.ProductPage) telegram.InlineButton {
 // msgOnOrderLegend explains the parts on order under a category.
 const msgOnOrderLegend = "🔎 — під замовлення: на складі немає, але можемо привезти. Натисніть, і менеджер назве ціну й термін."
 
-// orderPartLabel fits a part on order on one button, marked apart from the
-// stock: it has no price yet.
-func orderPartLabel(p domain.CatalogPart) string {
-	return strings.TrimSpace(fmt.Sprintf("🔎 %s · %s %s", p.Name, p.Brand, p.Number))
+// listing lays products, then parts on order, out for a message: each in
+// full on a numbered line of the text, and a short button with its number.
+// A button holds one line, which Telegram cuts at a phone's width, so a long
+// name on a button would show only its start; the text shows all of it.
+// first is the number of the first item.
+func listing(first int, products []domain.Product, parts []domain.CatalogPart) (string, [][]telegram.InlineButton) {
+	lines := make([]string, 0, len(products)+len(parts))
+	rows := make([][]telegram.InlineButton, 0, len(products)+len(parts))
+	n := first
+	for _, p := range products {
+		lines = append(lines, fmt.Sprintf("<b>%d.</b> %s · %s — <b>%s</b> %s", n, esc(p.Name), esc(p.Brand), p.Price, stockMark(&p)))
+		rows = append(rows, []telegram.InlineButton{button(productLabel(n, p), actProduct, p.ID)})
+		n++
+	}
+	for _, p := range parts {
+		lines = append(lines, fmt.Sprintf("<b>%d.</b> 🔎 %s · %s — ціна за запитом", n, esc(p.Name), esc(strings.TrimSpace(p.Brand+" "+p.Number))))
+		rows = append(rows, []telegram.InlineButton{button(orderPartLabel(n, p), actRequest, p.ID)})
+		n++
+	}
+	return strings.Join(lines, "\n"), rows
 }
 
-// productLabel fits a product on one button. Button text is plain, so it is
-// not escaped.
-func productLabel(p domain.Product) string {
-	label := fmt.Sprintf("%s · %s — %s", p.Name, p.Brand, p.Price)
+// stockMark is a product's availability in a list, briefly.
+func stockMark(p *domain.Product) string {
+	switch {
+	case p.OnOrder:
+		return "🚚 " + leadTime(p.LeadDays)
+	case p.Stock == 0:
+		return "❌ немає"
+	case p.Stock <= domain.LowStock:
+		return fmt.Sprintf("⚠️ останні %d шт.", p.Stock)
+	default:
+		return "✅"
+	}
+}
+
+// orderPartLabel is the button of a listed part on order: its number and
+// brand. Button text is plain, so it is not escaped.
+func orderPartLabel(n int, p domain.CatalogPart) string {
+	return fmt.Sprintf("%d · 🔎 %s · дізнатися ціну", n, p.Brand)
+}
+
+// productLabel is the button of a listed product: its number, brand and
+// price -- short enough for any phone, the name being in the text above.
+func productLabel(n int, p domain.Product) string {
+	label := fmt.Sprintf("%d · %s · %s", n, p.Brand, p.Price)
 	switch {
 	case p.Stock > 0:
 	case p.OnOrder:
 		label += " · 🚚"
 	default:
-		label += " · ❌ немає"
+		label += " · ❌"
 	}
 	return label
 }
@@ -354,12 +388,10 @@ func analoguesView(p *domain.Product, analogues []domain.Product) (string, *tele
 			{button("⬅️ До категорії", actCategoryN, p.CategoryID)},
 		}}
 	}
-	kb := &telegram.InlineKeyboard{}
-	for _, a := range analogues {
-		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(productLabel(a), actProduct, a.ID)})
-	}
+	list, rows := listing(1, analogues, nil)
+	kb := &telegram.InlineKeyboard{Rows: rows}
 	kb.Rows = append(kb.Rows, []telegram.InlineButton{button("⬅️ До категорії", actCategoryN, p.CategoryID)})
-	return fmt.Sprintf("🔁 Аналоги для <b>%s</b> (%s):", esc(p.Name), esc(p.Brand)), kb
+	return fmt.Sprintf("🔁 Аналоги для <b>%s</b> (%s):\n\n%s", esc(p.Name), esc(p.Brand), list), kb
 }
 
 // carView answers "🚗 My car" when one is saved.
@@ -400,10 +432,10 @@ func kitView(kit *service.Kit) (string, *telegram.InlineKeyboard) {
 	b.WriteString("\n")
 
 	kb := &telegram.InlineKeyboard{}
-	for _, i := range kit.Items {
-		fmt.Fprintf(&b, "• %s (%s) — %d × %s\n", esc(i.Product.Name), esc(i.Product.Brand), i.Qty, i.Product.Price)
+	for n, i := range kit.Items {
+		fmt.Fprintf(&b, "<b>%d.</b> %s · %s — %d × %s\n", n+1, esc(i.Product.Name), esc(i.Product.Brand), i.Qty, i.Product.Price)
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{
-			button(fmt.Sprintf("%s · %s", i.Product.Name, i.Product.Brand), actProduct, i.Product.ID),
+			button(fmt.Sprintf("%d · %s · %s", n+1, i.Product.Brand, i.Product.Price), actProduct, i.Product.ID),
 		})
 	}
 	if len(kit.Missing) > 0 {
@@ -430,8 +462,8 @@ func carForgottenView() (string, *telegram.InlineKeyboard) {
 }
 
 // maxReplyRunes keeps a model reply inside Telegram's 4096-character message
-// limit with room for escaping.
-const maxReplyRunes = 3500
+// limit with room for escaping and the list of the cards under it.
+const maxReplyRunes = 2800
 
 // consultantView is the consultant's answer: the model's text, escaped -- it
 // is model output, so it is never trusted as markup -- and a button per
@@ -445,13 +477,12 @@ func consultantView(text string, products []domain.Product, parts []domain.Catal
 	if r := []rune(text); len(r) > maxReplyRunes {
 		text = string(r[:maxReplyRunes]) + "…"
 	}
-	kb := &telegram.InlineKeyboard{}
-	for _, p := range products {
-		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(productLabel(p), actProduct, p.ID)})
+	html := esc(text)
+	list, rows := listing(1, products, parts)
+	if list != "" {
+		html += "\n\n" + list
 	}
-	for _, p := range parts {
-		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(orderPartLabel(p), actRequest, p.ID)})
-	}
+	kb := &telegram.InlineKeyboard{Rows: rows}
 	if carSaved {
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{
 			button("🛍 Каталог для вашого авто", actCategories),
@@ -464,9 +495,9 @@ func consultantView(text string, products []domain.Product, parts []domain.Catal
 	// A plain chat reply ("how are you") carries no buttons. A nil interface,
 	// not a nil *InlineKeyboard, so no reply_markup is sent at all.
 	if len(kb.Rows) == 0 {
-		return esc(text), nil
+		return html, nil
 	}
-	return esc(text), kb
+	return html, kb
 }
 
 func cartView(c *domain.Cart) (string, *telegram.InlineKeyboard) {

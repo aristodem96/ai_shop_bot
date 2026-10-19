@@ -149,7 +149,8 @@ func TestProductPageListsPartsOnOrder(t *testing.T) {
 	text, kb := productPageView(pg)
 	assert.Contains(t, text, "під замовлення")
 	assert.Equal(t, encode(actProduct, 5), kb.Rows[0][0].CallbackData, "the stock first")
-	assert.Equal(t, "🔎 Наконечник рульової тяги · LEMFORDER 37143 01", kb.Rows[1][0].Text)
+	assert.Contains(t, text, "<b>2.</b> 🔎 Наконечник рульової тяги · LEMFORDER 37143 01 — ціна за запитом", "the full name in the text")
+	assert.Equal(t, "2 · 🔎 LEMFORDER · дізнатися ціну", kb.Rows[1][0].Text, "a short button, numbered as the text")
 	assert.Equal(t, encode(actRequest, 31), kb.Rows[1][0].CallbackData, "a part on order opens its request")
 
 	pg.Products = nil
@@ -176,4 +177,15 @@ func TestCarScreenShowsCatalogueProgress(t *testing.T) {
 
 	text, _ = categoriesView(nil, &octavia, &domain.CatalogProgress{State: "queued"})
 	assert.Contains(t, text, "у черзі")
+}
+
+func TestListingNumbersAcrossPages(t *testing.T) {
+	pg := &service.ProductPage{
+		Category: domain.Category{ID: 3, Title: "Фільтри"},
+		Products: []domain.Product{{ID: 5, Name: "Фільтр масляний з дуже довгою назвою, що не влізла б у кнопку", Brand: "MANN-FILTER", Price: domain.UAH(310), Stock: 12}},
+		Page:     1, Pages: 2,
+	}
+	text, kb := productPageView(pg)
+	assert.Contains(t, text, "<b>9.</b> Фільтр масляний з дуже довгою назвою, що не влізла б у кнопку · MANN-FILTER", "page two starts at nine")
+	assert.Equal(t, "9 · MANN-FILTER · 310 грн", kb.Rows[0][0].Text)
 }
