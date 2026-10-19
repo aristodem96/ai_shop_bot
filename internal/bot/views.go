@@ -43,8 +43,6 @@ func categoriesView(menu []service.CategoryEntry, car *domain.Vehicle, prog *dom
 		if line := progressLine(prog); line != "" && (!prog.Loaded() || prog.Filed < prog.Parts) {
 			text += line + "\n"
 		}
-	} else {
-		text += "Показую всі деталі. Напишіть свою машину, щоб бачити лише сумісні.\n"
 	}
 	if len(menu) == 0 {
 		text += "\nДля цього авто в каталозі поки нічого немає."
@@ -61,11 +59,7 @@ func categoriesView(menu []service.CategoryEntry, car *domain.Vehicle, prog *dom
 	if prog != nil && (!prog.Loaded() || prog.Filed < prog.Parts) {
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(btnRefresh, actCategories)})
 	}
-	last := []telegram.InlineButton{button(btnCart, actCart)}
-	if car != nil {
-		last = append([]telegram.InlineButton{button("Показувати всі деталі", actForgetCar)}, last...)
-	}
-	kb.Rows = append(kb.Rows, last)
+	kb.Rows = append(kb.Rows, []telegram.InlineButton{button(btnCart, actCart)})
 	return text, kb
 }
 
@@ -381,7 +375,7 @@ func carView(car *domain.Vehicle, prog *domain.CatalogProgress) (string, *telegr
 	if prog != nil && (!prog.Loaded() || prog.Filed < prog.Parts) {
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(btnRefresh, actCarScreen)})
 	}
-	kb.Rows = append(kb.Rows, []telegram.InlineButton{button("Показувати всі деталі", actForgetCar)})
+	kb.Rows = append(kb.Rows, []telegram.InlineButton{button("✖️ Забути авто", actForgetCar)})
 	return text, kb
 }
 
@@ -431,9 +425,7 @@ func kitView(kit *service.Kit) (string, *telegram.InlineKeyboard) {
 }
 
 func carForgottenView() (string, *telegram.InlineKeyboard) {
-	return msgCarForgotten, &telegram.InlineKeyboard{Rows: [][]telegram.InlineButton{
-		{button(btnCatalog, actCategories)},
-	}}
+	return msgCarForgotten, nil
 }
 
 // maxReplyRunes keeps a model reply inside Telegram's 4096-character message

@@ -17,7 +17,7 @@ import (
 // message, so leaving it -- to a page, to analogues -- sends a new one.
 
 // car returns the buyer's car, or nil. A failure to read it degrades to "no
-// car" -- the whole catalogue instead of a filtered one -- rather than to an
+// car" -- the buyer is asked for it -- rather than to an
 // error, since browsing still works without it.
 func (b *Bot) car(ctx context.Context, user int64) *domain.Vehicle {
 	v, err := b.garage.Get(ctx, user)
@@ -38,8 +38,22 @@ func (b *Bot) start(ctx context.Context, chat, user int64) {
 	b.send(ctx, chat, msgAskCar, nil)
 }
 
-func (b *Bot) sendCategories(ctx context.Context, chat, user int64) {
+// catalogueCar is the car the catalogue opens for, and whether it may open
+// at all: with the consultant on, the catalogue is a car's -- every part of
+// every car is too much to browse -- and a buyer without a car is asked to
+// name one. Without the consultant there is no way to name a car, so the
+// whole catalogue opens.
+func (b *Bot) catalogueCar(ctx context.Context, user int64) (*domain.Vehicle, bool) {
 	car := b.car(ctx, user)
+	return car, car != nil || b.consultant == nil
+}
+
+func (b *Bot) sendCategories(ctx context.Context, chat, user int64) {
+	car, ok := b.catalogueCar(ctx, user)
+	if !ok {
+		b.send(ctx, chat, msgAskCar, nil)
+		return
+	}
 	menu, err := b.catalog.Menu(ctx, car)
 	if err != nil {
 		b.fail(ctx, chat, "list categories", err)
@@ -50,7 +64,10 @@ func (b *Bot) sendCategories(ctx context.Context, chat, user int64) {
 }
 
 func (b *Bot) editCategories(ctx context.Context, cc callbackCtx) error {
-	car := b.car(ctx, cc.user)
+	car, ok := b.catalogueCar(ctx, cc.user)
+	if !ok {
+		return b.editText(ctx, cc, msgAskCar, nil)
+	}
 	menu, err := b.catalog.Menu(ctx, car)
 	if err != nil {
 		return err
@@ -60,7 +77,11 @@ func (b *Bot) editCategories(ctx context.Context, cc callbackCtx) error {
 }
 
 func (b *Bot) editProductPage(ctx context.Context, cc callbackCtx, categoryID int64, page int, all bool) error {
-	pg, err := b.catalog.CategoryPage(ctx, categoryID, b.car(ctx, cc.user), page, all)
+	car, ok := b.catalogueCar(ctx, cc.user)
+	if !ok {
+		return b.editText(ctx, cc, msgAskCar, nil)
+	}
+	pg, err := b.catalog.CategoryPage(ctx, categoryID, car, page, all)
 	if err != nil {
 		return err
 	}
@@ -69,7 +90,11 @@ func (b *Bot) editProductPage(ctx context.Context, cc callbackCtx, categoryID in
 }
 
 func (b *Bot) sendProductPage(ctx context.Context, cc callbackCtx, categoryID int64) error {
-	pg, err := b.catalog.CategoryPage(ctx, categoryID, b.car(ctx, cc.user), 0, false)
+	car, ok := b.catalogueCar(ctx, cc.user)
+	if !ok {
+		return b.tg.SendMessage(ctx, cc.chat, msgAskCar, nil)
+	}
+	pg, err := b.catalog.CategoryPage(ctx, categoryID, car, 0, false)
 	if err != nil {
 		return err
 	}

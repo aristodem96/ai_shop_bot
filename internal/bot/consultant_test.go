@@ -249,3 +249,30 @@ func TestConsultantCardsWithoutText(t *testing.T) {
 	b.Handle(context.Background(), text("колодки"))
 	assert.Equal(t, msgHereYouGo, tg.last("sendMessage").text, "Telegram rejects an empty message")
 }
+
+func TestCatalogueAsksForACarFirst(t *testing.T) {
+	b, tg := withConsultant(&fakeConsultant{}, fakeLimiter{allow: true})
+	ctx := context.Background()
+
+	b.Handle(ctx, text(btnCatalog))
+	assert.Equal(t, msgAskCar, tg.last("sendMessage").text, "every part of every car is too much to browse")
+	b.Handle(ctx, press(encode(actCategory, 1, 0)))
+	assert.Equal(t, msgAskCar, tg.last("editMessageText").text, "a stale button too")
+
+	b.garage.car = &octavia
+	b.Handle(ctx, text(btnCatalog))
+	menu := tg.last("sendMessage")
+	assert.Contains(t, menu.text, "Для: Skoda Octavia")
+	assert.NotContains(t, callbacks(menu.markup), encode(actForgetCar), "no way back to the whole catalogue")
+
+	b.Handle(ctx, text(btnCar))
+	assert.Contains(t, callbacks(tg.last("sendMessage").markup), encode(actForgetCar), "the car can still be forgotten")
+	b.Handle(ctx, press(encode(actForgetCar)))
+	assert.Equal(t, msgCarForgotten, tg.last("editMessageText").text)
+}
+
+func TestWithoutConsultantTheWholeCatalogueOpens(t *testing.T) {
+	b := newTestBot()
+	b.Handle(context.Background(), text(btnCatalog))
+	assert.Contains(t, b.tg.last("sendMessage").text, "Оберіть розділ", "no consultant, no way to name a car")
+}
