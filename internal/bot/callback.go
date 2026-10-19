@@ -61,6 +61,12 @@ const (
 	actCarBack        action = "cb"   // cb:<draft> back to matching, or drop the draft
 	actMatchStop      action = "ve"   // ve:<session> end the session
 	actCarDelete      action = "vd"   // vd:<alias> forget a mapping and its fitments
+	actRequest        action = "rq"   // rq:<catalogue part> request a part on order: how many
+	actRequestQty     action = "rn"   // rn:<catalogue part>:<qty> send the request to the managers
+	actRequestFound   action = "rf"   // rf:<request> a manager found it: ask for the price
+	actRequestNone    action = "rx"   // rx:<request> a manager did not find it
+	actRequestBuy     action = "ro"   // ro:<request> the buyer takes the quote: to the cart
+	actRequestDecline action = "rd"   // rd:<request> the buyer turns the quote down
 	actNoop           action = "x"    // a label that only looks like a button
 )
 
@@ -77,6 +83,7 @@ var arity = map[action]int{
 	actMatchStart: 1, actMatchPick: 3, actMatchMakes: 1, actMatchMake: 2, actMatchBack: 1,
 	actMatchSkip: 2, actMatchStop: 1, actCarDelete: 1, actMatchAdd: 2,
 	actCarAdd: 1, actCarToggle: 2, actCarText: 1, actCarBack: 1,
+	actRequest: 1, actRequestQty: 2, actRequestFound: 1, actRequestNone: 1, actRequestBuy: 1, actRequestDecline: 1,
 }
 
 // maxCallbackData is Telegram's limit on callback_data, in bytes.

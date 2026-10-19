@@ -105,6 +105,10 @@ type Bot struct {
 	words    Words
 	wordJobs *wordJobs
 
+	// requests and parts are nil until UseRequests is called.
+	requests PartRequests
+	parts    CatalogParts
+
 	// imports is nil until UseImports is called.
 	imports     Imports
 	importFiles Files
@@ -239,6 +243,9 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 		if _, ok := commandArg(m.Text, cmdCars); ok && b.matching != nil {
 			text, kb := b.carsList(ctx)
 			b.send(ctx, m.Chat.ID, text, kb)
+			return
+		}
+		if b.requests != nil && b.handleQuoteReply(ctx, m) {
 			return
 		}
 		if b.matching != nil && b.handleCarText(ctx, m) {
@@ -420,6 +427,11 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 		default:
 			return b.cancelImport(ctx, cc, a[0])
 		}
+	case actRequest, actRequestQty, actRequestFound, actRequestNone, actRequestBuy, actRequestDecline:
+		if b.requests == nil {
+			return "", errBadCallback
+		}
+		return b.routeRequest(ctx, cc, cb)
 	case actForgetCar:
 		return "", b.forgetCar(ctx, cc)
 	case actNoop:

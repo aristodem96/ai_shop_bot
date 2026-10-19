@@ -208,7 +208,27 @@ func run() error {
 			// The consultant offers what the catalogue lists for the car
 			// beyond the stock, under names translated as crawls bring them.
 			catalogParts := postgres.NewCatalogPartRepository(pool)
-			consultant.UseOrderCatalog(catalogParts)
+			if cfg.Payments.MonobankToken != "" && cfg.Payments.AdminChatID != 0 {
+				// A request goes to the managers and is paid through the
+				// checkout, so it needs both.
+				requests := postgres.NewPartRequestRepository(pool)
+				consultant.UseOrderCatalog(catalogParts)
+				b.UseRequests(requests, catalogParts)
+				group.Go(func() error {
+					t := time.NewTicker(10 * time.Minute)
+					defer t.Stop()
+					for {
+						select {
+						case <-gctx.Done():
+							return nil
+						case <-t.C:
+							if _, err := requests.Expire(gctx); err != nil && gctx.Err() == nil {
+								log.Warn("could not expire quotes", slog.Any("error", err))
+							}
+						}
+					}
+				})
+			}
 			cats, err := catalog.Categories(startupCtx)
 			if err != nil {
 				return err

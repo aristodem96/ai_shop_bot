@@ -78,6 +78,9 @@ type Message struct {
 	Contact *Contact `json:"contact"`
 	// Document is a file sent as a file, not as a photo.
 	Document *Document `json:"document"`
+	// ReplyToMessage is the message this one answers, as a ForceReply
+	// question gets answered.
+	ReplyToMessage *Message `json:"reply_to_message"`
 }
 
 // Document is a file attached to a message.

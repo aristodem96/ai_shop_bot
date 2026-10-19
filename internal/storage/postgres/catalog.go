@@ -68,7 +68,7 @@ func inCategory(ph string) string {
 // the catalogue for fit. On 81 000 products that is 46 ms against 184, paid
 // on every tap through the menu.
 func (r *CatalogRepository) CategoryCounts(ctx context.Context, vehicleID int64) (map[int64]int, error) {
-	sql := `SELECT p.category_id, count(*) FROM products p WHERE p.is_active GROUP BY p.category_id`
+	sql := `SELECT p.category_id, count(*) FROM products p WHERE p.is_active AND p.request_id IS NULL GROUP BY p.category_id`
 	args := []any{}
 	if vehicleID != 0 {
 		sql = `
@@ -79,7 +79,7 @@ func (r *CatalogRepository) CategoryCounts(ctx context.Context, vehicleID int64)
 			)
 			SELECT p.category_id, count(*) FROM products p
 			JOIN fit ON fit.product_id = p.id
-			WHERE p.is_active
+			WHERE p.is_active AND p.request_id IS NULL
 			GROUP BY p.category_id`
 		args = append(args, vehicleID)
 	}
@@ -149,7 +149,7 @@ func (r *CatalogRepository) ProductsByCategory(ctx context.Context, categoryID, 
 	var total int
 	err := r.pool.QueryRow(ctx, `
 		SELECT count(*) FROM products p
-		WHERE `+inCategory("$1")+` AND p.is_active AND `+fitsVehicle("$2"),
+		WHERE `+inCategory("$1")+` AND p.is_active AND p.request_id IS NULL AND `+fitsVehicle("$2"),
 		categoryID, vehicleID,
 	).Scan(&total)
 	if err != nil {
@@ -158,7 +158,7 @@ func (r *CatalogRepository) ProductsByCategory(ctx context.Context, categoryID, 
 
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+productColumns+` FROM products p
-		WHERE `+inCategory("$1")+` AND p.is_active AND `+fitsVehicle("$2")+`
+		WHERE `+inCategory("$1")+` AND p.is_active AND p.request_id IS NULL AND `+fitsVehicle("$2")+`
 		ORDER BY (p.stock > 0) DESC, `+available+` DESC, p.price, p.id
 		LIMIT $3 OFFSET $4`,
 		categoryID, vehicleID, limit, offset)
@@ -235,7 +235,7 @@ func (r *CatalogRepository) Product(ctx context.Context, id int64) (*domain.Prod
 func (r *CatalogRepository) Analogues(ctx context.Context, p *domain.Product, vehicleID int64, limit int) ([]domain.Product, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+productColumns+` FROM products p
-		WHERE p.id <> $1 AND p.is_active AND `+available+` AND `+fitsVehicle("$5")+` AND (
+		WHERE p.id <> $1 AND p.is_active AND p.request_id IS NULL AND `+available+` AND `+fitsVehicle("$5")+` AND (
 			p.oem_numbers && $2::text[]
 			OR (p.category_id = $3 AND (
 				($6 AND p.universal)
@@ -272,7 +272,7 @@ func (r *CatalogRepository) KitParts(ctx context.Context, vehicleID int64, partT
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+productColumns+` FROM products p
-		WHERE p.is_active AND `+available+` AND p.part_type = $2 AND `+fitsVehicle("$1")+`
+		WHERE p.is_active AND p.request_id IS NULL AND `+available+` AND p.part_type = $2 AND `+fitsVehicle("$1")+`
 		  AND p.specs @> $3::jsonb
 		ORDER BY (p.stock > 0) DESC, p.price, p.id
 		LIMIT $4`,

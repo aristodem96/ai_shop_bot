@@ -195,7 +195,18 @@ func (b *Bot) answer(ctx context.Context, chat int64, reply *agent.Reply, err er
 		}
 		products = append(products, *p)
 	}
-	msg, kb := consultantView(reply.Text, products, reply.CartChanged, reply.CarSaved)
+	var parts []domain.CatalogPart
+	for _, id := range reply.CatalogPartIDs {
+		if b.parts == nil {
+			break
+		}
+		p, err := b.parts.CatalogPart(ctx, id)
+		if err != nil {
+			continue // replaced by a recrawl since
+		}
+		parts = append(parts, *p)
+	}
+	msg, kb := consultantView(reply.Text, products, parts, reply.CartChanged, reply.CarSaved)
 	b.send(ctx, chat, msg, kb)
 }
 

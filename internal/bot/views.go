@@ -344,7 +344,7 @@ const maxReplyRunes = 3500
 // consultantView is the consultant's answer: the model's text, escaped -- it
 // is model output, so it is never trusted as markup -- and a button per
 // product it chose to show, labelled from the catalogue.
-func consultantView(text string, products []domain.Product, cartChanged, carSaved bool) (string, telegram.ReplyMarkup) {
+func consultantView(text string, products []domain.Product, parts []domain.CatalogPart, cartChanged, carSaved bool) (string, telegram.ReplyMarkup) {
 	// Telegram refuses an empty message, and the buyer would get nothing at
 	// all. Cards without words still need a line above them.
 	if strings.TrimSpace(text) == "" {
@@ -356,6 +356,9 @@ func consultantView(text string, products []domain.Product, cartChanged, carSave
 	kb := &telegram.InlineKeyboard{}
 	for _, p := range products {
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(productLabel(p), actProduct, p.ID)})
+	}
+	for _, p := range parts {
+		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(catalogPartLabel(p), actRequest, p.ID)})
 	}
 	if carSaved {
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{
