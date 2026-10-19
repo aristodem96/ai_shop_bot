@@ -171,7 +171,16 @@ func (a *Agent) Reply(ctx context.Context, userID, chatID int64, text string, im
 		case llm.StopToolUse:
 			results := a.tools.run(ctx, run, resp.Message.ToolCalls)
 			turn = append(turn, llm.Message{Role: llm.RoleUser, ToolResults: results})
-			continue
+			if !answered(resp.Message, results) {
+				continue
+			}
+			// The model wrote its answer and showed the cards in one step.
+			// Asking it again only gets the same answer retold, which the
+			// buyer then reads twice; the step is the answer. The closing
+			// assistant turn keeps the stored history well formed -- it may
+			// not end on tool results -- and is left empty here so the text
+			// is not counted twice; saving fills it with the reply.
+			turn = append(turn, llm.Message{Role: llm.RoleAssistant})
 		}
 
 		// An answer, possibly cut off by max_tokens; a cut answer still
@@ -269,6 +278,26 @@ func startsTurn(m llm.Message) bool {
 	return m.Role == llm.RoleUser && len(m.ToolResults) == 0
 }
 
+// answered reports whether a step that called tools is already the answer:
+// it has text for the buyer, every call was show_products, and none failed.
+// A failed call has to go back to the model, which then fixes its ids.
+func answered(m llm.Message, results []llm.ToolResult) bool {
+	if strings.TrimSpace(m.Text) == "" {
+		return false
+	}
+	for _, c := range m.ToolCalls {
+		if c.Name != toolShowProducts {
+			return false
+		}
+	}
+	for _, r := range results {
+		if r.IsError {
+			return false
+		}
+	}
+	return true
+}
+
 // turnText is everything the model said to the buyer in this turn. The model
 // often explains its pick in the step that calls show_products and ends with
 // a short closing line -- or none at all -- so the last step alone can be
@@ -277,7 +306,9 @@ func startsTurn(m llm.Message) bool {
 func turnText(turn []llm.Message) string {
 	var parts []string
 	for _, m := range turn {
-		if t := strings.TrimSpace(m.Text); m.Role == llm.RoleAssistant && t != "" {
+		// The same text again -- written with a call that failed, then with
+		// its retry -- is said once.
+		if t := strings.TrimSpace(m.Text); m.Role == llm.RoleAssistant && t != "" && !slices.Contains(parts, t) {
 			parts = append(parts, t)
 		}
 	}

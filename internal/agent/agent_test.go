@@ -405,14 +405,52 @@ func TestTextBeforeShowIsTheAnswer(t *testing.T) {
 
 func TestExplanationIsNotLostToAClosingLine(t *testing.T) {
 	// Seen in the evals: the explanation came with show_products, and the
-	// final step said only "Shall I add it?".
+	// final step said only "Shall I add it?". The step with the explanation
+	// and the cards is the answer now; the model is not asked again.
 	talkAndShow := llm.Call("c1", "show_products", map[string]any{"product_ids": []int64{2}})
 	talkAndShow.Response.Message.Text = "Для Camry потрібна олива 0W-20 — ось вона."
-	f := newAgent(t, llm.NewFake(talkAndShow, llm.Say("Додати в кошик?")))
+	fake := llm.NewFake(talkAndShow, llm.Say("Додати в кошик?"))
+	f := newAgent(t, fake)
 
 	reply, err := f.agent.Reply(context.Background(), chat, chat, "яке масло?")
 	require.NoError(t, err)
-	assert.Equal(t, "Для Camry потрібна олива 0W-20 — ось вона.\n\nДодати в кошик?", reply.Text)
+	assert.Equal(t, "Для Camry потрібна олива 0W-20 — ось вона.", reply.Text)
+	assert.Equal(t, []int64{2}, reply.ProductIDs)
+	assert.Equal(t, 1, fake.Remaining(), "one request, not two")
+}
+
+// Seen live: the model wrote the answer with show_products, was asked
+// again after the cards, and retold it; the buyer read it twice.
+func TestAnswerWithCardsIsNotRetold(t *testing.T) {
+	answer := "Я запам'ятав ваш Daewoo Lanos 1.5. Для ближнього світла зазвичай ставлять H4."
+	talkAndShow := llm.Call("c1", "show_products", map[string]any{"product_ids": []int64{2}})
+	talkAndShow.Response.Message.Text = answer
+	fake := llm.NewFake(talkAndShow, llm.Say("Я запам'ятав ваш Daewoo Lanos 1.5. Для ближнього світла — H4."))
+	f := newAgent(t, fake)
+
+	reply, err := f.agent.Reply(context.Background(), chat, chat, "лампа ближнього світла")
+	require.NoError(t, err)
+	assert.Equal(t, answer, reply.Text, "said once")
+
+	saved := f.history.msgs[chat]
+	last := saved[len(saved)-1]
+	assert.Equal(t, llm.RoleAssistant, last.Role, "the stored turn ends with the model, not on tool results")
+	assert.Equal(t, answer, last.Text)
+}
+
+func TestFailedShowProductsGoesBackToTheModel(t *testing.T) {
+	bad := llm.Call("c1", "show_products", map[string]any{"product_ids": []int64{404}})
+	bad.Response.Message.Text = "Ось варіант."
+	good := llm.Call("c2", "show_products", map[string]any{"product_ids": []int64{2}})
+	good.Response.Message.Text = "Ось варіант."
+	fake := llm.NewFake(bad, good)
+	f := newAgent(t, fake)
+
+	reply, err := f.agent.Reply(context.Background(), chat, chat, "колодки")
+	require.NoError(t, err)
+	assert.Equal(t, []int64{2}, reply.ProductIDs, "a made-up id is sent back to be fixed, not shown")
+	assert.Equal(t, "Ось варіант.", reply.Text, "the text written again with the retry is said once")
+	assert.Zero(t, fake.Remaining())
 }
 
 func TestEmptyFinalTurnIsStoredWithTheSentText(t *testing.T) {

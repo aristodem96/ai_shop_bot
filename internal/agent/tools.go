@@ -24,6 +24,10 @@ const maxShown = 5
 const maxAddQty = 6
 
 // runState is what the tools accumulate during one buyer message.
+// toolShowProducts puts cards under the answer. A step that calls only it,
+// with text, is the answer itself; see Agent.Reply.
+const toolShowProducts = "show_products"
+
 type runState struct {
 	userID      int64
 	shown       []int64
@@ -140,7 +144,7 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, ord
 			Schema: object(map[string]any{"vehicle_id": integer("Vehicle id.")}, "vehicle_id"),
 		},
 		{
-			Name: "show_products",
+			Name: toolShowProducts,
 			Description: "Show parts to the buyer as cards with photo, price, stock and fit, under your reply. " +
 				"Use it whenever you recommend parts. At most 5 per reply.",
 			Schema: object(map[string]any{
@@ -173,7 +177,7 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, ord
 		"search_parts":   tb.searchParts,
 		"get_part":       tb.getPart,
 		"service_kit":    tb.serviceKit,
-		"show_products":  tb.showProducts,
+		toolShowProducts: tb.showProducts,
 		"add_to_cart":    tb.addToCart,
 		"order_status":   tb.orderStatus,
 	}
