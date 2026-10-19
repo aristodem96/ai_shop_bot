@@ -126,15 +126,15 @@ func (r *ImportRepository) Apply(ctx context.Context, b *importer.Batch, dryRun 
 		// second time.
 		rows, err := tx.Query(ctx, `
 			INSERT INTO products (source, external_id, sku, category_id, name, brand, description,
-				oem_numbers, price, stock, lead_time_days, image_url, part_type, universal)
+				oem_numbers, part_key, price, stock, lead_time_days, image_url, part_type, universal)
 			SELECT $1, i.external_id, i.sku, c.id, i.name, i.brand, i.description,
-				i.oem, i.price, coalesce(i.stock, 0), i.lead_days, i.image, i.part_type, i.universal
+				i.oem, i.part_key, i.price, coalesce(i.stock, 0), i.lead_days, i.image, i.part_type, i.universal
 			FROM import_products i
 			JOIN categories c ON c.slug = i.category
 			ON CONFLICT (source, external_id) DO UPDATE SET
 				category_id = EXCLUDED.category_id, name = EXCLUDED.name, brand = EXCLUDED.brand,
 				description = coalesce(nullif(EXCLUDED.description, ''), products.description),
-				oem_numbers = EXCLUDED.oem_numbers, price = EXCLUDED.price,
+				oem_numbers = EXCLUDED.oem_numbers, part_key = EXCLUDED.part_key, price = EXCLUDED.price,
 				stock = greatest(EXCLUDED.stock - (
 					SELECT coalesce(sum(oi.qty), 0) FROM order_items oi
 					JOIN orders o ON o.id = oi.order_id
@@ -262,7 +262,7 @@ func stage(ctx context.Context, tx pgx.Tx, products []importer.Product) error {
 	if _, err := tx.Exec(ctx, `
 		CREATE TEMP TABLE import_products (
 			external_id text PRIMARY KEY,
-			sku text, name text, brand text, description text, oem text[], price bigint,
+			sku text, name text, brand text, description text, oem text[], part_key text, price bigint,
 			stock int, lead_days int, image text, category text, part_type text, universal boolean
 		) ON COMMIT DROP;
 		CREATE TEMP TABLE import_fits (
@@ -272,7 +272,7 @@ func stage(ctx context.Context, tx pgx.Tx, products []importer.Product) error {
 	}
 
 	_, err := tx.CopyFrom(ctx, pgx.Identifier{"import_products"},
-		[]string{"external_id", "sku", "name", "brand", "description", "oem", "price",
+		[]string{"external_id", "sku", "name", "brand", "description", "oem", "part_key", "price",
 			"stock", "lead_days", "image", "category", "part_type", "universal"},
 		pgx.CopyFromSlice(len(products), func(i int) ([]any, error) {
 			p := products[i]
@@ -280,7 +280,7 @@ func stage(ctx context.Context, tx pgx.Tx, products []importer.Product) error {
 			if oem == nil {
 				oem = []string{}
 			}
-			return []any{p.ExternalID, p.SKU, p.Name, p.Brand, p.Description, oem, int64(p.Price),
+			return []any{p.ExternalID, p.SKU, p.Name, p.Brand, p.Description, oem, p.PartKey, int64(p.Price),
 				p.Stock, p.LeadDays, p.Image, p.Category, p.PartType, p.Universal}, nil
 		}))
 	if err != nil {

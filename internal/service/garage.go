@@ -11,7 +11,14 @@ import (
 type GarageService struct {
 	vehicles VehicleRepository
 	garages  GarageRepository
+	// chosen is told of every car a buyer chooses, to start fetching what
+	// fits it; nil when nothing needs to.
+	chosen func(ctx context.Context, vehicleID int64)
 }
+
+// OnChoose sets what is told of a car a buyer chooses. The parts catalogue
+// uses it to fetch what fits the car before the buyer asks.
+func (s *GarageService) OnChoose(f func(ctx context.Context, vehicleID int64)) { s.chosen = f }
 
 // NewGarageService wires a GarageService.
 func NewGarageService(vehicles VehicleRepository, garages GarageRepository) *GarageService {
@@ -56,6 +63,9 @@ func (s *GarageService) Set(ctx context.Context, userID, vehicleID int64) (*doma
 	}
 	if err := s.garages.SetGarage(ctx, userID, vehicleID); err != nil {
 		return nil, err
+	}
+	if s.chosen != nil {
+		s.chosen(ctx, vehicleID)
 	}
 	return v, nil
 }

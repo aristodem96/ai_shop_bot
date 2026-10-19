@@ -24,6 +24,7 @@ import (
 	"github.com/aristodem96/ai_shop_bot/internal/autodb"
 	"github.com/aristodem96/ai_shop_bot/internal/bot"
 	"github.com/aristodem96/ai_shop_bot/internal/config"
+	"github.com/aristodem96/ai_shop_bot/internal/crawler"
 	"github.com/aristodem96/ai_shop_bot/internal/directory"
 	"github.com/aristodem96/ai_shop_bot/internal/importer"
 	"github.com/aristodem96/ai_shop_bot/internal/llm"
@@ -94,13 +95,24 @@ func run() error {
 	var (
 		vehicles service.VehicleRepository = vehicleRepo
 		dir      *directory.Directory
+		crawl    *crawler.Crawler
 	)
 	if cfg.AutoDB.User != "" {
 		api := autodb.New(autodb.Config{BaseURL: cfg.AutoDB.URL, User: cfg.AutoDB.User, Password: cfg.AutoDB.Password})
 		dir = directory.New(api, postgres.NewDirectoryRepository(pool), log)
 		vehicles = dir
+		crawl = crawler.New(api, postgres.NewCrawlRepository(pool), crawler.Config{}, log)
 	}
 	garage := service.NewGarageService(vehicles, vehicleRepo)
+	if crawl != nil {
+		// A car chosen is a car whose parts are fetched now, in the
+		// background, so they are there when the buyer asks for them.
+		garage.OnChoose(func(ctx context.Context, vehicleID int64) {
+			if err := crawl.Enqueue(ctx, vehicleID); err != nil {
+				log.WarnContext(ctx, "could not queue a crawl", slog.Int64("vehicle_id", vehicleID), slog.Any("error", err))
+			}
+		})
+	}
 	kits := service.NewMaintenanceService(catalogRepo, vehicleRepo)
 
 	tg := telegram.NewWithBaseURL(cfg.TelegramAPIURL, cfg.TelegramToken)
@@ -123,6 +135,7 @@ func run() error {
 			dir.Warm(gctx)
 			return nil
 		})
+		group.Go(func() error { return crawl.Run(gctx) })
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {

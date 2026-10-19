@@ -111,10 +111,13 @@ type Product struct {
 	PartType    string
 	Universal   bool
 	OEM         []string
-	Price       domain.Money
-	Stock       *int // nil: on order
-	LeadDays    *int
-	Fits        []ModelFit
+	// PartKey is the supplier's part number, normalised: the key the
+	// product meets the parts catalogue's lists by.
+	PartKey  string
+	Price    domain.Money
+	Stock    *int // nil: on order
+	LeadDays *int
+	Fits     []ModelFit
 }
 
 // ModelFit is a fitment to a model of the catalogue.
@@ -247,7 +250,7 @@ func Resolve(ctx context.Context, store Store, p *Profile, parsed *Parsed) (*Bat
 			prod.LeadDays = p.LeadTimeDays
 		}
 		if pn := domain.NormalizeOEM(o.PartNumber); pn != "" {
-			prod.OEM = []string{pn}
+			prod.OEM, prod.PartKey = []string{pn}, pn
 		}
 		// The profile's rules know this supplier; the tree's keywords know
 		// parts in general. The first say wins, then the category's own

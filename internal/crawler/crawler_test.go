@@ -1,0 +1,127 @@
+package crawler
+
+import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"sort"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/aristodem96/ai_shop_bot/internal/autodb"
+)
+
+// tree is a parts tree: brakes (with pads and discs) and filters, a leaf.
+type fakeAPI struct {
+	mu        sync.Mutex
+	failsLeft map[int64]int // section -> failures before it answers
+	calls     int
+}
+
+var tree = map[int64][]autodb.Section{
+	0:   {{ID: 1, Name: "тормозная система", HasChildren: true}, {ID: 2, Name: "фильтр"}},
+	1:   {{ID: 11, Name: "колодки"}, {ID: 12, Name: "диски", HasChildren: true}},
+	12:  {{ID: 121, Name: "диски передние"}},
+	999: nil,
+}
+
+var partsOf = map[int64][]autodb.Part{
+	11:  {{SupplierID: 65, Number: "S 59 513", Brand: "BREMBO", Name: "Колодки"}},
+	121: {{SupplierID: 30, Number: "0 986 479 C93", Brand: "BOSCH", Name: "Диск"}, {SupplierID: 30, Number: "", Brand: "BOSCH"}},
+	2:   {{SupplierID: 4, Number: "W 712/95", Brand: "MANN-FILTER", Name: "Фильтр масляный"}},
+}
+
+func (f *fakeAPI) Sections(_ context.Context, _ autodb.Group, _ int64, parent int64) ([]autodb.Section, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	return tree[parent], nil
+}
+
+func (f *fakeAPI) SectionParts(_ context.Context, _ autodb.Group, _ int64, sec int64) ([]autodb.Part, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	if f.failsLeft[sec] > 0 {
+		f.failsLeft[sec]--
+		return nil, errors.New("autodb: unavailable: timeout")
+	}
+	return partsOf[sec], nil
+}
+
+type memStore struct {
+	mu       sync.Mutex
+	parts    map[int64][]Part // by section
+	progress [3]int
+	finished error
+}
+
+func (s *memStore) Enqueue(context.Context, int64, time.Duration) error { return nil }
+func (s *memStore) Claim(context.Context) (int64, bool, error)          { return 0, false, nil }
+func (s *memStore) Requeue(context.Context) error                       { return nil }
+func (s *memStore) SaveParts(_ context.Context, _, sec int64, p []Part) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.parts[sec] = p
+	return nil
+}
+func (s *memStore) Progress(_ context.Context, _ int64, total, done, parts int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.progress = [3]int{total, done, parts}
+	return nil
+}
+func (s *memStore) Finish(_ context.Context, _ int64, err error) error {
+	s.finished = err
+	return nil
+}
+func (s *memStore) Status(context.Context, int64) (Status, error) { return Status{}, nil }
+
+func init() { retryDelay = time.Millisecond }
+
+func newCrawler(api *fakeAPI) (*Crawler, *memStore) {
+	store := &memStore{parts: map[int64][]Part{}}
+	return New(api, store, Config{Parallel: 2}, slog.New(slog.NewTextHandler(io.Discard, nil))), store
+}
+
+func TestCrawlWalksTheTree(t *testing.T) {
+	api := &fakeAPI{failsLeft: map[int64]int{11: 1}}
+	c, store := newCrawler(api)
+
+	require.NoError(t, c.Crawl(context.Background(), 18537))
+	sections := make([]int64, 0, len(store.parts))
+	for s := range store.parts {
+		sections = append(sections, s)
+	}
+	sort.Slice(sections, func(i, j int) bool { return sections[i] < sections[j] })
+	assert.Equal(t, []int64{2, 11, 121}, sections, "every leaf, at any depth, and none of the nodes")
+
+	assert.Equal(t, []Part{{SupplierID: 65, ArticleKey: "S59513", Number: "S 59 513", Brand: "BREMBO", BrandKey: "BREMBO", Name: "Колодки"}},
+		store.parts[11], "a section that failed once is asked again")
+	assert.Equal(t, "MANNFILTER", store.parts[2][0].BrandKey, "keys are written the way products' are")
+	assert.Len(t, store.parts[121], 1, "a part with no number is no key to match")
+	assert.Equal(t, [3]int{3, 3, 4}, store.progress)
+}
+
+func TestCrawlFailsWhenTooMuchIsLost(t *testing.T) {
+	api := &fakeAPI{failsLeft: map[int64]int{11: 10, 121: 10}}
+	c, _ := newCrawler(api)
+
+	err := c.Crawl(context.Background(), 18537)
+	require.ErrorContains(t, err, "2 of 3 sections failed", "to be queued again rather than kept half done")
+}
+
+func TestRetryGivesUpOnARefusedAddress(t *testing.T) {
+	calls := 0
+	_, err := retry(context.Background(), func() (int, error) {
+		calls++
+		return 0, autodb.ErrIPNotAllowed
+	})
+	require.ErrorIs(t, err, autodb.ErrIPNotAllowed)
+	assert.Equal(t, 1, calls, "asking again will not change the dashboard")
+}
