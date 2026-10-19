@@ -171,6 +171,8 @@ func (e *Enricher) Product(ctx context.Context, productID int64) error {
 
 // Run matches pending products in the background until ctx is done.
 func (e *Enricher) Run(ctx context.Context) error {
+	// The stock pass is background work, unlike a card a buyer waits for.
+	ctx = autodb.Background(ctx)
 	for ctx.Err() == nil {
 		n, err := e.Pass(ctx, 50)
 		if err != nil && ctx.Err() == nil {

@@ -89,4 +89,5 @@ require (
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/time v0.16.0 // indirect
 )

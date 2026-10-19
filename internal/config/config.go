@@ -133,6 +133,11 @@ type AutoDB struct {
 	URL      string
 	User     string
 	Password string
+	// RPS caps requests per second to the API, everything together;
+	// BackgroundRPS is the share crawls and enrichment may take of it, so
+	// a buyer's lookup never queues behind them.
+	RPS           int
+	BackgroundRPS int
 }
 
 // LoadBot reads the bot configuration.
@@ -163,6 +168,10 @@ func LoadBot() (*Bot, error) {
 			URL:      envString("AUTODB_API_URL", "https://auto-db.pro/api/v1/"),
 			User:     envString("AUTODB_USER", ""),
 			Password: envString("AUTODB_PASSWORD", ""),
+			// The plan's limits are not published; a few a second is what
+			// the API was seen to bear without slowing down.
+			RPS:           envInt("AUTODB_RPS", 4, collect),
+			BackgroundRPS: envInt("AUTODB_BACKGROUND_RPS", 2, collect),
 		},
 		ImportDir: envString("IMPORT_DIR", filepath.Join(os.TempDir(), "ai_shop_bot-imports")),
 		Redis: Redis{

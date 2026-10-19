@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 )
 
 // The answers below are shaped like the live API's: a doubled byte order
@@ -113,4 +115,26 @@ func TestErrors(t *testing.T) {
 	bad := New(Config{BaseURL: c.base, User: "user_x", Password: "wrong"})
 	_, err = bad.Makes(context.Background(), Passenger)
 	require.ErrorIs(t, err, ErrUnauthorized)
+}
+
+func TestBackgroundKeepsToItsShare(t *testing.T) {
+	c, _ := server(t, map[string]string{"search": `[]`})
+	c.all, c.background = rate.NewLimiter(rate.Limit(1000), 1), rate.NewLimiter(rate.Limit(20), 1)
+	ctx := context.Background()
+
+	start := time.Now()
+	for range 5 {
+		_, err := c.Search(Background(ctx), "x")
+		require.NoError(t, err)
+	}
+	bg := time.Since(start)
+
+	start = time.Now()
+	for range 5 {
+		_, err := c.Search(ctx, "x")
+		require.NoError(t, err)
+	}
+	fg := time.Since(start)
+	assert.GreaterOrEqual(t, bg, 180*time.Millisecond, "five background calls at 20 a second")
+	assert.Less(t, fg, bg/2, "a buyer's call does not wait for the background share")
 }

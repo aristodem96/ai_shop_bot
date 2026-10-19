@@ -102,7 +102,8 @@ func run() error {
 		enricher *enrich.Enricher
 	)
 	if cfg.AutoDB.User != "" {
-		api := autodb.New(autodb.Config{BaseURL: cfg.AutoDB.URL, User: cfg.AutoDB.User, Password: cfg.AutoDB.Password})
+		api := autodb.New(autodb.Config{BaseURL: cfg.AutoDB.URL, User: cfg.AutoDB.User, Password: cfg.AutoDB.Password,
+			RPS: cfg.AutoDB.RPS, BackgroundRPS: cfg.AutoDB.BackgroundRPS})
 		dir = directory.New(api, postgres.NewDirectoryRepository(pool), log).WithFallback(vehicleRepo)
 		vehicles = dir
 		crawl = crawler.New(api, postgres.NewCrawlRepository(pool), crawler.Config{}, log)

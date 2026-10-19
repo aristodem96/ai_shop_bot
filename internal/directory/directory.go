@@ -187,6 +187,7 @@ func (d *Directory) Vehicle(ctx context.Context, id int64) (*domain.Vehicle, err
 // background at start; a make that fails is logged and left for a lookup to
 // fetch.
 func (d *Directory) Warm(ctx context.Context) {
+	ctx = autodb.Background(ctx)
 	makes, err := d.makes(ctx)
 	if err != nil {
 		d.log.WarnContext(ctx, "could not warm the vehicle directory", slog.Any("error", err))

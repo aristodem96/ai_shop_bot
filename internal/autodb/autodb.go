@@ -26,6 +26,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 // Errors of the API.
@@ -47,6 +49,10 @@ type Config struct {
 	// Timeout bounds one request. getSectionParts takes up to several
 	// seconds, so the default is generous.
 	Timeout time.Duration
+	// RPS caps requests per second, all callers together; zero is no cap.
+	// BackgroundRPS is the part of it calls marked Background may use.
+	RPS           int
+	BackgroundRPS int
 }
 
 // Client calls the Auto-DB Pro API.
@@ -55,6 +61,9 @@ type Client struct {
 	user     string
 	password string
 	http     *http.Client
+	// all paces every call; background paces background calls on top.
+	all        *rate.Limiter
+	background *rate.Limiter
 }
 
 // New returns a Client.
@@ -62,10 +71,41 @@ func New(cfg Config) *Client {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 30 * time.Second
 	}
-	return &Client{
+	c := &Client{
 		base: strings.TrimRight(cfg.BaseURL, "/") + "/", user: cfg.User, password: cfg.Password,
 		http: &http.Client{Timeout: cfg.Timeout},
 	}
+	if cfg.RPS > 0 {
+		c.all = rate.NewLimiter(rate.Limit(cfg.RPS), 1)
+		bg := cfg.BackgroundRPS
+		if bg <= 0 || bg > cfg.RPS {
+			bg = cfg.RPS
+		}
+		c.background = rate.NewLimiter(rate.Limit(bg), 1)
+	}
+	return c
+}
+
+type backgroundKey struct{}
+
+// Background marks calls made under ctx as background work -- a crawl, an
+// enrichment pass -- which keeps to its smaller share of the rate.
+func Background(ctx context.Context) context.Context {
+	return context.WithValue(ctx, backgroundKey{}, true)
+}
+
+// wait paces a call: a background one through its own limiter first, then
+// every call through the common one.
+func (c *Client) wait(ctx context.Context) error {
+	if c.all == nil {
+		return nil
+	}
+	if bg, _ := ctx.Value(backgroundKey{}).(bool); bg {
+		if err := c.background.Wait(ctx); err != nil {
+			return err
+		}
+	}
+	return c.all.Wait(ctx)
 }
 
 // Group is a vehicle type. Passenger cars are the default.
@@ -326,6 +366,9 @@ var bom = []byte{0xEF, 0xBB, 0xBF}
 
 // get calls one action and decodes its JSON into out.
 func (c *Client) get(ctx context.Context, q url.Values, out any) error {
+	if err := c.wait(ctx); err != nil {
+		return fmt.Errorf("autodb: %s: %w", q.Get("action"), err)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"?"+q.Encode(), nil)
 	if err != nil {
 		return fmt.Errorf("autodb: build %s request: %w", q.Get("action"), err)

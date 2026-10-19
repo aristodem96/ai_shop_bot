@@ -82,6 +82,8 @@ services:
       AUTODB_API_URL: ${AUTODB_API_URL:-https://auto-db.pro/api/v1/}
       AUTODB_USER: ${AUTODB_USER:-}
       AUTODB_PASSWORD: ${AUTODB_PASSWORD:-}
+      AUTODB_RPS: ${AUTODB_RPS:-4}
+      AUTODB_BACKGROUND_RPS: ${AUTODB_BACKGROUND_RPS:-2}
       # Supplier profiles for price lists sent to the managers' chat. A new
       # supplier is a new file in ./profiles; no rebuild needed.
       IMPORT_PROFILES_DIR: /profiles

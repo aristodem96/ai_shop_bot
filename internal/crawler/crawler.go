@@ -118,6 +118,8 @@ func (c *Crawler) Status(ctx context.Context, vehicleID int64) (Status, error) {
 
 // Run takes crawls from the queue until ctx is done.
 func (c *Crawler) Run(ctx context.Context) error {
+	// Crawls are background work and keep to its share of the API's rate.
+	ctx = autodb.Background(ctx)
 	if err := c.store.Requeue(ctx); err != nil {
 		c.log.WarnContext(ctx, "could not requeue crawls left running", slog.Any("error", err))
 	}
