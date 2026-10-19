@@ -36,10 +36,13 @@ func mainMenu() *telegram.ReplyKeyboard {
 	}
 }
 
-func categoriesView(menu []service.CategoryEntry, car *domain.Vehicle) (string, *telegram.InlineKeyboard) {
+func categoriesView(menu []service.CategoryEntry, car *domain.Vehicle, prog *domain.CatalogProgress) (string, *telegram.InlineKeyboard) {
 	text := "<b>Каталог</b>\n"
 	if car != nil {
 		text += "🚗 Для: " + esc(car.Label()) + "\n"
+		if line := progressLine(prog); line != "" && (!prog.Loaded() || prog.Filed < prog.Parts) {
+			text += line + "\n"
+		}
 	} else {
 		text += "Показую всі деталі. Напишіть свою машину, щоб бачити лише сумісні.\n"
 	}
@@ -55,12 +58,43 @@ func categoriesView(menu []service.CategoryEntry, car *domain.Vehicle) (string, 
 	for _, e := range menu {
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(entryLabel(e), actCategory, e.Category.ID, 0)})
 	}
+	if prog != nil && (!prog.Loaded() || prog.Filed < prog.Parts) {
+		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(btnRefresh, actCategories)})
+	}
 	last := []telegram.InlineButton{button(btnCart, actCart)}
 	if car != nil {
 		last = append([]telegram.InlineButton{button("Показувати всі деталі", actForgetCar)}, last...)
 	}
 	kb.Rows = append(kb.Rows, last)
 	return text, kb
+}
+
+// btnRefresh redraws a screen that is still filling up.
+const btnRefresh = "🔄 Оновити"
+
+// progressLine says how far a car's parts catalogue has loaded, "" for a
+// car with none.
+func progressLine(p *domain.CatalogProgress) string {
+	if p == nil {
+		return ""
+	}
+	switch p.State {
+	case "done":
+		line := "✅ Каталог деталей: " + num(p.Parts)
+		if p.Filed < p.Parts {
+			line += fmt.Sprintf(", з них %s уже в розділах — решта з'явиться за кілька хвилин", num(p.Filed))
+		}
+		return line
+	case "running":
+		if p.SectionsTotal == 0 {
+			return "⏳ Каталог деталей завантажується…"
+		}
+		return fmt.Sprintf("⏳ Каталог деталей завантажується: %d%% (%s деталей)",
+			p.SectionsDone*100/p.SectionsTotal, num(p.Parts))
+	case "failed":
+		return "⚠️ Каталог деталей поки не завантажився, пробую ще раз."
+	}
+	return "⏳ Каталог деталей стоїть у черзі на завантаження."
 }
 
 // entryLabel is a menu button: the name and how many parts are behind it,
@@ -334,13 +368,21 @@ func analoguesView(p *domain.Product, analogues []domain.Product) (string, *tele
 }
 
 // carView answers "🚗 My car" when one is saved.
-func carView(car *domain.Vehicle) (string, *telegram.InlineKeyboard) {
-	return "🚗 Ваше авто: <b>" + esc(car.Label()) + "</b>\n\nКаталог і консультант підбирають деталі під нього. Щоб змінити — просто напишіть іншу машину.",
-		&telegram.InlineKeyboard{Rows: [][]telegram.InlineButton{
-			{button("🛍 Каталог для цього авто", actCategories)},
-			{button("🔧 Комплект для ТО", actKit)},
-			{button("Показувати всі деталі", actForgetCar)},
-		}}
+func carView(car *domain.Vehicle, prog *domain.CatalogProgress) (string, *telegram.InlineKeyboard) {
+	text := "🚗 Ваше авто: <b>" + esc(car.Label()) + "</b>\n"
+	if line := progressLine(prog); line != "" {
+		text += "\n" + line + "\n"
+	}
+	text += "\nКаталог і консультант підбирають деталі під нього. Щоб змінити — просто напишіть іншу машину."
+	kb := &telegram.InlineKeyboard{Rows: [][]telegram.InlineButton{
+		{button("🛍 Каталог для цього авто", actCategories)},
+		{button("🔧 Комплект для ТО", actKit)},
+	}}
+	if prog != nil && (!prog.Loaded() || prog.Filed < prog.Parts) {
+		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(btnRefresh, actCarScreen)})
+	}
+	kb.Rows = append(kb.Rows, []telegram.InlineButton{button("Показувати всі деталі", actForgetCar)})
+	return text, kb
 }
 
 var partTypeLabels = map[string]string{

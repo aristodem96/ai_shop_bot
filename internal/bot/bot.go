@@ -115,8 +115,9 @@ type Bot struct {
 
 	// photos and enricher are nil until UsePhotos and UseEnrichment are
 	// called.
-	photos   Photos
-	enricher Enricher
+	photos    Photos
+	enricher  Enricher
+	catalogue CatalogueProgress // nil: no progress shown
 
 	// requests and parts are nil until UseRequests is called.
 	requests PartRequests
@@ -313,7 +314,7 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 		b.start(ctx, chat, user)
 	case "/catalog", btnCatalog:
 		b.sendCategories(ctx, chat, user)
-	case "/car", btnCar:
+	case cmdMyCar, btnCar:
 		b.sendCar(ctx, chat, user)
 	case "/cart", btnCart:
 		b.sendCart(ctx, chat, user)
@@ -474,6 +475,8 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 		return b.routeRequest(ctx, cc, cb)
 	case actForgetCar:
 		return "", b.forgetCar(ctx, cc)
+	case actCarScreen:
+		return "", b.editCar(ctx, cc)
 	case actNoop:
 		return "", nil
 	}

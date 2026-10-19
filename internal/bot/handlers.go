@@ -45,7 +45,7 @@ func (b *Bot) sendCategories(ctx context.Context, chat, user int64) {
 		b.fail(ctx, chat, "list categories", err)
 		return
 	}
-	text, kb := categoriesView(menu, car)
+	text, kb := categoriesView(menu, car, b.progress(ctx, car))
 	b.send(ctx, chat, text, kb)
 }
 
@@ -55,7 +55,7 @@ func (b *Bot) editCategories(ctx context.Context, cc callbackCtx) error {
 	if err != nil {
 		return err
 	}
-	text, kb := categoriesView(menu, car)
+	text, kb := categoriesView(menu, car, b.progress(ctx, car))
 	return b.editText(ctx, cc, text, kb)
 }
 
@@ -161,11 +161,21 @@ func (b *Bot) changeCart(ctx context.Context, cc callbackCtx, change func() (*do
 
 func (b *Bot) sendCar(ctx context.Context, chat, user int64) {
 	if car := b.car(ctx, user); car != nil {
-		text, kb := carView(car)
+		text, kb := carView(car, b.progress(ctx, car))
 		b.send(ctx, chat, text, kb)
 		return
 	}
 	b.send(ctx, chat, msgAskCar, nil)
+}
+
+// editCar redraws the car screen, for how far its catalogue has got.
+func (b *Bot) editCar(ctx context.Context, cc callbackCtx) error {
+	car := b.car(ctx, cc.user)
+	if car == nil {
+		return b.editText(ctx, cc, msgAskCar, nil)
+	}
+	text, kb := carView(car, b.progress(ctx, car))
+	return b.editText(ctx, cc, text, kb)
 }
 
 // errNoCar is a kit asked for before the buyer named a car.

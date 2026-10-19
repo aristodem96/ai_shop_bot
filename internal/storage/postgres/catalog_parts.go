@@ -178,6 +178,35 @@ func (r *CatalogPartRepository) CrawlState(ctx context.Context, vehicleID int64)
 	return state, nil
 }
 
+// Progress says how far a vehicle's catalogue has loaded; nil for a
+// vehicle not from the catalogue.
+func (r *CatalogPartRepository) Progress(ctx context.Context, vehicleID int64) (*domain.CatalogProgress, error) {
+	var (
+		p     domain.CatalogProgress
+		modID int64
+	)
+	err := r.pool.QueryRow(ctx, `
+		SELECT v.autodb_mod_id, coalesce(c.status, 'none'), coalesce(c.sections_done, 0), coalesce(c.sections_total, 0)
+		FROM vehicles v LEFT JOIN autodb_crawls c ON c.mod_id = v.autodb_mod_id
+		WHERE v.id = $1 AND v.autodb_mod_id IS NOT NULL`, vehicleID).Scan(&modID, &p.State, &p.SectionsDone, &p.SectionsTotal)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("postgres: catalogue progress of vehicle %d: %w", vehicleID, err)
+	}
+	err = r.pool.QueryRow(ctx, `
+		SELECT count(*), count(*) FILTER (WHERE filed) FROM (
+			SELECT mp.article_key, mp.brand_key, bool_or(coalesce(n.category, '') <> '') AS filed
+			FROM autodb_mod_parts mp LEFT JOIN autodb_part_names n ON n.name = mp.name
+			WHERE mp.mod_id = $1
+			GROUP BY mp.article_key, mp.brand_key) x`, modID).Scan(&p.Parts, &p.Filed)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: count catalogue parts of vehicle %d: %w", vehicleID, err)
+	}
+	return &p, nil
+}
+
 // Untranslated returns crawled names that have no translation yet.
 func (r *CatalogPartRepository) Untranslated(ctx context.Context, limit int) ([]string, error) {
 	rows, err := r.pool.Query(ctx, `

@@ -99,12 +99,12 @@ func TestCategoriesViewShowsCounts(t *testing.T) {
 		{Category: domain.Category{ID: 1, Title: "Гальмівна система"}, Count: 3301},
 		{Category: domain.Category{ID: 9, Title: "Інше"}, Count: 4},
 	}
-	text, kb := categoriesView(menu, &octavia)
+	text, kb := categoriesView(menu, &octavia, nil)
 	assert.Contains(t, text, "Оберіть розділ")
 	assert.Equal(t, "Гальмівна система · 3 301", kb.Rows[0][0].Text, "the count says what is behind a button")
 	assert.Equal(t, encode(actCategory, 1, 0), kb.Rows[0][0].CallbackData)
 
-	text, _ = categoriesView(nil, &octavia)
+	text, _ = categoriesView(nil, &octavia, nil)
 	assert.Contains(t, text, "поки нічого немає", "a car the catalogue has nothing for is told so")
 }
 
@@ -155,4 +155,25 @@ func TestProductPageListsPartsOnOrder(t *testing.T) {
 	pg.Products = nil
 	text, _ = productPageView(pg)
 	assert.NotContains(t, text, "нічого немає", "parts on order alone are not an empty page")
+}
+
+func TestCarScreenShowsCatalogueProgress(t *testing.T) {
+	text, kb := carView(&octavia, &domain.CatalogProgress{State: "running", SectionsDone: 120, SectionsTotal: 363, Parts: 4210})
+	assert.Contains(t, text, "завантажується: 33% (4 210 деталей)")
+	assert.Contains(t, callbacks(kb), encode(actCarScreen), "while it loads, the screen can be refreshed")
+
+	text, kb = carView(&octavia, &domain.CatalogProgress{State: "done", Parts: 10112, Filed: 7900})
+	assert.Contains(t, text, "Каталог деталей: 10 112, з них 7 900 уже в розділах")
+	assert.Contains(t, callbacks(kb), encode(actCarScreen), "the menu is still filling up")
+
+	text, kb = carView(&octavia, &domain.CatalogProgress{State: "done", Parts: 10112, Filed: 10112})
+	assert.Contains(t, text, "Каталог деталей: 10 112")
+	assert.NotContains(t, text, "розділах")
+	assert.NotContains(t, callbacks(kb), encode(actCarScreen), "nothing left to wait for")
+
+	text, _ = carView(&octavia, nil)
+	assert.NotContains(t, text, "Каталог деталей", "a car from the shop's own list has no catalogue")
+
+	text, _ = categoriesView(nil, &octavia, &domain.CatalogProgress{State: "queued"})
+	assert.Contains(t, text, "у черзі")
 }

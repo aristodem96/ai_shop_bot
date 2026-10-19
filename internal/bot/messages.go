@@ -20,12 +20,16 @@ const (
 var Commands = []telegram.Command{
 	{Command: "start", Description: "Почати"},
 	{Command: "catalog", Description: "Каталог запчастин"},
-	{Command: "car", Description: "Моє авто"},
+	{Command: "mycar", Description: "Моє авто"},
 	{Command: "cart", Description: "Кошик"},
 	{Command: "orders", Description: "Мої замовлення"},
 	{Command: "new", Description: "Почати розмову з консультантом заново"},
 	{Command: "help", Description: "Як користуватися"},
 }
+
+// cmdMyCar is the buyer's car. Not /car: that one is the managers', adding a
+// vehicle to the directory, and the owner's private chat has both menus.
+const cmdMyCar = "/mycar"
 
 // cmdAdmin is the managers' help.
 const cmdAdmin = "/admin"

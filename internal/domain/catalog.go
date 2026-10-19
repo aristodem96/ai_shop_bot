@@ -164,3 +164,17 @@ type CatalogPart struct {
 	// Category is the slug of the shop's category, "" when not yet known.
 	Category string
 }
+
+// CatalogProgress is how far a car's parts catalogue has loaded.
+type CatalogProgress struct {
+	// State is "none" before the load is queued, then "queued", "running",
+	// and "done" or "failed".
+	State                       string
+	SectionsDone, SectionsTotal int
+	// Parts counts the different parts loaded; Filed those of them already
+	// in a category of the shop's menu, which takes their names translated.
+	Parts, Filed int
+}
+
+// Loaded reports whether the whole catalogue is in.
+func (p CatalogProgress) Loaded() bool { return p.State == "done" }

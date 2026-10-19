@@ -84,6 +84,14 @@ func TestCatalogParts(t *testing.T) {
 	_, err = repo.CatalogPart(ctx, -1)
 	require.ErrorIs(t, err, domain.ErrNotFound)
 
+	prog, err := repo.Progress(ctx, vehicleID)
+	require.NoError(t, err)
+	assert.Equal(t, &domain.CatalogProgress{State: "none", Parts: 3, Filed: 2}, prog,
+		"three parts, the Brembo once; the two pads are filed, the filter is not")
+	prog, err = repo.Progress(ctx, vehicleByCode(t, "lanos-15"))
+	require.NoError(t, err)
+	assert.Nil(t, prog, "a car from the shop's own list has no catalogue")
+
 	// The menu: only filed parts, once each, not those the shop stocks.
 	padsID, brakesID := categoryBySlug(t, "brake-pads"), categoryBySlug(t, "brakes")
 	counts, err := repo.CategoryCounts(ctx, vehicleID)

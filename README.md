@@ -56,7 +56,8 @@ the buttons. Most of this README is about that boundary.
 - **"My car"** — any car sold in Europe, from the Auto-DB parts catalogue, or
   the shop's own list for makes it lacks (Chery, BYD). Remembered once named;
   the catalogue then shows only parts that fit. Every card says plainly
-  whether the part fits.
+  whether the part fits. `/mycar` shows how far the car's parts catalogue
+  has loaded, and the bot writes when it is in.
 - **Parts on order** — what the catalogue lists for the car and the shop does
   not stock is offered with a button: the buyer picks a quantity, a manager
   finds a supplier and names the price and the lead time, and the buyer pays
