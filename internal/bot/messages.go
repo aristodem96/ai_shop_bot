@@ -16,6 +16,15 @@ const (
 	btnHelp    = "❓ Допомога"
 )
 
+// menuButton reports whether text is a press of the main menu.
+func menuButton(text string) bool {
+	switch text {
+	case btnCatalog, btnCart, btnCar, btnOrders, btnHelp:
+		return true
+	}
+	return false
+}
+
 // Commands is the menu registered with Telegram.
 var Commands = []telegram.Command{
 	{Command: "start", Description: "Почати"},

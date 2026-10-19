@@ -253,7 +253,10 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 		b.receiveImport(ctx, m)
 		return
 	}
-	if b.isAdmin(m.Chat.ID) {
+	// A main menu button is never an answer to a managers' dialog: in the
+	// owner's private chat, "🚗 Моє авто" pressed while a dialog waits for
+	// a supplier's name or a car's description would become one.
+	if b.isAdmin(m.Chat.ID) && !menuButton(m.Text) {
 		if _, ok := commandArg(m.Text, cmdAdmin); ok {
 			b.send(ctx, m.Chat.ID, msgAdminHelp, nil)
 			return
@@ -476,7 +479,9 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 	case actForgetCar:
 		return "", b.forgetCar(ctx, cc)
 	case actCarScreen:
-		return "", b.editCar(ctx, cc)
+		return b.progressToast(ctx, cc.user), b.editCar(ctx, cc)
+	case actMenuRefresh:
+		return b.progressToast(ctx, cc.user), b.editCategories(ctx, cc)
 	case actNoop:
 		return "", nil
 	}

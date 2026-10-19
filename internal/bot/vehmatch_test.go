@@ -262,3 +262,19 @@ func TestCarCommandByHand(t *testing.T) {
 	b.Handle(ctx, say(managers, "/car Peugeot 308"))
 	assert.Contains(t, b.tg.last("sendMessage").text, "через кому", "and a line it cannot read is asked again")
 }
+
+// The owner's private chat is the managers' chat too: a menu button pressed
+// while a dialog waits for text is the button, not the answer.
+func TestMenuButtonIsNoAnswerToADialog(t *testing.T) {
+	b, _, m := newMatchBot(t, true)
+	ctx := context.Background()
+	b.Handle(ctx, say(managers, "/car Peugeot 308 T7 дизель"))
+	b.Handle(ctx, pressIn(managers, encode(actCarText, 1)))
+	require.Len(t, m.proposals, 1)
+
+	b.Handle(ctx, say(managers, btnCar))
+	assert.Len(t, m.proposals, 1, "not taken as a correction of the car")
+
+	b.Handle(ctx, say(managers, "тільки дизель 1.6"))
+	assert.Len(t, m.proposals, 2, "the dialog still waits for its answer")
+}
