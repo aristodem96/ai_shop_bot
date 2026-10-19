@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -56,4 +57,26 @@ func TestEmptyMenuWhileLoading(t *testing.T) {
 	assert.Contains(t, text, "я напишу вам", "an empty menu while loading is not a dead end")
 	text, _ = categoriesView(nil, &octavia, &domain.CatalogProgress{State: "done"})
 	assert.Contains(t, text, "поки нічого немає")
+}
+
+func TestNoCallToWriteWhileTheCatalogueLoads(t *testing.T) {
+	b, tg := withConsultant(&fakeConsultant{}, fakeLimiter{allow: true})
+	b.garage.car = &octavia
+	ctx := context.Background()
+
+	b.UseCatalogueProgress(fakeProgress{&domain.CatalogProgress{State: "running"}})
+	b.Handle(ctx, text(btnCatalog))
+	assert.NotContains(t, tg.last("sendMessage").text, msgTypeHint, "the consultant would find little yet")
+	b.Handle(ctx, text(btnCar))
+	assert.NotContains(t, tg.last("sendMessage").text, msgTypeHint)
+
+	b.UseCatalogueProgress(fakeProgress{&domain.CatalogProgress{State: "done", Parts: 10, Filed: 10}})
+	b.Handle(ctx, text(btnCatalog))
+	assert.Equal(t, 1, strings.Count(tg.last("sendMessage").text, "напишіть"), "once loaded, one call to write")
+}
+
+func TestLoadingMenuOnlyAsksToWait(t *testing.T) {
+	text, _ := categoriesView(nil, &octavia, &domain.CatalogProgress{State: "running"})
+	assert.NotContains(t, text, "напишіть", "nothing to find yet")
+	assert.Contains(t, text, "я напишу вам")
 }

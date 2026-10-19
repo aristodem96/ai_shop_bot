@@ -38,9 +38,10 @@ func (b *Bot) mainMenu() *telegram.ReplyKeyboard {
 }
 
 // typeHint ends a screen the buyer browses with the shorter way: writing.
-// Empty without the consultant.
-func (b *Bot) typeHint() string {
-	if b.consultant == nil {
+// Not while the car's catalogue loads -- the consultant would find little
+// and say so -- and not without the consultant.
+func (b *Bot) typeHint(prog *domain.CatalogProgress) string {
+	if b.consultant == nil || (prog != nil && !prog.Loaded()) {
 		return ""
 	}
 	return "\n\n" + msgTypeHint
@@ -77,8 +78,12 @@ func (b *Bot) sendCategories(ctx context.Context, chat, user int64) {
 		b.fail(ctx, chat, "list categories", err)
 		return
 	}
-	text, kb := categoriesView(menu, car, b.progress(ctx, car))
-	b.send(ctx, chat, text+b.typeHint(), kb)
+	prog := b.progress(ctx, car)
+	text, kb := categoriesView(menu, car, prog)
+	if len(menu) > 0 {
+		text += b.typeHint(prog)
+	}
+	b.send(ctx, chat, text, kb)
 }
 
 func (b *Bot) editCategories(ctx context.Context, cc callbackCtx) error {
@@ -90,8 +95,12 @@ func (b *Bot) editCategories(ctx context.Context, cc callbackCtx) error {
 	if err != nil {
 		return err
 	}
-	text, kb := categoriesView(menu, car, b.progress(ctx, car))
-	return b.editText(ctx, cc, text+b.typeHint(), kb)
+	prog := b.progress(ctx, car)
+	text, kb := categoriesView(menu, car, prog)
+	if len(menu) > 0 {
+		text += b.typeHint(prog)
+	}
+	return b.editText(ctx, cc, text, kb)
 }
 
 func (b *Bot) editProductPage(ctx context.Context, cc callbackCtx, categoryID int64, page int, all bool) error {
@@ -204,8 +213,9 @@ func (b *Bot) changeCart(ctx context.Context, cc callbackCtx, change func() (*do
 
 func (b *Bot) sendCar(ctx context.Context, chat, user int64) {
 	if car := b.car(ctx, user); car != nil {
-		text, kb := carView(car, b.progress(ctx, car))
-		b.send(ctx, chat, text+b.typeHint(), kb)
+		prog := b.progress(ctx, car)
+		text, kb := carView(car, prog)
+		b.send(ctx, chat, text+b.typeHint(prog), kb)
 		return
 	}
 	b.send(ctx, chat, msgAskCar, nil)
@@ -217,8 +227,9 @@ func (b *Bot) editCar(ctx context.Context, cc callbackCtx) error {
 	if car == nil {
 		return b.editText(ctx, cc, msgAskCar, nil)
 	}
-	text, kb := carView(car, b.progress(ctx, car))
-	return b.editText(ctx, cc, text+b.typeHint(), kb)
+	prog := b.progress(ctx, car)
+	text, kb := carView(car, prog)
+	return b.editText(ctx, cc, text+b.typeHint(prog), kb)
 }
 
 // errNoCar is a kit asked for before the buyer named a car.
