@@ -32,7 +32,9 @@ make up        # recreates the bot with the new setting; the database stays
 ```
 
 (`make down` stops the stack and keeps its data. `make reset` stops it **and
-deletes its volumes**, database included: use it only to start from scratch.)
+deletes the database and uploaded price lists**: use it only to start from
+scratch. It also clears old images and the build cache, as `make prune` does
+alone.)
 
 Monobank only delivers to `https://` addresses, which every tunnel provides.
 
@@ -142,6 +144,17 @@ the `imports` volume and the managers' dialogs in Redis, so a deploy midway
 through an import or a vehicle matching session loses neither. The bot
 finishes in-flight updates on `SIGTERM` (`stop_grace_period: 70s`), so a
 deploy does not cut a buyer off mid-checkout.
+
+### Disk
+
+Every `docker compose up --build` leaves the previous image and more build
+cache behind: gigabytes after a few weeks of updates. `docker system df`
+shows it, and `make prune` frees it without touching the database or the
+certificates.
+
+Never run `docker compose down -v` or `docker volume prune` here: besides
+the database they delete Caddy's certificate, and Let's Encrypt issues one
+for a domain only five times a week. `make reset` keeps it.
 
 ### Logs
 

@@ -100,9 +100,21 @@ docker-seed: ## Load (or reset) the demo catalogue from inside the bot image
 down: ## Stop the stack; the database and Redis are kept
 	docker compose --profile bot down
 
+# reset deletes the shop's data by name, not with `down -v`: on a server that
+# would also take Caddy's volumes, and with them the HTTPS certificate, which
+# Let's Encrypt reissues for a domain only five times a week. It also clears
+# what rebuilds leave behind: old images and the build cache, gigabytes after
+# a few weeks of `make up`.
 .PHONY: reset
-reset: ## Stop the stack and DELETE its data (database, Redis) to start from scratch
-	docker compose --profile bot down -v
+reset: ## Stop the stack, DELETE the database and uploaded files, clear old images and build cache
+	docker compose --profile bot down
+	docker volume rm -f ai_shop_bot_pgdata ai_shop_bot_imports
+	$(MAKE) prune
+
+.PHONY: prune
+prune: ## Free disk: old bot images and the build cache (never the data or certificates)
+	docker image prune -f
+	docker builder prune -f
 
 .PHONY: logs
 logs: ## Tail the bot container logs
