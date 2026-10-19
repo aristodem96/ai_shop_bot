@@ -52,6 +52,16 @@ type Orders interface {
 	OrdersOf(ctx context.Context, userID int64, limit int) ([]domain.Order, error)
 }
 
+// OrderCatalog is the parts catalogue of the buyer's car beyond the shop's
+// stock: what the shop can order for it, at a price a manager quotes.
+type OrderCatalog interface {
+	ForVehicle(ctx context.Context, f service.SearchFilter) ([]domain.CatalogPart, error)
+	CatalogPart(ctx context.Context, id int64) (*domain.CatalogPart, error)
+	// CrawlState is "" for a car outside the catalogue, "none", "queued" or
+	// "running" while its parts are still loading, "done" or "failed".
+	CrawlState(ctx context.Context, vehicleID int64) (string, error)
+}
+
 // History stores conversations between turns.
 type History interface {
 	Load(ctx context.Context, chatID int64) ([]llm.Message, error)
@@ -77,6 +87,9 @@ type Reply struct {
 	// ProductIDs are the products to show as cards, in order. Every id was
 	// checked against the catalogue when the model asked to show it.
 	ProductIDs []int64
+	// CatalogPartIDs are catalogue parts to offer on order, checked the same
+	// way.
+	CatalogPartIDs []int64
 	// CartChanged is set when a tool added something to the cart.
 	CartChanged bool
 	// CarSaved is set when the buyer's car was saved during this turn.
@@ -108,6 +121,10 @@ func New(ctx context.Context, client llm.Client, catalog Catalog, cart Cart, gar
 		log:     log,
 	}, nil
 }
+
+// UseOrderCatalog lets searches offer parts the shop can order beyond its
+// stock. Without it the agent sells the stock alone.
+func (a *Agent) UseOrderCatalog(c OrderCatalog) { a.tools.parts = c }
 
 // Fixed answers for the turns that end without a usable model answer. They
 // are shop wording, not model output.
@@ -185,8 +202,9 @@ func (a *Agent) Reply(ctx context.Context, userID, chatID int64, text string, im
 
 		// An answer, possibly cut off by max_tokens; a cut answer still
 		// beats none, and the prompt keeps answers far below the limit.
-		reply := &Reply{Text: turnText(turn), ProductIDs: run.shown, CartChanged: run.cartChanged, CarSaved: run.carSaved}
-		if reply.Text == "" && len(reply.ProductIDs) == 0 {
+		reply := &Reply{Text: turnText(turn), ProductIDs: run.shown, CatalogPartIDs: run.shownParts,
+			CartChanged: run.cartChanged, CarSaved: run.carSaved}
+		if reply.Text == "" && len(reply.ProductIDs) == 0 && len(reply.CatalogPartIDs) == 0 {
 			reply.Text = replyStuck
 		}
 		// The stored answer is the text the buyer was actually given. A final
@@ -209,7 +227,7 @@ func (a *Agent) Reply(ctx context.Context, userID, chatID int64, text string, im
 		{Role: llm.RoleAssistant, Text: replyStuck},
 	})
 	a.logTurn(ctx, chatID, a.cfg.MaxSteps, usage, start, "max_steps")
-	return &Reply{Text: replyStuck, ProductIDs: run.shown, CartChanged: run.cartChanged, CarSaved: run.carSaved}, nil
+	return &Reply{Text: replyStuck, ProductIDs: run.shown, CatalogPartIDs: run.shownParts, CartChanged: run.cartChanged, CarSaved: run.carSaved}, nil
 }
 
 // Reset forgets the conversation.

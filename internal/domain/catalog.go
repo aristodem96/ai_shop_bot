@@ -148,3 +148,16 @@ func NormalizeOEM(s string) string {
 	}
 	return b.String()
 }
+
+// CatalogPart is a part the Auto-DB catalogue lists for a car and the shop
+// does not stock. It has no price: the shop can order it, and a manager
+// quotes the price once a supplier is found.
+type CatalogPart struct {
+	ID     int64
+	Brand  string
+	Number string
+	// Name is Ukrainian once translated, the catalogue's Russian until then.
+	Name string
+	// Category is the slug of the shop's category, "" when not yet known.
+	Category string
+}

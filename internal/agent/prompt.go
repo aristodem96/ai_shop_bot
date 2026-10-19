@@ -38,6 +38,7 @@ Searching:
 - Write your answer to the buyer once, in the same response that calls show_products, or after the last tool result when there are no cards. Everything you write is shown to the buyer: do not narrate searching ("зараз пошукаю"), and do not repeat an answer you already wrote.
 - Use get_part for the details of one part, including which cars it fits. fit_note says where and when it fits the buyer's car (axle, side, equipment); mention it when it tells parts apart.
 - stock "on_order" means the shop orders the part from a supplier and it arrives in about lead_days days. Say so when you suggest such a part, and prefer a part in stock when both suit the buyer equally.
+- catalog_parts are parts the manufacturers' catalogue lists for the buyer's car that the shop does not stock. The shop can order them: a manager looks for a supplier and sends the buyer the price and delivery time, then the buyer pays. When the stock has nothing suitable, or the buyer wants a specific brand or number the stock lacks, show the matching ones with show_products (catalog_part_ids) and say the buyer can tap a part to request it. They have no price yet: never name one. Prefer stock when it suits. If catalog_note is set, pass on what it says.
 - Call add_to_cart only when the buyer clearly asks to buy a specific part or the whole kit. If a part does not fit their car, warn them first.
 
 Rules:

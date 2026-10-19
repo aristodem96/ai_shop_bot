@@ -30,6 +30,7 @@ import (
 	"github.com/aristodem96/ai_shop_bot/internal/llm"
 	"github.com/aristodem96/ai_shop_bot/internal/llm/claude"
 	"github.com/aristodem96/ai_shop_bot/internal/observability"
+	"github.com/aristodem96/ai_shop_bot/internal/partnames"
 	"github.com/aristodem96/ai_shop_bot/internal/payment/monobank"
 	"github.com/aristodem96/ai_shop_bot/internal/service"
 	"github.com/aristodem96/ai_shop_bot/internal/storage/postgres"
@@ -202,6 +203,20 @@ func run() error {
 			return err
 		}
 		b.UseConsultant(consultant, redisstore.NewRateLimiter(rdb, cfg.Agent.RateLimit, cfg.Agent.RateWindow), tg)
+
+		if crawl != nil {
+			// The consultant offers what the catalogue lists for the car
+			// beyond the stock, under names translated as crawls bring them.
+			catalogParts := postgres.NewCatalogPartRepository(pool)
+			consultant.UseOrderCatalog(catalogParts)
+			cats, err := catalog.Categories(startupCtx)
+			if err != nil {
+				return err
+			}
+			names := partnames.New(model, catalogParts, cats, log)
+			crawl.OnDone(func(int64) { names.Wake() })
+			group.Go(func() error { return names.Run(gctx) })
+		}
 	}
 
 	// --- catalogue imports from the managers' chat ----------------------------

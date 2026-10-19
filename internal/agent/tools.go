@@ -31,6 +31,7 @@ const toolShowProducts = "show_products"
 type runState struct {
 	userID      int64
 	shown       []int64
+	shownParts  []int64
 	cartChanged bool
 	carSaved    bool
 }
@@ -46,6 +47,7 @@ type toolbox struct {
 	garage   Garage
 	kits     Maintenance
 	orders   Orders
+	parts    OrderCatalog // nil: stock only
 	now      func() time.Time
 	// catSlug maps category ids to the slugs the model knows them by.
 	catSlug map[int64]string
@@ -118,7 +120,8 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, ord
 		{
 			Name: "search_parts",
 			Description: "Search the catalogue. Returns only parts that can be bought (in stock or on order), cheapest first, or best keyword match " +
-				"first when query is set. Categories, as section: its subcategories (a section finds everything under it): " +
+				"first when query is set. With vehicle_id it also returns catalog_parts: parts the manufacturers' catalogue lists for the car " +
+				"that the shop does not stock, which the shop can order on request. Categories, as section: its subcategories (a section finds everything under it): " +
 				strings.Join(catalogue, "; ") + ".",
 			Schema: object(map[string]any{
 				"vehicle_id":    integer("Only parts that fit this vehicle; universal products always match."),
@@ -145,14 +148,18 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, ord
 		},
 		{
 			Name: toolShowProducts,
-			Description: "Show parts to the buyer as cards with photo, price, stock and fit, under your reply. " +
-				"Use it whenever you recommend parts. At most 5 per reply.",
+			Description: "Show parts to the buyer under your reply: products as cards with photo, price, stock and fit, " +
+				"catalogue parts as buttons to request them on order. Use it whenever you recommend parts. At most 5 of each per reply.",
 			Schema: object(map[string]any{
 				"product_ids": map[string]any{
 					"type": "array", "items": map[string]any{"type": "integer"},
-					"description": "Ids from search results, in the order to show them.",
+					"description": "Product ids from search results, in the order to show them.",
 				},
-			}, "product_ids"),
+				"catalog_part_ids": map[string]any{
+					"type": "array", "items": map[string]any{"type": "integer"},
+					"description": "Ids of catalog_parts from search results.",
+				},
+			}),
 		},
 		{
 			Name:        "order_status",
@@ -423,7 +430,56 @@ func (tb *toolbox) searchParts(ctx context.Context, _ *runState, input json.RawM
 	for i := range res.Products {
 		views[i] = tb.view(&res.Products[i])
 	}
-	return map[string]any{"relaxed": res.Relaxed, "products": views}, nil
+	out := map[string]any{"relaxed": res.Relaxed, "products": views}
+	if in.VehicleID != 0 && tb.parts != nil {
+		if err := tb.addCatalogParts(ctx, out, service.SearchFilter{
+			VehicleID: in.VehicleID, Category: in.Category, Query: in.Query, PartNumber: in.PartNumber,
+			Brand: in.Brand, Limit: maxShown,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+type catalogPartView struct {
+	ID       int64  `json:"catalog_part_id"`
+	Name     string `json:"name"`
+	Brand    string `json:"brand"`
+	Number   string `json:"number"`
+	Category string `json:"category,omitempty"`
+}
+
+// catalogNotes tell the model what a car's catalogue state means for the
+// answer.
+var catalogNotes = map[string]string{
+	"none":    "the catalogue of this car is being loaded and takes a few minutes; catalog_parts may be incomplete, the buyer can ask again shortly",
+	"queued":  "the catalogue of this car is being loaded and takes a few minutes; catalog_parts may be incomplete, the buyer can ask again shortly",
+	"running": "the catalogue of this car is being loaded and takes a few minutes; catalog_parts may be incomplete, the buyer can ask again shortly",
+	"failed":  "the catalogue of this car could not be loaded; catalog_parts may be incomplete",
+}
+
+// addCatalogParts adds what the shop can order for the car beyond its stock.
+// Price filters do not apply: these parts have no price until a manager
+// quotes one.
+func (tb *toolbox) addCatalogParts(ctx context.Context, out map[string]any, f service.SearchFilter) error {
+	state, err := tb.parts.CrawlState(ctx, f.VehicleID)
+	if err != nil || state == "" {
+		return err
+	}
+	parts, err := tb.parts.ForVehicle(ctx, f)
+	if err != nil {
+		return err
+	}
+	views := make([]catalogPartView, len(parts))
+	for i, p := range parts {
+		views[i] = catalogPartView{ID: p.ID, Name: p.Name, Brand: p.Brand, Number: p.Number, Category: p.Category}
+	}
+	out["catalog_parts"] = views
+	if note := catalogNotes[state]; note != "" {
+		out["catalog_note"] = note
+	}
+	return nil
 }
 
 func (tb *toolbox) getPart(ctx context.Context, run *runState, input json.RawMessage) (any, error) {
@@ -461,9 +517,13 @@ func (tb *toolbox) getPart(ctx context.Context, run *runState, input json.RawMes
 // fails here and never reaches the buyer.
 func (tb *toolbox) showProducts(ctx context.Context, run *runState, input json.RawMessage) (any, error) {
 	var in struct {
-		ProductIDs []int64 `json:"product_ids"`
+		ProductIDs     []int64 `json:"product_ids"`
+		CatalogPartIDs []int64 `json:"catalog_part_ids"`
 	}
 	if err := decode(input, &in); err != nil {
+		return nil, err
+	}
+	if err := tb.showCatalogParts(ctx, run, in.CatalogPartIDs); err != nil {
 		return nil, err
 	}
 
@@ -487,7 +547,36 @@ func (tb *toolbox) showProducts(ctx context.Context, run *runState, input json.R
 	if len(unknown) > 0 {
 		return nil, fmt.Errorf("%w: no products with ids %v; use ids from search results", errInput, unknown)
 	}
-	return map[string]any{"shown": len(run.shown)}, nil
+	return map[string]any{"shown": len(run.shown), "shown_catalog_parts": len(run.shownParts)}, nil
+}
+
+// showCatalogParts checks catalogue part ids the way showProducts checks
+// products.
+func (tb *toolbox) showCatalogParts(ctx context.Context, run *runState, ids []int64) error {
+	if len(ids) > 0 && tb.parts == nil {
+		return fmt.Errorf("%w: no catalogue parts in this shop", errInput)
+	}
+	var unknown []int64
+	for _, id := range ids {
+		if slices.Contains(run.shownParts, id) {
+			continue
+		}
+		if len(run.shownParts) == maxShown {
+			return fmt.Errorf("%w: at most %d catalogue parts per reply", errInput, maxShown)
+		}
+		if _, err := tb.parts.CatalogPart(ctx, id); err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				unknown = append(unknown, id)
+				continue
+			}
+			return err
+		}
+		run.shownParts = append(run.shownParts, id)
+	}
+	if len(unknown) > 0 {
+		return fmt.Errorf("%w: no catalogue parts with ids %v; use catalog_part_id from search results", errInput, unknown)
+	}
+	return nil
 }
 
 func (tb *toolbox) addToCart(ctx context.Context, run *runState, input json.RawMessage) (any, error) {

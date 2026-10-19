@@ -84,6 +84,8 @@ type Crawler struct {
 	store Store
 	cfg   Config
 	log   *slog.Logger
+	// onDone runs after a crawl stored its parts.
+	onDone func(modID int64)
 }
 
 // New returns a Crawler.
@@ -99,6 +101,10 @@ func New(api API, store Store, cfg Config, log *slog.Logger) *Crawler {
 	}
 	return &Crawler{api: api, store: store, cfg: cfg, log: log}
 }
+
+// OnDone sets what runs after each successful crawl, such as translating
+// the names it brought.
+func (c *Crawler) OnDone(f func(modID int64)) { c.onDone = f }
 
 // Enqueue queues the crawl of a vehicle the buyer chose.
 func (c *Crawler) Enqueue(ctx context.Context, vehicleID int64) error {
