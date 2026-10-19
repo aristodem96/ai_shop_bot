@@ -55,6 +55,8 @@ const (
 	actGroupAccept    action = "ga"   // ga:<review>:<group> file it as the model guessed
 	actGroupPick      action = "gk"   // gk:<review>:<group>:<category, 0 sections> pick its category
 	actGroupMixed     action = "gm"   // gm:<review>:<group> different kinds of products: sort by name
+	actReport         action = "rp"   // rp:<preset, 0 to type dates> a period's sales report
+	actReportExcel    action = "re"   // re:<from>:<to> the report as a workbook, unix seconds
 	actCatOpen        action = "ko"   // ko:<category> a category's screen; 0 the sections
 	actCatNew         action = "kn"   // kn:<section or 0> a new subcategory, or section: asks its title
 	actCatRename      action = "kr"   // kr:<category> asks the new title
@@ -98,6 +100,7 @@ var arity = map[action]int{
 	actSupplierOpen: 1, actSupplierMarkup: 2, actSupplierLead: 2, actSupplierDelete: 2,
 	actCatOpen: 1, actCatNew: 1, actCatRename: 1, actCatAddWord: 1, actCatRemoveWord: 1, actCatDelete: 1,
 	actCatPick: 2, actCatApply: 1, actCatCancel: 1,
+	actReport: 1, actReportExcel: 2,
 	actGroupsNext: 1, actGroupsCreate: 1, actGroupsDoubts: 2, actGroupAccept: 2, actGroupPick: 3, actGroupMixed: 2,
 	actMatchStart: 1, actMatchPick: 3, actMatchMakes: 1, actMatchMake: 2, actMatchBack: 1,
 	actMatchSkip: 2, actMatchStop: 1, actCarDelete: 1, actMatchAdd: 2,

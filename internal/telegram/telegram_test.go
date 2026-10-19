@@ -209,3 +209,24 @@ func TestUploadPhotoSendsAFileAndReturnsItsID(t *testing.T) {
 	assert.Equal(t, "HTML", fields["parse_mode"])
 	assert.JSONEq(t, `{"inline_keyboard":[[{"text":"+","callback_data":"a:1"}]]}`, fields["reply_markup"])
 }
+
+func TestSendDocument(t *testing.T) {
+	var (
+		name string
+		file []byte
+		cap  string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseMultipartForm(1<<20))
+		f, h, err := r.FormFile("document")
+		require.NoError(t, err)
+		file, _ = io.ReadAll(f)
+		name, cap = h.Filename, r.FormValue("caption")
+		_, _ = io.WriteString(w, `{"ok":true,"result":{"message_id":1,"chat":{"id":5}}}`)
+	}))
+	t.Cleanup(srv.Close)
+	require.NoError(t, NewWithBaseURL(srv.URL, token).SendDocument(context.Background(), 5, "zvit.xlsx", []byte("XLSX"), "Звіт"))
+	assert.Equal(t, "zvit.xlsx", name)
+	assert.Equal(t, []byte("XLSX"), file)
+	assert.Equal(t, "Звіт", cap)
+}

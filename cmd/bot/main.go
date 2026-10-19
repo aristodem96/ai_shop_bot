@@ -45,6 +45,7 @@ import (
 	"github.com/aristodem96/ai_shop_bot/internal/partnames"
 	"github.com/aristodem96/ai_shop_bot/internal/payment/monobank"
 	"github.com/aristodem96/ai_shop_bot/internal/photos"
+	"github.com/aristodem96/ai_shop_bot/internal/reports"
 	"github.com/aristodem96/ai_shop_bot/internal/service"
 	"github.com/aristodem96/ai_shop_bot/internal/storage/postgres"
 	redisstore "github.com/aristodem96/ai_shop_bot/internal/storage/redis"
@@ -63,6 +64,7 @@ func main() {
 type app struct {
 	cfg  *config.Bot
 	log  *slog.Logger
+	loc  *time.Location // the shop's days: reminders' hours, reports' periods
 	pool *pgxpool.Pool
 	rdb  *goredis.Client
 	tg   *telegram.Client
@@ -134,7 +136,7 @@ func run() error {
 	defer func() { _ = rdb.Close() }()
 
 	group, gctx := errgroup.WithContext(ctx)
-	a := &app{cfg: cfg, log: log, pool: pool, rdb: rdb, startup: startup, group: group, ctx: gctx,
+	a := &app{cfg: cfg, log: log, loc: loc, pool: pool, rdb: rdb, startup: startup, group: group, ctx: gctx,
 		tg: telegram.NewWithBaseURL(cfg.TelegramAPIURL, cfg.TelegramToken), mux: http.NewServeMux()}
 
 	a.wireShop()
@@ -374,6 +376,7 @@ func (a *app) wireManagers() error {
 	}
 	cats := categories.New(postgres.NewCategoryRepository(a.pool))
 	a.bot.UseCategories(cats)
+	a.bot.UseReports(reports.New(postgres.NewReportRepository(a.pool), a.loc), a.tg)
 	// Suppliers' groups are filed by the model where it is sure, by the
 	// owner where it is not; without a model, by the owner alone.
 	var matcher grouping.Matcher

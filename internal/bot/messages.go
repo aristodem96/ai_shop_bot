@@ -33,6 +33,7 @@ const cmdAdmin = "/admin"
 // adminCommands are the managers' chat's own.
 var adminCommands = []telegram.Command{
 	{Command: "admin", Description: "Що вміє бот для менеджерів"},
+	{Command: "report", Description: "Звіт про продажі за період"},
 	{Command: "suppliers", Description: "Постачальники: націнка, термін"},
 	{Command: "categories", Description: "Категорії та їхні слова"},
 	{Command: "groups", Description: "Групи постачальників без категорії"},
@@ -70,6 +71,8 @@ const msgAdminHelp = `<b>Для менеджерів</b>
 Якщо авто немає в довіднику — там же «➕ Додати в довідник».
 <code>/cars</code> — підтверджені відповідності, з кнопкою видалення.
 <code>/car Peugeot 308 T7 2008-2013 1.6 HDi дизель</code> — додати авто в довідник словами.
+
+📊 <b>Звіт</b> — <code>/report</code>: виручка, замовлення, що продано, повернення й запити під замовлення за день, тиждень, місяць або свої дати; кнопкою «📥 Excel» — файлом.
 
 🛒 <b>Замовлення</b> — оплачені приходять сюди самі, з кнопками «Підтвердити», «Відправлено» (або «Видано» для самовивозу), «Скасувати».
 

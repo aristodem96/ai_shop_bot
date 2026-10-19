@@ -80,6 +80,10 @@ the buttons. Most of this README is about that boundary.
 - **Part requests** — a buyer's request for a part on order arrives with
   *Found / Not found*; the manager answers with the price and the days, and
   the bot does the rest.
+- **Sales reports** — `/report`: revenue, orders, average check, pickup
+  against delivery, refunds, best sellers, sales by category and part
+  requests for today, yesterday, this or last week or month, or any dates;
+  "📥 Excel" sends it as a workbook. Days are the shop's, in its time zone.
 - **Price lists from the chat** — send the supplier's Excel or CSV, read the
   report of the dry run, press *Apply*. Unknown vehicle names are mapped and
   unrecognised products filed in the same chat.

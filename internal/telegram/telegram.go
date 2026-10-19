@@ -242,6 +242,39 @@ func (c *Client) SendPhoto(ctx context.Context, chatID int64, photoURL, captionH
 	return c.call(ctx, "sendPhoto", params, nil)
 }
 
+// SendDocument sends a file, such as a spreadsheet, with a caption.
+func (c *Client) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, captionHTML string) error {
+	body, contentType, err := multipartBody(map[string]string{
+		"chat_id": strconv.FormatInt(chatID, 10), "caption": captionHTML, "parse_mode": "HTML",
+	}, "document", filename, data)
+	if err != nil {
+		return err
+	}
+	return c.send(ctx, "sendDocument", body, contentType, nil)
+}
+
+// multipartBody is a form with fields and one file.
+func multipartBody(fields map[string]string, fileField, filename string, data []byte) ([]byte, string, error) {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	for k, v := range fields {
+		if err := w.WriteField(k, v); err != nil {
+			return nil, "", fmt.Errorf("telegram: write %s: %w", k, err)
+		}
+	}
+	fw, err := w.CreateFormFile(fileField, filename)
+	if err != nil {
+		return nil, "", fmt.Errorf("telegram: attach %s: %w", fileField, err)
+	}
+	if _, err := fw.Write(data); err != nil {
+		return nil, "", fmt.Errorf("telegram: attach %s: %w", fileField, err)
+	}
+	if err := w.Close(); err != nil {
+		return nil, "", fmt.Errorf("telegram: close upload: %w", err)
+	}
+	return buf.Bytes(), w.FormDataContentType(), nil
+}
+
 // UploadPhoto sends a photo from its bytes and returns the file_id Telegram
 // keeps it under: sent again by that id, as SendPhoto's photo, it is not
 // uploaded twice.
