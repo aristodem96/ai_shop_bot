@@ -37,13 +37,10 @@ func isCSV(path string) bool {
 // whose delimiter the profile leaves open is read with each candidate until
 // one gives the header row: a wrong delimiter leaves each line one cell, so
 // the header is found with the right one only.
-func readAndParse(path string, p *Profile) (*Parsed, error) {
+func readAndParse(path string, p *Supplier) (*Parsed, error) {
 	delims := []rune{0}
 	if isCSV(path) {
 		delims = csvDelimiters
-		if p.CSVDelimiter != "" {
-			delims = []rune{p.delimiter()}
-		}
 	}
 	var best *HeaderError
 	for _, d := range delims {

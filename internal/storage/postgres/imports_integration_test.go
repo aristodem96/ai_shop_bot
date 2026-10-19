@@ -16,15 +16,20 @@ import (
 
 // The example in docs/import is the test input, so the file a reader of the
 // README tries is the file CI proves works.
-const (
-	exampleProfile = "../../../profiles/demo-stock.json"
-	exampleFile    = "../../../docs/import/example-price.csv"
-)
+const exampleFile = "../../../docs/import/example-price.csv"
+
+// exampleSupplier reads the example file the way the managers' chat would
+// set it up: the columns Detect finds in it.
+func exampleSupplier() *importer.Supplier {
+	return &importer.Supplier{Name: "Demo stock", Source: "demo-stock", Columns: importer.Columns{
+		ExternalID: "Код", PartNumber: "Артикул", Brand: "Бренд", Name: "Найменування", Category: "Група",
+		Price: "Ціна, грн", Stock: "Залишок", Vehicle: "Авто", Years: "Роки", Position: "Розташування",
+	}}
+}
 
 func importExample(t *testing.T, file string, dryRun bool) (*importer.Report, importer.Result) {
 	t.Helper()
-	p, err := importer.LoadProfile(exampleProfile)
-	require.NoError(t, err)
+	p := exampleSupplier()
 	rep, res, err := importer.Run(context.Background(), NewImportRepository(testPool), p, file, importer.Options{DryRun: dryRun})
 	require.NoError(t, err)
 	return rep, res
@@ -78,15 +83,13 @@ func TestImportExample(t *testing.T) {
 	assert.False(t, pads.OnOrder, "a file with a stock column is the shop's own shelf")
 	octavia := vehicleByCode(t, "octavia-a7-20tdi")
 	assert.True(t, pads.FitsVehicle(octavia), "\"Skoda Octavia A7\" covers every engine of it")
-	assert.True(t, pads.FitsVehicle(vehicleByCode(t, "golf-7-16tdi")), "\"VW Golf VII\" goes through the profile's map")
+	assert.True(t, pads.FitsVehicle(vehicleByCode(t, "golf-7-16tdi")), "\"VW Golf VII\" is the Volkswagen Golf VII")
 	assert.Equal(t, "передня вісь", pads.FitNotes[octavia])
 
 	assert.True(t, imported(t, "10005").FitsVehicle(vehicleByCode(t, "logan-2-16")), "a bare model name is enough when unique")
 	assert.Equal(t, "Rivne Gum", imported(t, "10005").Brand)
 	assert.True(t, imported(t, "10003").FitsVehicle(vehicleByCode(t, "corolla-e210-16")), "2019- overlaps a car made from 2019")
-	brush := imported(t, "10008")
-	assert.True(t, brush.Universal)
-	assert.Equal(t, categoryBySlug(t, "mirrors-glass"), brush.CategoryID, "the profile's rule")
+	assert.Equal(t, categoryBySlug(t, "mirrors-glass"), imported(t, "10008").CategoryID, "«щітка скл» in the tree")
 	assert.Equal(t, categoryBySlug(t, "brake-pads"), pads.CategoryID, "the tree's keywords")
 	assert.Equal(t, categoryBySlug(t, "arms"), imported(t, "10005").CategoryID)
 
@@ -181,8 +184,7 @@ func TestImportStopsOnTruncatedFile(t *testing.T) {
 	truncated := filepath.Join(t.TempDir(), "price.csv")
 	require.NoError(t, os.WriteFile(truncated, []byte(strings.Join(lines[:6], "\n")), 0o600)) // the header and two offers
 
-	p, err := importer.LoadProfile(exampleProfile)
-	require.NoError(t, err)
+	p := exampleSupplier()
 	repo := NewImportRepository(testPool)
 	_, res, err := importer.Run(ctx, repo, p, truncated, importer.Options{})
 	var limit *importer.DeactivationError
@@ -239,4 +241,38 @@ func TestVehicleAliasMakesAndTakesFitments(t *testing.T) {
 
 	_, err = repo.RemoveVehicleAlias(ctx, aliases[0].ID)
 	require.ErrorIs(t, err, importer.ErrNoAlias)
+}
+
+func TestSuppliers(t *testing.T) {
+	skipShort(t)
+	ctx := context.Background()
+	repo := NewImportRepository(testPool)
+	svc := importer.NewService(importer.Deps{Prices: repo, Suppliers: repo})
+	t.Cleanup(func() { _, _ = testPool.Exec(ctx, `DELETE FROM suppliers`) })
+
+	in, err := svc.Inspect(ctx, exampleFile)
+	require.NoError(t, err)
+	assert.Nil(t, in.Supplier, "a file nobody has sent before")
+	s := &importer.Supplier{Name: " Demo   stock ", Columns: in.Detected}
+	require.NoError(t, svc.SaveSupplier(ctx, s))
+	assert.Equal(t, "Demo stock", s.Name)
+	assert.Equal(t, "demo-stock", s.Source, "the key the example's products are matched on")
+
+	in, err = svc.Inspect(ctx, exampleFile)
+	require.NoError(t, err)
+	require.NotNil(t, in.Supplier, "the next file is recognised")
+	assert.Equal(t, s.ID, in.Supplier.ID)
+
+	s.Name, s.MarkupPercent = "Склад", 15
+	require.NoError(t, svc.SaveSupplier(ctx, s))
+	got, err := svc.Supplier(ctx, s.ID, "")
+	require.NoError(t, err)
+	assert.Equal(t, "Склад", got.Name)
+	assert.Equal(t, "demo-stock", got.Source, "renaming keeps the key")
+	assert.InDelta(t, 15.0, got.MarkupPercent, 0.001)
+
+	require.ErrorIs(t, svc.SaveSupplier(ctx, &importer.Supplier{Name: "склад", Columns: in.Detected}), importer.ErrSupplierTaken)
+	require.NoError(t, svc.DeleteSupplier(ctx, s.ID))
+	_, err = svc.Supplier(ctx, s.ID, "")
+	require.ErrorIs(t, err, importer.ErrNoSupplier)
 }

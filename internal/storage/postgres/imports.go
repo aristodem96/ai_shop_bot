@@ -93,9 +93,6 @@ var errDryRun = errors.New("dry run")
 func (r *ImportRepository) Apply(ctx context.Context, b *importer.Batch, dryRun bool) (importer.Result, error) {
 	var res importer.Result
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
-		if err := createCategories(ctx, tx, b.CreateCategories); err != nil {
-			return err
-		}
 		if err := createBrands(ctx, tx, b.NewBrands); err != nil {
 			return err
 		}
@@ -223,18 +220,6 @@ func (r *ImportRepository) Apply(ctx context.Context, b *importer.Batch, dryRun 
 		return importer.Result{}, err
 	}
 	return res, nil
-}
-
-func createCategories(ctx context.Context, tx pgx.Tx, cats map[string]string) error {
-	for slug, title := range cats {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO categories (slug, title, position)
-			VALUES ($1, $2, (SELECT coalesce(max(position), 0) + 1 FROM categories))
-			ON CONFLICT (slug) DO NOTHING`, slug, title); err != nil {
-			return fmt.Errorf("postgres: create category %s: %w", slug, err)
-		}
-	}
-	return nil
 }
 
 func createBrands(ctx context.Context, tx pgx.Tx, brands []importer.NewBrand) error {

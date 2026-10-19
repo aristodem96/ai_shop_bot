@@ -18,25 +18,77 @@ const managers = int64(-100500)
 
 // importRun is one call the bot made to the importer.
 type importRun struct {
-	profile string // "" for the vehicle directory
-	opts    importer.Options
-	file    string // the file's contents at the time of the call
+	supplier string // "" for the vehicle directory
+	opts     importer.Options
+	file     string // the file's contents at the time of the call
 }
 
-// fakeImports reports what it is told to and records each run.
+// fakeImports reports what it is told to and records each run. A file is
+// recognised as the first supplier's when there is one; otherwise its
+// header is header.
 type fakeImports struct {
-	profiles []string
-	runs     []importRun
-	err      error // returned by Prices
+	suppliers []importer.Supplier
+	header    []string
+	runs      []importRun
+	err       error // returned by Prices
 	// unmatched replaces the report's unknown vehicle names when set.
 	unmatched []importer.Count
 }
 
-func (f *fakeImports) Profiles() ([]string, error) { return f.profiles, nil }
+func (f *fakeImports) Suppliers(context.Context) ([]importer.Supplier, error) {
+	return f.suppliers, nil
+}
 
-func (f *fakeImports) Prices(_ context.Context, profile, path string, opts importer.Options) (*importer.Report, importer.Result, error) {
+func (f *fakeImports) Supplier(_ context.Context, id int64, _ string) (*importer.Supplier, error) {
+	for i := range f.suppliers {
+		if f.suppliers[i].ID == id {
+			s := f.suppliers[i]
+			return &s, nil
+		}
+	}
+	return nil, importer.ErrNoSupplier
+}
+
+func (f *fakeImports) Inspect(context.Context, string) (*importer.Inspection, error) {
+	if len(f.suppliers) > 0 {
+		s := f.suppliers[0]
+		return &importer.Inspection{Supplier: &s}, nil
+	}
+	return &importer.Inspection{Header: f.header, Detected: importer.Detect(f.header)}, nil
+}
+
+func (f *fakeImports) SaveSupplier(_ context.Context, s *importer.Supplier) error {
+	for i := range f.suppliers {
+		if f.suppliers[i].ID == s.ID {
+			f.suppliers[i] = *s
+			return nil
+		}
+		if f.suppliers[i].Name == s.Name {
+			return importer.ErrSupplierTaken
+		}
+	}
+	s.ID = int64(len(f.suppliers) + 1)
+	f.suppliers = append(f.suppliers, *s)
+	return nil
+}
+
+func (f *fakeImports) DeleteSupplier(_ context.Context, id int64) error {
+	for i := range f.suppliers {
+		if f.suppliers[i].ID == id {
+			f.suppliers = append(f.suppliers[:i], f.suppliers[i+1:]...)
+			return nil
+		}
+	}
+	return nil
+}
+
+func (f *fakeImports) Prices(ctx context.Context, id int64, path string, opts importer.Options) (*importer.Report, importer.Result, error) {
 	data, _ := os.ReadFile(path)
-	f.runs = append(f.runs, importRun{profile: profile, opts: opts, file: string(data)})
+	name := ""
+	if s, err := f.Supplier(ctx, id, ""); err == nil {
+		name = s.Name
+	}
+	f.runs = append(f.runs, importRun{supplier: name, opts: opts, file: string(data)})
 	rep := &importer.Report{File: filepath.Base(path), Rows: 81654, Offers: 80942, Skipped: 1,
 		Problems:          []importer.Problem{{Row: importer.RowRef{Sheet: "Chery", Line: 9}, Reason: "немає назви"}},
 		NewBrands:         []string{"Mogen", "<KYB>"},
@@ -59,10 +111,15 @@ func (f *fakeImports) Vehicles(_ context.Context, path string, dryRun bool) ([]i
 	return nil, importer.VehicleResult{Inserted: 197, Updated: 12}, nil
 }
 
-func newImportBot(t *testing.T, profiles ...string) (testBot, *fakeImports) {
+// newImportBot is a managers' chat with the named suppliers.
+func newImportBot(t *testing.T, suppliers ...string) (testBot, *fakeImports) {
 	t.Helper()
 	b := newTestBot()
-	imports := &fakeImports{profiles: profiles}
+	imports := &fakeImports{}
+	for i, name := range suppliers {
+		imports.suppliers = append(imports.suppliers, importer.Supplier{ID: int64(i + 1), Name: name,
+			Columns: importer.Columns{Name: "Назва", Price: "Ціна"}})
+	}
 	files := &fakeFiles{data: map[string][]byte{"doc": []byte("Назва;Ціна\nКолодки;1049\n")}}
 	require.NoError(t, b.UseImports(imports, files, filepath.Join(t.TempDir(), "imports"), managers))
 	return b, imports
@@ -89,14 +146,14 @@ func TestImportPreviewThenApply(t *testing.T) {
 	ctx := context.Background()
 
 	b.Handle(ctx, upload(managers, "price.xlsx", ""))
-	require.Len(t, imports.runs, 1, "one profile: no need to ask which")
-	assert.Equal(t, importRun{profile: "chinaavto", opts: importer.Options{DryRun: true}, file: "Назва;Ціна\nКолодки;1049\n"},
+	require.Len(t, imports.runs, 1, "a known supplier's file is checked at once, no caption needed")
+	assert.Equal(t, importRun{supplier: "chinaavto", opts: importer.Options{DryRun: true}, file: "Назва;Ціна\nКолодки;1049\n"},
 		imports.runs[0], "the file is checked first, as downloaded")
 
 	preview := b.tg.last("sendMessage")
 	assert.Equal(t, managers, preview.chat)
 	for _, want := range []string{
-		"price.xlsx", "профіль «chinaavto»", "Рядків: 81 654", "Chery, рядок 9: немає назви",
+		"price.xlsx", "постачальник «chinaavto»", "Рядків: 81 654", "Chery, рядок 9: немає назви",
 		"&lt;KYB&gt;", "Lada Priora (3)", "Не впізнав категорію: 2", "Ящик під магнітолу, Бігунок", "➕ 12 нових", "✏️ 80 930 оновлено", "каталог ще не змінено",
 	} {
 		assert.Contains(t, preview.text, want)
@@ -119,39 +176,89 @@ func TestImportPreviewThenApply(t *testing.T) {
 	assert.Empty(t, importFiles(t, b), "the file is deleted once applied")
 }
 
-func TestImportAsksWhichProfile(t *testing.T) {
-	b, imports := newImportBot(t, "chinaavto", "demo-stock")
+func TestNewFileSetsUpASupplier(t *testing.T) {
+	b, imports := newImportBot(t)
+	imports.header = []string{"Код", "Номенклатура", "Производитель", "Цена"}
 	ctx := context.Background()
 
-	b.Handle(ctx, upload(managers, "cars.csv", ""))
-	assert.Empty(t, imports.runs, "with two profiles the bot does not guess")
-	ask := b.tg.last("sendMessage")
-	assert.Equal(t, msgImportChoose, ask.text)
-	assert.Equal(t, []string{
-		encode(actImportProfile, 1, 0), encode(actImportProfile, 1, 1), encode(actImportProfile, 1, 2), encode(actImportCancel, 1),
-	}, callbacks(ask.markup))
+	b.Handle(ctx, upload(managers, "export.xlsx", ""))
+	assert.Empty(t, imports.runs, "a new file is set up before it is checked")
+	setup := b.tg.last("sendMessage")
+	for _, want := range []string{"новий для мене файл", "✅ Назва: «Номенклатура»", "✅ Ціна: «Цена»",
+		"✅ Код товару: «Код»", "✅ Бренд: «Производитель»", "▫️ Залишок: —"} {
+		assert.Contains(t, setup.text, want)
+	}
 
-	b.Handle(ctx, pressIn(managers, encode(actImportProfile, 1, 2)))
+	// The brand is in fact something else: no such column.
+	b.Handle(ctx, pressIn(managers, encode(actSetupField, 1, 4)))
+	assert.Contains(t, callbacks(b.tg.last("editMessageText").markup), encode(actSetupColumn, 1, 4, 2))
+	b.Handle(ctx, pressIn(managers, encode(actSetupColumn, 1, 4, -1)))
+	assert.Contains(t, b.tg.last("editMessageText").text, "▫️ Бренд: —")
+
+	b.Handle(ctx, pressIn(managers, encode(actSetupNext, 1)))
+	assert.Contains(t, b.tg.last("editMessageText").text, "немає колонки із залишками", "no stock: asks the delivery time")
+	b.Handle(ctx, pressIn(managers, encode(actSetupLead, 1, 2)))
+	assert.Contains(t, b.tg.last("editMessageText").text, "націнку")
+	b.Handle(ctx, pressIn(managers, encode(actSetupMarkup, 1, 20)))
+	assert.IsType(t, &telegram.ForceReply{}, b.tg.last("sendMessage").markup, "the name is asked by reply")
+
+	b.Handle(ctx, reply(managers, "Наша 1С"))
+	require.Len(t, imports.suppliers, 1)
+	s := imports.suppliers[0]
+	assert.Equal(t, "Наша 1С", s.Name)
+	assert.Equal(t, importer.Columns{ExternalID: "Код", Name: "Номенклатура", Price: "Цена"}, s.Columns)
+	assert.Equal(t, 2, *s.LeadDays)
+	assert.InDelta(t, 20.0, s.MarkupPercent, 0.001)
+	require.Len(t, imports.runs, 1, "and the file is checked as its")
+	assert.Equal(t, "Наша 1С", imports.runs[0].supplier)
+}
+
+func TestChangedFileUpdatesTheKnownSupplier(t *testing.T) {
+	b, imports := newImportBot(t)
+	imports.header = []string{"Артикул", "Назва", "Ціна", "Залишок"}
+	imports.suppliers = []importer.Supplier{{ID: 7, Name: "China Avto", Source: "china-avto",
+		Columns: importer.Columns{PartNumber: "Кат. номер", Name: "Назва", Price: "Ціна"}}}
+	ctx := context.Background()
+
+	// The supplier renamed a column: the file no longer reads as its.
+	in := imports.suppliers
+	imports.suppliers = nil
+	b.Handle(ctx, upload(managers, "price.xlsx", ""))
+	imports.suppliers = in
+	b.Handle(ctx, pressIn(managers, encode(actSetupNext, 1)))
+	assert.Contains(t, b.tg.last("editMessageText").text, "націнку", "a stock column: no delivery time to ask")
+	b.Handle(ctx, pressIn(managers, encode(actSetupMarkup, 1, 0)))
+	assert.Contains(t, callbacks(b.tg.last("editMessageText").markup), encode(actSetupSupplier, 1, 7))
+	b.Handle(ctx, pressIn(managers, encode(actSetupSupplier, 1, 7)))
+
+	require.Len(t, imports.suppliers, 1, "not a second supplier")
+	assert.Equal(t, "Артикул", imports.suppliers[0].Columns.PartNumber)
+	assert.Equal(t, "china-avto", imports.suppliers[0].Source, "its products are matched by the same key")
+	assert.Equal(t, "China Avto", imports.runs[0].supplier)
+}
+
+func TestVehicleDirectoryByCaption(t *testing.T) {
+	b, imports := newImportBot(t, "chinaavto")
+	b.Handle(context.Background(), upload(managers, "cars.csv", "Авто"))
 	require.Len(t, imports.runs, 1)
-	assert.Empty(t, imports.runs[0].profile, "the last button is the vehicle directory")
+	assert.Empty(t, imports.runs[0].supplier)
 	assert.Contains(t, b.tg.last("sendMessage").text, "➕ 197 нових авто")
 }
 
-func TestImportCaptionPicksTarget(t *testing.T) {
-	b, imports := newImportBot(t, "chinaavto", "demo-stock")
+func TestSuppliersList(t *testing.T) {
+	b, imports := newImportBot(t, "China Avto")
 	ctx := context.Background()
 
-	b.Handle(ctx, upload(managers, "price.csv", " Demo-Stock "))
-	require.Len(t, imports.runs, 1)
-	assert.Equal(t, "demo-stock", imports.runs[0].profile)
+	b.Handle(ctx, say(managers, "/suppliers"))
+	assert.Contains(t, b.tg.last("sendMessage").text, "<b>China Avto</b> — залишки з файлу")
+	b.Handle(ctx, pressIn(managers, encode(actSupplierOpen, 1)))
+	assert.Contains(t, b.tg.last("editMessageText").text, "• Назва — «Назва»")
+	b.Handle(ctx, pressIn(managers, encode(actSupplierMarkup, 1, 15)))
+	assert.InDelta(t, 15.0, imports.suppliers[0].MarkupPercent, 0.001)
+	assert.Contains(t, b.tg.last("editMessageText").text, "націнка 15%")
 
-	b.Handle(ctx, upload(managers, "cars.csv", "авто"))
-	require.Len(t, imports.runs, 2)
-	assert.Empty(t, imports.runs[1].profile)
-
-	b.Handle(ctx, upload(managers, "price.csv", "постачальник"))
-	assert.Len(t, imports.runs, 2)
-	assert.Contains(t, b.tg.last("sendMessage").text, "chinaavto, demo-stock, авто", "an unknown name lists the known ones")
+	b.Handle(ctx, pressIn(managers, encode(actSupplierDelete, 1, 1)))
+	assert.Empty(t, imports.suppliers)
 }
 
 func TestImportStoppedByLimitOffersForce(t *testing.T) {

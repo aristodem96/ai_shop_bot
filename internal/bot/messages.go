@@ -33,6 +33,7 @@ const cmdAdmin = "/admin"
 // adminCommands are the managers' chat's own.
 var adminCommands = []telegram.Command{
 	{Command: "admin", Description: "Що вміє бот для менеджерів"},
+	{Command: "suppliers", Description: "Постачальники: націнка, термін"},
 	{Command: "categories", Description: "Категорії та їхні слова"},
 	{Command: "word", Description: "Віднести слово з назв товарів до категорії"},
 	{Command: "cars", Description: "Відповідності назв авто постачальників"},
@@ -52,7 +53,8 @@ func AdminMenu(adminChat int64) []telegram.Command {
 
 const msgAdminHelp = `<b>Для менеджерів</b>
 
-📄 <b>Прайс постачальника</b> — надішліть сюди файл .xlsx або .csv. У підписі — назва профілю постачальника (якщо профіль один, підпис не потрібен). Я перевірю файл, покажу звіт і кнопку «Застосувати».
+📄 <b>Прайс</b> (вивантаження з 1С або файл постачальника) — надішліть сюди .xlsx або .csv, підпис не потрібен. Перший файл постачальника я покажу вам: які колонки що означають; ви перевірите й дасте постачальнику назву. Наступні його файли я впізнаю сам. Перед змінами в каталозі — звіт і кнопка «Застосувати».
+<code>/suppliers</code> — постачальники, їхні націнки й терміни доставки.
 
 🚗 <b>Довідник авто</b> — файл .csv з підписом «авто».
 
@@ -139,14 +141,12 @@ const (
 
 // Catalogue imports, in the managers' chat.
 const (
-	msgImportBadType        = "Я завантажую прайси у форматі .xlsx або .csv. Файл .xls пересохраніть в Excel як .xlsx."
-	msgImportTooBig         = "Файл більший за 20 МБ — стільки Telegram дозволяє боту завантажити. Розбийте прайс на частини або збережіть як .csv."
-	msgImportUnknownProfile = "Не знаю профілю «%s». Напишіть у підписі до файлу один з: %s."
-	msgImportChoose         = "Що це за файл?"
-	msgImportChecking       = "⏳ Перевіряю <b>%s</b> як %s…"
-	msgImportExpired        = "Файл застарів — надішліть його ще раз."
-	msgImportGone           = "Цей файл уже застосовано або скасовано."
-	msgImportCancelled      = "Скасовано, каталог не змінено."
+	msgImportBadType   = "Я завантажую прайси у форматі .xlsx або .csv. Файл .xls пересохраніть в Excel як .xlsx."
+	msgImportTooBig    = "Файл більший за 20 МБ — стільки Telegram дозволяє боту завантажити. Розбийте прайс на частини або збережіть як .csv."
+	msgImportChecking  = "⏳ Файл постачальника «%s» — перевіряю…"
+	msgImportExpired   = "Файл застарів — надішліть його ще раз."
+	msgImportGone      = "Цей файл уже застосовано або скасовано."
+	msgImportCancelled = "Скасовано, каталог не змінено."
 )
 
 // Mapping suppliers' vehicle names, in the managers' chat.

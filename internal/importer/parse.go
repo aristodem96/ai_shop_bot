@@ -77,7 +77,7 @@ func (c columnIndex) get(row []string, header string) string {
 // Parse turns sheets into offers. It never fails on a bad row: the row is
 // reported and the rest of the file still loads, because one typo in a price
 // list of eighty thousand rows must not block the other 79 999.
-func Parse(sheets []Sheet, p *Profile) (*Parsed, error) {
+func Parse(sheets []Sheet, p *Supplier) (*Parsed, error) {
 	out := &Parsed{}
 	byKey := make(map[string]*Offer)
 	headers := 0
@@ -199,7 +199,7 @@ func (c Columns) all() []string {
 	return out
 }
 
-func parseRow(row []string, idx columnIndex, p *Profile) (*Offer, error) {
+func parseRow(row []string, idx columnIndex, p *Supplier) (*Offer, error) {
 	c := p.Columns
 	o := &Offer{
 		PartNumber: idx.get(row, c.PartNumber),

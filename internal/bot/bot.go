@@ -257,6 +257,18 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 		if b.requests != nil && b.handleQuoteReply(ctx, m) {
 			return
 		}
+		if _, ok := commandArg(m.Text, cmdSuppliers); ok && b.imports != nil {
+			text, kb, err := b.suppliersList(ctx)
+			if err != nil {
+				b.fail(ctx, m.Chat.ID, "list suppliers", err)
+				return
+			}
+			b.send(ctx, m.Chat.ID, text, kb)
+			return
+		}
+		if b.imports != nil && b.handleImportReply(ctx, m) {
+			return
+		}
 		if b.matching != nil && b.handleCarText(ctx, m) {
 			return
 		}
@@ -407,13 +419,21 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 			return "", errBadCallback
 		}
 		return b.routeMatch(ctx, cc, cb)
-	case actImportProfile, actImportApply, actImportCancel:
+	case actSetupField, actSetupColumn, actSetupNext, actSetupLead, actSetupMarkup, actSetupSupplier:
+		if b.imports == nil {
+			return "", errBadCallback
+		}
+		return b.routeSetup(ctx, cc, cb)
+	case actSupplierOpen, actSupplierMarkup, actSupplierLead, actSupplierDelete:
+		if b.imports == nil {
+			return "", errBadCallback
+		}
+		return b.routeSuppliers(ctx, cc, cb)
+	case actImportApply, actImportCancel:
 		if b.imports == nil {
 			return "", errBadCallback
 		}
 		switch cb.act {
-		case actImportProfile:
-			return b.chooseImport(ctx, cc, a[0], a[1])
 		case actImportApply:
 			return b.applyImport(ctx, cc, a[0], a[1])
 		default:

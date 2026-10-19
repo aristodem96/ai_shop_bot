@@ -110,10 +110,9 @@ func (s *Service) SuggestVehicles(ctx context.Context, unknown []UnknownVehicle)
 	return out, nil
 }
 
-// AddVehicleAlias stores a mapping the owner confirmed, for the supplier of
-// the named profile.
-func (s *Service) AddVehicleAlias(ctx context.Context, profile, name string, modelIDs []int64) error {
-	p, err := s.profile(profile)
+// AddVehicleAlias stores a mapping the owner confirmed, for the supplier.
+func (s *Service) AddVehicleAlias(ctx context.Context, supplierID int64, name string, modelIDs []int64) error {
+	p, err := s.Supplier(ctx, supplierID, "")
 	if err != nil {
 		return err
 	}

@@ -17,8 +17,12 @@ import (
 
 // Imports runs catalogue imports for the managers' chat.
 type Imports interface {
-	Profiles() ([]string, error)
-	Prices(ctx context.Context, profile, path string, opts importer.Options) (*importer.Report, importer.Result, error)
+	Suppliers(ctx context.Context) ([]importer.Supplier, error)
+	Supplier(ctx context.Context, id int64, name string) (*importer.Supplier, error)
+	Inspect(ctx context.Context, path string) (*importer.Inspection, error)
+	SaveSupplier(ctx context.Context, s *importer.Supplier) error
+	DeleteSupplier(ctx context.Context, id int64) error
+	Prices(ctx context.Context, supplierID int64, path string, opts importer.Options) (*importer.Report, importer.Result, error)
 	Vehicles(ctx context.Context, path string, dryRun bool) ([]importer.Problem, importer.VehicleResult, error)
 }
 
@@ -28,31 +32,25 @@ const (
 	// importTTL is how long an uploaded file waits for "apply". A preview
 	// older than this describes a catalogue that may have moved on.
 	importTTL = time.Hour
-	// vehiclesCaption names the vehicle directory instead of a profile.
+	// vehiclesCaption marks a file as the vehicle directory.
 	vehiclesCaption = "авто"
 )
 
-// importJob is a file a manager uploaded: checked, waiting to be applied.
+// importJob is a file a manager uploaded: being set up as a new supplier's,
+// or checked and waiting to be applied.
 type importJob struct {
-	id      int64
-	chat    int64
-	dir     string // the job's own directory; removed with it
-	path    string
-	profile string // empty while not chosen
-	cars    bool   // the vehicle directory rather than a price list
-	created time.Time
+	id       int64
+	chat     int64
+	dir      string // the job's own directory; removed with it
+	path     string
+	supplier int64  // zero while the file's supplier is being set up
+	name     string // the supplier's, for the messages
+	cars     bool   // the vehicle directory rather than a price list
+	created  time.Time
+	// setup is a new supplier being made from this file.
+	setup *supplierSetup
 	// report is the last preview's, for mapping its unknown vehicles.
 	report *importer.Report
-}
-
-func (j *importJob) chosen() bool { return j.cars || j.profile != "" }
-
-// target names what the file is loaded as, for the messages.
-func (j *importJob) target() string {
-	if j.cars {
-		return "довідник авто"
-	}
-	return "профіль «" + j.profile + "»"
 }
 
 // UseImports lets the managers' chat load price lists and the vehicle
@@ -72,7 +70,8 @@ func (b *Bot) UseImports(imports Imports, files Files, dir string, adminChat int
 		b.log.Warn("could not clear old uploads", slog.Any("error", err))
 	}
 	b.imports, b.importFiles, b.importDir = imports, files, dir
-	b.importJobs = newJobs[importJob](importTTL, b.dialogs("dialog:import:", importTTL), nil, b.log)
+	b.importJobs = newJobs[importJob](importTTL, b.dialogs("dialog:import:", importTTL),
+		b.dialogs("dialog:import-reply:", importTTL), b.log)
 	b.importJobs.drop = func(j *importJob) { j.remove(b.log) }
 	return nil
 }
@@ -93,34 +92,31 @@ func (b *Bot) receiveImport(ctx context.Context, m *telegram.Message) {
 		return
 	}
 
-	profiles, err := b.imports.Profiles()
-	if err != nil {
-		b.fail(ctx, chat, "list import profiles", err)
-		return
-	}
-	job := &importJob{chat: chat, created: time.Now()}
-	caption := strings.ToLower(strings.TrimSpace(m.Caption))
-	switch {
-	case caption == vehiclesCaption:
-		job.cars = true
-	case slices.Contains(profiles, caption):
-		job.profile = caption
-	case caption != "":
-		b.send(ctx, chat, fmt.Sprintf(msgImportUnknownProfile, esc(m.Caption), esc(profileList(profiles))), nil)
-		return
-	case len(profiles) == 1:
-		job.profile = profiles[0]
-	}
-
+	job := &importJob{chat: chat, created: time.Now(),
+		cars: strings.EqualFold(strings.TrimSpace(m.Caption), vehiclesCaption)}
 	if err := b.saveUpload(ctx, job, doc); err != nil {
 		b.fail(ctx, chat, "download import file", err)
 		return
 	}
-	if !job.chosen() {
-		b.send(ctx, chat, msgImportChoose, chooseProfileKeyboard(job.id, profiles))
+	if job.cars {
+		b.previewImport(ctx, job)
 		return
 	}
-	b.previewImport(ctx, job)
+	in, err := b.imports.Inspect(ctx, job.path)
+	if err != nil {
+		b.importJobs.remove(ctx, job.id)
+		job.remove(b.log)
+		b.send(ctx, chat, "❌ "+esc(err.Error()), nil)
+		return
+	}
+	if in.Supplier != nil {
+		// A file this supplier has sent before: its columns, its terms.
+		job.supplier, job.name = in.Supplier.ID, in.Supplier.Name
+		b.send(ctx, chat, fmt.Sprintf(msgImportChecking, esc(job.name)), nil)
+		b.previewImport(ctx, job)
+		return
+	}
+	b.startSetup(ctx, job, in)
 }
 
 // saveUpload downloads the file into a directory of its own, under the name
@@ -160,7 +156,7 @@ func (b *Bot) previewImport(ctx context.Context, job *importJob) {
 			j.remove(b.log)
 		}
 	} else {
-		// The profile chosen and the report, for applying and mapping.
+		// The report, for applying and mapping.
 		b.importJobs.save(ctx, job)
 	}
 	b.send(ctx, job.chat, text, kb)
@@ -173,41 +169,11 @@ func (b *Bot) runImport(ctx context.Context, job *importJob, opts importer.Optio
 		problems, res, err := b.imports.Vehicles(ctx, job.path, opts.DryRun)
 		return vehicleImportView(job.id, name, problems, res, err, opts.DryRun)
 	}
-	rep, res, err := b.imports.Prices(ctx, job.profile, job.path, opts)
+	rep, res, err := b.imports.Prices(ctx, job.supplier, job.path, opts)
 	if opts.DryRun && rep != nil {
 		job.report = rep
 	}
-	return priceImportView(job.id, name, job.profile, rep, res, err, opts, b.matching != nil)
-}
-
-// chooseImport is the button that picks a profile for an uploaded file.
-// choice indexes the profiles as listed; one past the end is the vehicle
-// directory.
-func (b *Bot) chooseImport(ctx context.Context, cc callbackCtx, id, choice int64) (string, error) {
-	if !b.isAdmin(cc.chat) {
-		return "", errBadCallback
-	}
-	job, ok := b.importJobs.get(ctx, id)
-	if !ok {
-		return "", b.editText(ctx, cc, msgImportExpired, nil)
-	}
-	profiles, err := b.imports.Profiles()
-	if err != nil {
-		return "", err
-	}
-	switch {
-	case choice == int64(len(profiles)):
-		job.cars = true
-	case choice >= 0 && choice < int64(len(profiles)):
-		job.profile = profiles[choice]
-	default:
-		return "", errBadCallback
-	}
-	if err := b.editText(ctx, cc, fmt.Sprintf(msgImportChecking, esc(filepath.Base(job.path)), esc(job.target())), nil); err != nil {
-		b.log.WarnContext(ctx, "could not edit the profile choice", slog.Any("error", err))
-	}
-	b.previewImport(ctx, job)
-	return "", nil
+	return priceImportView(job.id, name, job.name, rep, res, err, opts, b.matching != nil)
 }
 
 // applyImport is the "apply" button under a preview. force is the second,
@@ -284,8 +250,4 @@ func removeStale(dir string, ttl time.Duration) error {
 		}
 	}
 	return nil
-}
-
-func profileList(profiles []string) string {
-	return strings.Join(append(slices.Clone(profiles), vehiclesCaption), ", ")
 }

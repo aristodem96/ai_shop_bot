@@ -25,20 +25,22 @@ func (d *carDraft) createdAt() time.Time      { return d.created }
 func (d *carDraft) setCreatedAt(t time.Time)  { d.created = t }
 
 type importJobJSON struct {
-	ID      int64            `json:"id"`
-	Chat    int64            `json:"chat"`
-	Dir     string           `json:"dir"`
-	Path    string           `json:"path"`
-	Profile string           `json:"profile"`
-	Cars    bool             `json:"cars"`
-	Created time.Time        `json:"created"`
-	Report  *importer.Report `json:"report,omitempty"`
+	ID       int64            `json:"id"`
+	Chat     int64            `json:"chat"`
+	Dir      string           `json:"dir"`
+	Path     string           `json:"path"`
+	Supplier int64            `json:"supplier,omitempty"`
+	Name     string           `json:"name,omitempty"`
+	Cars     bool             `json:"cars"`
+	Created  time.Time        `json:"created"`
+	Setup    *supplierSetup   `json:"setup,omitempty"`
+	Report   *importer.Report `json:"report,omitempty"`
 }
 
 // MarshalJSON writes the importJob for Redis.
 func (j *importJob) MarshalJSON() ([]byte, error) {
-	return json.Marshal(importJobJSON{ID: j.id, Chat: j.chat, Dir: j.dir, Path: j.path, Profile: j.profile,
-		Cars: j.cars, Created: j.created, Report: j.report})
+	return json.Marshal(importJobJSON{ID: j.id, Chat: j.chat, Dir: j.dir, Path: j.path, Supplier: j.supplier,
+		Name: j.name, Cars: j.cars, Created: j.created, Setup: j.setup, Report: j.report})
 }
 
 // UnmarshalJSON reads the importJob back.
@@ -47,8 +49,8 @@ func (j *importJob) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &x); err != nil {
 		return err
 	}
-	*j = importJob{id: x.ID, chat: x.Chat, dir: x.Dir, path: x.Path, profile: x.Profile, cars: x.Cars,
-		created: x.Created, report: x.Report}
+	*j = importJob{id: x.ID, chat: x.Chat, dir: x.Dir, path: x.Path, supplier: x.Supplier, name: x.Name,
+		cars: x.Cars, created: x.Created, setup: x.Setup, report: x.Report}
 	return nil
 }
 
@@ -62,7 +64,7 @@ type matchJobJSON struct {
 	ID        int64            `json:"id"`
 	ImportJob int64            `json:"import_job"`
 	Chat      int64            `json:"chat"`
-	Profile   string           `json:"profile"`
+	Supplier  int64            `json:"supplier"`
 	Items     []matchItemJSON  `json:"items"`
 	Idx       int              `json:"idx"`
 	Models    []importer.Model `json:"models"`
@@ -78,7 +80,7 @@ func (j *matchJob) MarshalJSON() ([]byte, error) {
 	for i, it := range j.items {
 		items[i] = matchItemJSON{UnknownVehicle: it.UnknownVehicle, Suggested: it.suggested, Note: it.note}
 	}
-	return json.Marshal(matchJobJSON{ID: j.id, ImportJob: j.importJob, Chat: j.chat, Profile: j.profile, Items: items,
+	return json.Marshal(matchJobJSON{ID: j.id, ImportJob: j.importJob, Chat: j.chat, Supplier: j.supplier, Items: items,
 		Idx: j.idx, Models: j.models, AIError: j.aiError, Matched: j.matched, Skipped: j.skipped, Created: j.created})
 }
 
@@ -92,7 +94,7 @@ func (j *matchJob) UnmarshalJSON(b []byte) error {
 	for i, it := range x.Items {
 		items[i] = matchItem{UnknownVehicle: it.UnknownVehicle, suggested: it.Suggested, note: it.Note}
 	}
-	*j = matchJob{id: x.ID, importJob: x.ImportJob, chat: x.Chat, profile: x.Profile, items: items, idx: x.Idx,
+	*j = matchJob{id: x.ID, importJob: x.ImportJob, chat: x.Chat, supplier: x.Supplier, items: items, idx: x.Idx,
 		models: x.Models, aiError: x.AIError, matched: x.Matched, skipped: x.Skipped, created: x.Created}
 	return nil
 }

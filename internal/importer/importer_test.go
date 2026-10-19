@@ -57,12 +57,11 @@ func TestParseYears(t *testing.T) {
 
 func days(n int) *int { return &n }
 
-func priceList() *Profile {
-	return &Profile{
-		Source: "supplier", SKUPrefix: "SP", LeadTimeDays: days(3), DefaultCategory: "other",
+func priceList() *Supplier {
+	return &Supplier{
+		Name: "Supplier", Source: "supplier", LeadDays: days(3),
 		Columns: Columns{ExternalID: "Посилання", PartNumber: "Артикул", Brand: "Виробник",
 			Name: "Назва", Price: "Ціна, грн", Vehicle: "Авто"},
-		Rules: []Rule{{Contains: []string{"колодк"}, Category: "brakes"}},
 	}
 }
 
@@ -150,7 +149,7 @@ func catalogue() *fakeStore {
 			{ID: 4, Make: "Chery", Model: "Tiggo 4"},
 		},
 		cats: []Category{
-			{Slug: "brakes", Title: "Гальма"},
+			{Slug: "brakes", Title: "Гальма", Keywords: []string{"колодк"}},
 			{Slug: "suspension", Title: "Підвіска", Keywords: []string{"амортиз"}},
 			{Slug: "body", Title: "Кузов"},
 			{Slug: "struts", Parent: "body", Title: "Упори", Keywords: []string{"амортизатор багаж"}},
@@ -161,7 +160,7 @@ func catalogue() *fakeStore {
 	}
 }
 
-func resolveSheet(t *testing.T, p *Profile, sh Sheet) *Batch {
+func resolveSheet(t *testing.T, p *Supplier, sh Sheet) *Batch {
 	t.Helper()
 	parsed, err := Parse([]Sheet{sh}, p)
 	require.NoError(t, err)
@@ -185,23 +184,13 @@ func TestResolve(t *testing.T) {
 	assert.Equal(t, 3, *pads.LeadDays, "a file without stock is a supplier's list: everything on order")
 	assert.Equal(t, []ModelFit{{ModelID: 1, Via: "skodaoctaviaa7"}, {ModelID: 2, Via: "volkswagengolfvii"}}, pads.Fits,
 		"each fitment remembers the name it came from")
-	assert.True(t, strings.HasPrefix(pads.SKU, "SP-"))
+	assert.True(t, strings.HasPrefix(pads.SKU, "SU-"))
 	assert.Equal(t, pads.SKU, sku(priceList(), "https://shop/1"), "the code is stable across runs")
 
 	assert.Equal(t, []Count{{Name: "Chery Tiggo", N: 1}}, b.Report.UnmatchedVehicles,
 		"a family name is not guessed into a model")
 	assert.Equal(t, 1, b.Report.WithoutFitment)
 	assert.Equal(t, 2, b.Report.Skipped)
-}
-
-func TestResolveVehicleMap(t *testing.T) {
-	p := priceList()
-	p.Vehicles = map[string][]string{"Chery Tiggo": {"Chery Tiggo 7", "Chery Tiggo 4"}}
-	b := resolveSheet(t, p, priceSheet)
-
-	shock := b.Products[2]
-	assert.Equal(t, []ModelFit{{ModelID: 3, Via: "cherytiggo"}, {ModelID: 4, Via: "cherytiggo"}}, shock.Fits)
-	assert.Empty(t, b.Report.UnmatchedVehicles)
 }
 
 func TestResolveNewBrandTakesCommonSpelling(t *testing.T) {
@@ -221,23 +210,20 @@ func TestResolveNewBrandTakesCommonSpelling(t *testing.T) {
 	}
 }
 
-func TestResolveRejectsUnknownCategory(t *testing.T) {
-	p := priceList()
-	p.Rules = append(p.Rules, Rule{Contains: []string{"фільтр"}, Category: "filtres"})
-	parsed, err := Parse([]Sheet{priceSheet}, p)
-	require.NoError(t, err)
-	_, err = Resolve(context.Background(), catalogue(), p, parsed)
-	require.ErrorContains(t, err, `no category "filtres"`)
-}
-
-func TestProfileValidate(t *testing.T) {
+func TestSupplierValidate(t *testing.T) {
 	require.NoError(t, priceList().Validate())
 
-	err := (&Profile{Source: "Bad Source"}).Validate()
-	require.Error(t, err)
-	for _, want := range []string{"source", "sku_prefix", "columns.name", "external_id or", "lead_time_days", "default_category"} {
-		assert.ErrorContains(t, err, want, "every problem is reported at once")
+	err := (&Supplier{Name: "X"}).Validate()
+	for _, want := range []error{ErrSupplierName, ErrNoName, ErrNoPrice, ErrNoKey, ErrNoStockOrDay} {
+		require.ErrorIs(t, err, want, "every problem is reported at once")
 	}
+}
+
+func TestSourceFor(t *testing.T) {
+	none := func(string) bool { return false }
+	assert.Equal(t, "china-avto", SourceFor("China Avto", none))
+	assert.Equal(t, "1s-mahazynu", SourceFor("1С магазину", none)[len("supplier-"):], "a key starts with a letter")
+	assert.Equal(t, "avtomyr-2", SourceFor("АвтоМир", func(s string) bool { return s == "avtomyr" }))
 }
 
 func TestReadCSV(t *testing.T) {
@@ -302,15 +288,6 @@ func TestExceeded(t *testing.T) {
 	assert.True(t, Exceeded(21, 100, 20))
 	assert.False(t, Exceeded(5, 0, 20), "nothing on sale, nothing to protect")
 	assert.True(t, Exceeded(1, 1, 0), "a zero limit allows none")
-}
-
-func TestResolveRejectsSectionWithSubcategories(t *testing.T) {
-	p := priceList()
-	p.Rules = []Rule{{Contains: []string{"фільтр"}, Category: "filters"}}
-	parsed, err := Parse([]Sheet{priceSheet}, p)
-	require.NoError(t, err)
-	_, err = Resolve(context.Background(), catalogue(), p, parsed)
-	require.ErrorContains(t, err, `"filters" has subcategories`, "products go to a subcategory, not over it")
 }
 
 func TestResolveFilesByTreeKeywords(t *testing.T) {
@@ -403,12 +380,6 @@ func TestResolveOwnerAliasesAndExamples(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, b.Report.UnmatchedVehicles)
 	assert.Equal(t, []ModelFit{{ModelID: 3, Via: "cherytiggo"}}, b.Products[2].Fits)
-
-	// A profile's own map is the deliberate override.
-	p.Vehicles = map[string][]string{"Chery Tiggo": {"Chery Tiggo 4"}}
-	b, err = Resolve(context.Background(), store, p, parsed)
-	require.NoError(t, err)
-	assert.Equal(t, int64(4), b.Products[2].Fits[0].ModelID)
 }
 
 func TestModelLabel(t *testing.T) {

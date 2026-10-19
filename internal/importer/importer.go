@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base32"
-	"errors"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -63,7 +62,6 @@ type Batch struct {
 	Source            string
 	Products          []Product
 	NewBrands         []NewBrand
-	CreateCategories  map[string]string
 	DeactivateMissing bool
 	// MaxDeactivatePercent caps what share of the supplier's active
 	// products the batch may take off sale, unless Force is set.
@@ -182,7 +180,7 @@ type Result struct {
 // Run imports a file. With DryRun nothing is kept, but the counts are those a
 // real run would produce. A run stopped by the deactivation limit returns
 // those counts with a *DeactivationError.
-func Run(ctx context.Context, store Store, p *Profile, path string, opts Options) (*Report, Result, error) {
+func Run(ctx context.Context, store Store, p *Supplier, path string, opts Options) (*Report, Result, error) {
 	started := time.Now()
 	parsed, err := readAndParse(path, p)
 	if err != nil {
@@ -200,13 +198,13 @@ func Run(ctx context.Context, store Store, p *Profile, path string, opts Options
 }
 
 // Resolve turns parsed offers into catalogue products.
-func Resolve(ctx context.Context, store Store, p *Profile, parsed *Parsed) (*Batch, error) {
+func Resolve(ctx context.Context, store Store, p *Supplier, parsed *Parsed) (*Batch, error) {
 	cats, err := store.Categories(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkCategories(cats, p); err != nil {
-		return nil, err
+	if !Leaves(cats)[defaultCategory] {
+		return nil, fmt.Errorf("importer: no category %q for the rows nothing recognises", defaultCategory)
 	}
 	byID := make(map[string]*Category, len(cats))
 	for i := range cats {
@@ -226,9 +224,8 @@ func Resolve(ctx context.Context, store Store, p *Profile, parsed *Parsed) (*Bat
 	rep.Problems = parsed.Problems[:min(len(parsed.Problems), maxProblems)]
 	b := &Batch{
 		Source:               p.Source,
-		CreateCategories:     p.CreateCategories,
-		DeactivateMissing:    p.DeactivateMissing,
-		MaxDeactivatePercent: p.maxDeactivatePercent(),
+		DeactivateMissing:    true,
+		MaxDeactivatePercent: maxDeactivatePercent,
 		Report:               rep,
 		NewBrands:            brands.created,
 	}
@@ -247,21 +244,18 @@ func Resolve(ctx context.Context, store Store, p *Profile, parsed *Parsed) (*Bat
 			Image:       o.Image,
 			Price:       o.Price,
 			Stock:       o.Stock,
-			Category:    p.DefaultCategory,
+			Category:    defaultCategory,
 			Group:       o.Category,
 		}
 		if prod.Stock == nil {
-			prod.LeadDays = p.LeadTimeDays
+			prod.LeadDays = p.LeadDays
 		}
 		if pn := domain.NormalizeOEM(o.PartNumber); pn != "" {
 			prod.OEM, prod.PartKey = []string{pn}, pn
 		}
-		// The profile's rules know this supplier; the tree's keywords know
-		// parts in general. The first say wins, then the category's own
-		// part type and universality fill what the rule left open.
-		if r := matchRule(p.Rules, o); r != nil {
-			prod.Category, prod.PartType, prod.Universal = r.Category, r.PartType, r.Universal
-		} else if c := classifier.Classify(o.Name + " " + o.Category); c != nil {
+		// The tree's words decide, over the name and the supplier's group;
+		// the category gives the part type and universality.
+		if c := classifier.Classify(o.Name + " " + o.Category); c != nil {
 			prod.Category = c.Slug
 		} else {
 			rep.Unsorted++
@@ -270,8 +264,7 @@ func Resolve(ctx context.Context, store Store, p *Profile, parsed *Parsed) (*Bat
 			}
 		}
 		if c := byID[prod.Category]; c != nil {
-			prod.PartType = cmp.Or(prod.PartType, c.PartType)
-			prod.Universal = prod.Universal || c.Universal
+			prod.PartType, prod.Universal = c.PartType, c.Universal
 		}
 		categories[prod.Category]++
 
@@ -297,57 +290,12 @@ func Resolve(ctx context.Context, store Store, p *Profile, parsed *Parsed) (*Bat
 	return b, nil
 }
 
-// checkCategories fails before any work when a profile files rows where no
-// product can be: in a category that does not exist, or in a section that has
-// subcategories, which the menu shows instead of products.
-func checkCategories(cats []Category, p *Profile) error {
-	leaves := Leaves(cats)
-	for s := range p.CreateCategories {
-		leaves[s] = true
-	}
-	check := func(what, slug string) error {
-		if leaves[slug] {
-			return nil
-		}
-		for _, c := range cats {
-			if c.Slug == slug {
-				return fmt.Errorf("%s: %q has subcategories; name one of them", what, slug)
-			}
-		}
-		return fmt.Errorf("%s: no category %q", what, slug)
-	}
-	errs := make([]error, 0, 1+len(p.Rules))
-	errs = append(errs, check("default_category", p.DefaultCategory))
-	for i, r := range p.Rules {
-		errs = append(errs, check(fmt.Sprintf("rules[%d]", i), r.Category))
-	}
-	if err := errors.Join(errs...); err != nil {
-		names := slices.Sorted(maps.Keys(leaves))
-		return fmt.Errorf("importer: %w (categories: %s)", err, strings.Join(names, ", "))
-	}
-	return nil
-}
-
-// matchRule finds the first rule whose words occur in the row's name or
-// supplier category.
-func matchRule(rules []Rule, o *Offer) *Rule {
-	text := strings.ToLower(o.Name + " " + o.Category)
-	for i := range rules {
-		for _, w := range rules[i].Contains {
-			if strings.Contains(text, strings.ToLower(w)) {
-				return &rules[i]
-			}
-		}
-	}
-	return nil
-}
-
 // sku builds the shop's code for a new product from the supplier's key. It
 // is stable -- the same offer gets the same code on every machine -- and 50
 // bits of hash keep 100 000 offers clear of collisions.
-func sku(p *Profile, key string) string {
+func sku(p *Supplier, key string) string {
 	sum := sha256.Sum256([]byte(p.Source + "\x00" + key))
-	return p.SKUPrefix + "-" + base32.StdEncoding.EncodeToString(sum[:])[:10]
+	return p.skuPrefix() + "-" + base32.StdEncoding.EncodeToString(sum[:])[:10]
 }
 
 // brandKey reduces a brand to letters and digits in upper case: "K.Y.B.",
@@ -404,6 +352,24 @@ func mostCommon(counts map[string]int) string {
 	return best
 }
 
+// makeAbbreviations are how price lists shorten makes the directory spells
+// out.
+var makeAbbreviations = map[string]string{
+	"vw": "Volkswagen", "фольксваген": "Volkswagen", "mercedes": "Mercedes-Benz", "mb": "Mercedes-Benz",
+	"мерседес": "Mercedes-Benz", "шкода": "Skoda", "шевроле": "Chevrolet", "деу": "Daewoo", "дэу": "Daewoo",
+	"чері": "Chery", "чери": "Chery", "джилі": "Geely", "джили": "Geely",
+}
+
+// expandMake writes the make of a vehicle name in full: "VW Golf VII" is
+// "Volkswagen Golf VII".
+func expandMake(name string) string {
+	first, rest, _ := strings.Cut(strings.TrimSpace(name), " ")
+	if full, ok := makeAbbreviations[strings.ToLower(first)]; ok {
+		return full + " " + rest
+	}
+	return name
+}
+
 // vehicleKey compares vehicle names by letters and digits only, in lower
 // case: "Chery Tiggo-7" and "chery tiggo 7" are one name.
 func vehicleKey(s string) string {
@@ -424,7 +390,7 @@ type vehicleResolver struct {
 	examples  map[string][]string
 }
 
-func newVehicleResolver(ctx context.Context, store Store, p *Profile) (*vehicleResolver, error) {
+func newVehicleResolver(ctx context.Context, store Store, p *Supplier) (*vehicleResolver, error) {
 	models, err := store.VehicleModels(ctx)
 	if err != nil {
 		return nil, err
@@ -442,32 +408,12 @@ func newVehicleResolver(ctx context.Context, store Store, p *Profile) (*vehicleR
 		mk := vehicleKey(m.Model)
 		r.byModel[mk] = append(r.byModel[mk], m.ID)
 	}
-	var errs []error
-	for name, targets := range p.Vehicles {
-		for _, t := range targets {
-			ids, ok := r.byName[vehicleKey(t)]
-			if !ok {
-				errs = append(errs, fmt.Errorf("vehicles[%q]: no model %q in the catalogue", name, t))
-				continue
-			}
-			k := vehicleKey(name)
-			r.mapped[k] = append(r.mapped[k], ids...)
-		}
-	}
-	if err := errors.Join(errs...); err != nil {
-		return nil, fmt.Errorf("importer: %w", err)
-	}
-	// What the owner confirmed in the chat comes after the profile: a
-	// developer's map in a file is the deliberate override.
+	// The names the owner mapped in the chat, for this supplier.
 	aliases, err := store.VehicleAliases(ctx, p.Source)
 	if err != nil {
 		return nil, err
 	}
-	for k, ids := range aliases {
-		if _, ok := r.mapped[k]; !ok {
-			r.mapped[k] = ids
-		}
-	}
+	maps.Copy(r.mapped, aliases)
 	return r, nil
 }
 
@@ -479,7 +425,7 @@ const examplesPerVehicle = 3
 // it. Anything else is reported, not guessed: a wrong fitment sells a part
 // that does not fit.
 func (r *vehicleResolver) resolve(name, product string) []int64 {
-	k := vehicleKey(name)
+	k := vehicleKey(expandMake(name))
 	if ids, ok := r.mapped[k]; ok {
 		return ids
 	}

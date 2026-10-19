@@ -62,8 +62,8 @@ func (f *fakeMatching) VehicleModels(context.Context) ([]importer.Model, error) 
 	return matchModels, nil
 }
 
-func (f *fakeMatching) AddVehicleAlias(_ context.Context, profile, name string, ids []int64) error {
-	f.aliases = append(f.aliases, profile+":"+name+fmtIDs(ids))
+func (f *fakeMatching) AddVehicleAlias(_ context.Context, supplier int64, name string, ids []int64) error {
+	f.aliases = append(f.aliases, fmt.Sprint(supplier)+":"+name+fmtIDs(ids))
 	return nil
 }
 
@@ -113,7 +113,7 @@ func TestMatchVehiclesFromTheReport(t *testing.T) {
 
 	runs := len(imports.runs)
 	b.Handle(ctx, pressIn(managers, encode(actMatchPick, 1, 0, 0)))
-	assert.Equal(t, []string{"chinaavto:Lada Priora→11→12"}, m.aliases, "all suggested, for this supplier")
+	assert.Equal(t, []string{"1:Lada Priora→11→12"}, m.aliases, "all suggested, for this supplier")
 	assert.Contains(t, b.tg.last("editMessageText").text, "зіставлено 1, пропущено 0")
 	require.Len(t, imports.runs, runs+1, "the file is checked again")
 	assert.True(t, imports.runs[runs].opts.DryRun)
@@ -135,7 +135,7 @@ func TestMatchByHand(t *testing.T) {
 	b.Handle(ctx, pressIn(managers, encode(actMatchMake, 1, 1)))
 	assert.Contains(t, callbacks(b.tg.last("editMessageText").markup), encode(actMatchPick, 1, 0, 21))
 	b.Handle(ctx, pressIn(managers, encode(actMatchPick, 1, 0, 21)))
-	assert.Equal(t, []string{"chinaavto:Lada Priora→21"}, m.aliases)
+	assert.Equal(t, []string{"1:Lada Priora→21"}, m.aliases)
 
 	b.Handle(ctx, pressIn(managers, encode(actMatchPick, 1, 0, 99)))
 	assert.Len(t, m.aliases, 1, "a finished session takes no more")
@@ -184,7 +184,7 @@ func TestDoubleTapDoesNotConfirmTheNextName(t *testing.T) {
 
 	b.Handle(ctx, pressIn(managers, encode(actMatchPick, 1, 0, 11)))
 	b.Handle(ctx, pressIn(managers, encode(actMatchPick, 1, 0, 11)))
-	assert.Equal(t, []string{"chinaavto:Lada Priora→11"}, m.aliases, "the second tap was for the first name, and is stale")
+	assert.Equal(t, []string{"1:Lada Priora→11"}, m.aliases, "the second tap was for the first name, and is stale")
 	assert.Equal(t, msgMatchStale, b.tg.last("answerCallbackQuery").text)
 }
 
@@ -211,7 +211,7 @@ func TestAddVehicleFromMatching(t *testing.T) {
 	require.Len(t, m.added, 1)
 	assert.Equal(t, "1.6 HDi", m.added[0][0].Engine, "only what the owner kept is written")
 	assert.Len(t, m.added[0], 1)
-	assert.Equal(t, []string{"chinaavto:Lada Priora→31"}, m.aliases, "the supplier's name maps to the new vehicle")
+	assert.Equal(t, []string{"1:Lada Priora→31"}, m.aliases, "the supplier's name maps to the new vehicle")
 	assert.Contains(t, b.tg.last("editMessageText").text, "зіставлено 1", "and the session moves on")
 }
 

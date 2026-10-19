@@ -359,12 +359,12 @@ func (a *app) wireManagers() error {
 		return nil
 	}
 	importRepo := postgres.NewImportRepository(a.pool)
-	deps := importer.Deps{Prices: importRepo, Vehicles: importRepo, Aliases: importRepo}
+	deps := importer.Deps{Prices: importRepo, Vehicles: importRepo, Aliases: importRepo, Suppliers: importRepo}
 	if a.model != nil {
 		matcher := vehiclematch.New(a.model)
 		deps.Matcher, deps.Proposer = matcher, matcher
 	}
-	imports := importer.NewService(deps, a.cfg.ImportProfilesDir)
+	imports := importer.NewService(deps)
 	if err := a.bot.UseImports(imports, a.tg, a.cfg.ImportDir, chat); err != nil {
 		return err
 	}

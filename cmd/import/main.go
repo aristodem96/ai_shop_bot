@@ -41,24 +41,16 @@ func main() {
 
 func run() error {
 	var (
-		profilePath = flag.String("profile", "", "supplier profile, JSON (required)")
-		filePath    = flag.String("file", "", "price list, .csv or .xlsx (required)")
-		vehicles    = flag.String("vehicles", "", "vehicle directory, .csv (instead of -profile and -file)")
-		dryRun      = flag.Bool("dry-run", false, "report what would change and change nothing")
-		force       = flag.Bool("force", false, "take off sale more of the supplier's products than its profile allows")
+		supplier = flag.String("supplier", "", "the supplier's name, as set up in the managers' chat")
+		filePath = flag.String("file", "", "price list, .csv or .xlsx (required)")
+		vehicles = flag.String("vehicles", "", "vehicle directory, .csv (instead of -supplier and -file)")
+		dryRun   = flag.Bool("dry-run", false, "report what would change and change nothing")
+		force    = flag.Bool("force", false, "take off sale more than a fifth of the supplier's products")
 	)
 	flag.Parse()
-	if (*vehicles == "") == (*profilePath == "" || *filePath == "") {
+	if (*vehicles == "") == (*supplier == "" || *filePath == "") {
 		flag.Usage()
-		return fmt.Errorf("give either -profile and -file, or -vehicles")
-	}
-
-	var profile *importer.Profile
-	if *vehicles == "" {
-		var err error
-		if profile, err = importer.LoadProfile(*profilePath); err != nil {
-			return err
-		}
+		return fmt.Errorf("give either -supplier and -file, or -vehicles")
 	}
 	cfg, err := config.LoadDatabase()
 	if err != nil {
@@ -84,11 +76,17 @@ func run() error {
 	}
 
 	started := time.Now()
+	repo := postgres.NewImportRepository(pool)
 	if *vehicles != "" {
-		return importVehicles(ctx, postgres.NewImportRepository(pool), *vehicles, *dryRun)
+		return importVehicles(ctx, repo, *vehicles, *dryRun)
 	}
-	report, res, err := importer.Run(ctx, postgres.NewImportRepository(pool), profile, *filePath,
-		importer.Options{DryRun: *dryRun, Force: *force})
+	// A supplier is set up in the managers' chat, from its first file: the
+	// columns are confirmed there, by the person who knows the file.
+	sup, err := importer.NewService(importer.Deps{Prices: repo, Suppliers: repo}).Supplier(ctx, 0, *supplier)
+	if err != nil {
+		return fmt.Errorf("supplier %q: %w (send its first file to the managers' chat to set it up)", *supplier, err)
+	}
+	report, res, err := importer.Run(ctx, repo, sup, *filePath, importer.Options{DryRun: *dryRun, Force: *force})
 	var out strings.Builder
 	if report != nil {
 		printReport(&out, report)
@@ -155,7 +153,7 @@ func printReport(w *strings.Builder, r *importer.Report) {
 	}
 
 	if r.Unsorted > 0 {
-		fmt.Fprintf(w, "\nProducts no category recognised: %d (filed in the default; a keyword from these names belongs in data/categories.csv)\n", r.Unsorted)
+		fmt.Fprintf(w, "\nProducts no category recognised: %d (filed in Other; add a word from these names to a category: /word in the managers' chat)\n", r.Unsorted)
 		printList(w, r.Unrecognised)
 	}
 

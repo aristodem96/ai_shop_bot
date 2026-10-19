@@ -37,9 +37,18 @@ const (
 	actEditContacts   action = "ce"   // type the contacts again
 	actCancelCheckout action = "cq"   // leave the checkout
 	actManage         action = "om"   // om:<order>:<move> a manager's button
-	actImportProfile  action = "ip"   // ip:<job>:<choice> what an uploaded file is
 	actImportApply    action = "ia"   // ia:<job>:<force> apply a checked file
 	actImportCancel   action = "ix"   // ix:<job> drop an uploaded file
+	actSetupField     action = "sf"   // sf:<job>:<field> which column a field of a new file is
+	actSetupColumn    action = "sc"   // sc:<job>:<field>:<column, -1 none> read the field from it
+	actSetupNext      action = "sn"   // sn:<job> the columns are right
+	actSetupLead      action = "sl"   // sl:<job>:<days> a file without stock is on order, this many days
+	actSetupMarkup    action = "sm"   // sm:<job>:<percent> added to the file's prices
+	actSetupSupplier  action = "ss"   // ss:<job>:<supplier, 0 new> whose the file is
+	actSupplierOpen   action = "uo"   // uo:<supplier> its screen; 0 the list
+	actSupplierMarkup action = "um"   // um:<supplier>:<percent, -1 to choose>
+	actSupplierLead   action = "ul"   // ul:<supplier>:<days, -1 to choose>
+	actSupplierDelete action = "ud"   // ud:<supplier>:<1 confirmed>
 	actCatOpen        action = "ko"   // ko:<category> a category's screen; 0 the sections
 	actCatNew         action = "kn"   // kn:<section or 0> a new subcategory, or section: asks its title
 	actCatRename      action = "kr"   // kr:<category> asks the new title
@@ -78,7 +87,9 @@ var arity = map[action]int{
 	actAdd: 1, actAnalogues: 1, actCart: 0, actInc: 1, actDec: 1, actDel: 1,
 	actClear: 0, actForgetCar: 0, actKit: 0, actKitAdd: 0, actNoop: 0,
 	actCheckout: 0, actPay: 0, actEditContacts: 0, actCancelCheckout: 0, actManage: 2,
-	actImportProfile: 2, actImportApply: 2, actImportCancel: 1,
+	actImportApply: 2, actImportCancel: 1,
+	actSetupField: 2, actSetupColumn: 3, actSetupNext: 1, actSetupLead: 2, actSetupMarkup: 2, actSetupSupplier: 2,
+	actSupplierOpen: 1, actSupplierMarkup: 2, actSupplierLead: 2, actSupplierDelete: 2,
 	actCatOpen: 1, actCatNew: 1, actCatRename: 1, actCatAddWord: 1, actCatRemoveWord: 1, actCatDelete: 1,
 	actCatPick: 2, actCatApply: 1, actCatCancel: 1,
 	actMatchStart: 1, actMatchPick: 3, actMatchMakes: 1, actMatchMake: 2, actMatchBack: 1,

@@ -18,7 +18,7 @@ type VehicleMatching interface {
 	CanSuggest() bool
 	SuggestVehicles(ctx context.Context, unknown []importer.UnknownVehicle) (map[string]importer.VehicleSuggestion, error)
 	VehicleModels(ctx context.Context) ([]importer.Model, error)
-	AddVehicleAlias(ctx context.Context, profile, name string, modelIDs []int64) error
+	AddVehicleAlias(ctx context.Context, supplierID int64, name string, modelIDs []int64) error
 	CanPropose() bool
 	ProposeVehicles(ctx context.Context, req importer.ProposeRequest) (*importer.VehicleProposal, error)
 	AddVehicles(ctx context.Context, vs []importer.Vehicle) ([]int64, error)
@@ -45,7 +45,7 @@ type matchJob struct {
 	id        int64
 	importJob int64
 	chat      int64
-	profile   string
+	supplier  int64
 	items     []matchItem
 	idx       int
 	models    []importer.Model
@@ -121,7 +121,7 @@ func (b *Bot) startMatch(ctx context.Context, cc callbackCtx, importID int64) (s
 	if err != nil {
 		return "", err
 	}
-	job := &matchJob{importJob: importID, chat: cc.chat, profile: ij.profile, models: models, created: time.Now()}
+	job := &matchJob{importJob: importID, chat: cc.chat, supplier: ij.supplier, models: models, created: time.Now()}
 	var suggestions map[string]importer.VehicleSuggestion
 	if b.matching.CanSuggest() {
 		b.send(ctx, cc.chat, fmt.Sprintf(msgMatchThinking, num(len(unknown))), nil)
@@ -163,7 +163,7 @@ func (b *Bot) pickMatch(ctx context.Context, cc callbackCtx, id, item, modelID i
 	if len(ids) == 0 {
 		return "", errBadCallback
 	}
-	if err := b.matching.AddVehicleAlias(ctx, job.profile, cur.Name, ids); err != nil {
+	if err := b.matching.AddVehicleAlias(ctx, job.supplier, cur.Name, ids); err != nil {
 		return "", err
 	}
 	job.matched++

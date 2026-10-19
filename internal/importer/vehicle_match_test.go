@@ -34,7 +34,7 @@ func TestSuggestVehiclesTrustsNothingItCannotCheck(t *testing.T) {
 		{Name: "Chery Tiggo", ModelIDs: []int64{12, 999, 11, 12}, Note: "сімейство"},
 		{Name: "Invented Car", ModelIDs: []int64{11}},
 	}}
-	s := NewService(Deps{Aliases: &fakeAliases{models: []Model{{ID: 11}, {ID: 12}}}, Matcher: m}, "")
+	s := NewService(Deps{Aliases: &fakeAliases{models: []Model{{ID: 11}, {ID: 12}}}, Matcher: m})
 
 	got, err := s.SuggestVehicles(context.Background(), []UnknownVehicle{{Name: "Chery Tiggo"}})
 	require.NoError(t, err)
@@ -45,13 +45,13 @@ func TestSuggestVehiclesTrustsNothingItCannotCheck(t *testing.T) {
 
 func TestSuggestVehiclesBoundsTheRequest(t *testing.T) {
 	m := &fakeMatcher{}
-	s := NewService(Deps{Aliases: &fakeAliases{}, Matcher: m}, "")
+	s := NewService(Deps{Aliases: &fakeAliases{}, Matcher: m})
 	many := make([]UnknownVehicle, maxSuggest+10)
 	_, err := s.SuggestVehicles(context.Background(), many)
 	require.NoError(t, err)
 	assert.Len(t, m.asked, maxSuggest)
 
-	_, err = NewService(Deps{Aliases: &fakeAliases{}}, "").SuggestVehicles(context.Background(), many)
+	_, err = NewService(Deps{Aliases: &fakeAliases{}}).SuggestVehicles(context.Background(), many)
 	require.ErrorIs(t, err, ErrNoMatcher)
 }
 
@@ -67,7 +67,7 @@ func TestProposeVehiclesChecksWhatTheModelSays(t *testing.T) {
 		{Make: "Peugeot", Model: "308 T7", YearFrom: 2007, YearTo: 2013, Engine: "1.6 HDi", Fuel: "diesel"},
 		{Make: "Peugeot", Model: "308 T7", YearFrom: 2013, YearTo: 2007, Engine: "1.6 VTi", Fuel: "petrol"},
 		{Make: "Peugeot", Model: "308 T7", YearFrom: 2007, Engine: "1.4", Fuel: "steam"},
-	}}}}, "")
+	}}}})
 
 	p, err := s.ProposeVehicles(context.Background(), ProposeRequest{Name: "Peugeot 308"})
 	require.NoError(t, err)
@@ -77,7 +77,7 @@ func TestProposeVehiclesChecksWhatTheModelSays(t *testing.T) {
 	assert.Contains(t, p.Rejected[0], "навпаки")
 	assert.Contains(t, p.Rejected[1], "пальне")
 
-	_, err = NewService(Deps{Aliases: &fakeAliases{}}, "").ProposeVehicles(context.Background(), ProposeRequest{})
+	_, err = NewService(Deps{Aliases: &fakeAliases{}}).ProposeVehicles(context.Background(), ProposeRequest{})
 	require.ErrorIs(t, err, ErrNoProposer)
 }
 

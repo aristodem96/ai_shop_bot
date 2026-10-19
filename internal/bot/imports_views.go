@@ -17,9 +17,9 @@ const importListed = 10
 // priceImportView renders a price list run. A dry run that went through
 // offers "apply"; a run stopped by the deactivation limit offers forcing it.
 // Anything else leaves nothing to decide, and no buttons.
-func priceImportView(id int64, file, profile string, rep *importer.Report, res importer.Result, err error, opts importer.Options, matchable bool) (string, *telegram.InlineKeyboard) {
+func priceImportView(id int64, file, supplier string, rep *importer.Report, res importer.Result, err error, opts importer.Options, matchable bool) (string, *telegram.InlineKeyboard) {
 	var b strings.Builder
-	fmt.Fprintf(&b, "📄 <b>%s</b> · профіль «%s»\n", esc(file), esc(profile))
+	fmt.Fprintf(&b, "📄 <b>%s</b> · постачальник «%s»\n", esc(file), esc(supplier))
 
 	var (
 		header *importer.HeaderError
@@ -32,7 +32,7 @@ func priceImportView(id int64, file, profile string, rep *importer.Report, res i
 		if header.Line > 0 {
 			fmt.Fprintf(&b, "Найближчий рядок (%s, рядок %d): %s\n", esc(header.Sheet), header.Line, esc(quoteAll(header.Found)))
 		}
-		b.WriteString("\nСхоже, постачальник перейменував колонку або це файл іншого постачальника. Виправте назву в профілі й надішліть файл ще раз.")
+		b.WriteString("\nСхоже, постачальник змінив файл. Надішліть його ще раз — я спитаю про колонки.")
 		return b.String(), nil
 	case err != nil && !errors.As(err, &limit):
 		fmt.Fprintf(&b, "\n❌ Не вдалося: %s", esc(err.Error()))
@@ -98,7 +98,7 @@ func writeImportReport(b *strings.Builder, rep *importer.Report) {
 			names = append(names, fmt.Sprintf("%s (%s)", c.Name, num(c.N)))
 		}
 		fmt.Fprintf(b, "\n🚗 <b>Авто, яких немає в довіднику: %s</b>\n%s\n", num(len(names)), esc(listed(names)))
-		b.WriteString("<i>Додайте їх у довідник авто або в карту «vehicles» профілю.</i>\n")
+		b.WriteString("<i>Натисніть «🚗 Зіставити авто» нижче: я запропоную моделі з довідника.</i>\n")
 	}
 	if rep.WithoutFitment > 0 {
 		fmt.Fprintf(b, "\n📦 Без жодного авто: %s — покупці з обраною машиною їх не побачать.\n", num(rep.WithoutFitment))
@@ -106,7 +106,7 @@ func writeImportReport(b *strings.Builder, rep *importer.Report) {
 
 	if rep.Unsorted > 0 {
 		fmt.Fprintf(b, "\n❓ <b>Не впізнав категорію: %s</b> — пішли в «Інше»\n%s\n", num(rep.Unsorted), esc(listed(rep.Unrecognised)))
-		b.WriteString("<i>Слово з такої назви варто додати до потрібної категорії.</i>\n")
+		b.WriteString("<i>Слово з такої назви додайте до потрібної категорії: <code>/word слово</code> або /categories.</i>\n")
 	}
 
 	if len(rep.Categories) > 0 {
@@ -149,20 +149,6 @@ func applyKeyboard(id int64) *telegram.InlineKeyboard {
 		button("✅ Застосувати", actImportApply, id, 0),
 		button("❌ Скасувати", actImportCancel, id),
 	}}}
-}
-
-// chooseProfileKeyboard asks what an uploaded file is. The last button is
-// the vehicle directory.
-func chooseProfileKeyboard(id int64, profiles []string) *telegram.InlineKeyboard {
-	kb := &telegram.InlineKeyboard{}
-	for i, p := range profiles {
-		kb.Rows = append(kb.Rows, []telegram.InlineButton{button("📄 "+p, actImportProfile, id, int64(i))})
-	}
-	kb.Rows = append(kb.Rows,
-		[]telegram.InlineButton{button("🚗 Довідник авто", actImportProfile, id, int64(len(profiles)))},
-		[]telegram.InlineButton{button("❌ Скасувати", actImportCancel, id)},
-	)
-	return kb
 }
 
 // listed joins the first importListed names and says how many more there

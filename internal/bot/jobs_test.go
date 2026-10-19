@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/aristodem96/ai_shop_bot/internal/importer"
 )
 
 func TestDialogsSurviveARestart(t *testing.T) {
@@ -23,7 +25,7 @@ func TestDialogsSurviveARestart(t *testing.T) {
 	start := func() (testBot, *fakeImports, *fakeMatching) {
 		b := newTestBot()
 		b.KeepDialogs(keep)
-		imports := &fakeImports{profiles: []string{"chinaavto"}}
+		imports := &fakeImports{suppliers: []importer.Supplier{{ID: 1, Name: "chinaavto"}}}
 		files := &fakeFiles{data: map[string][]byte{"doc": []byte("Назва;Ціна\nКолодки;1049\n")}}
 		require.NoError(t, b.UseImports(imports, files, dir, managers))
 		m := &fakeMatching{canSuggest: true}
@@ -37,7 +39,7 @@ func TestDialogsSurviveARestart(t *testing.T) {
 
 	b, imports, m := start() // the bot restarts mid-session
 	b.Handle(ctx, pressIn(managers, encode(actMatchPick, 1, 0, 0)))
-	assert.Equal(t, []string{"chinaavto:Lada Priora→11→12"}, m.aliases, "the session goes on where it was")
+	assert.Equal(t, []string{"1:Lada Priora→11→12"}, m.aliases, "the session goes on where it was")
 	require.NotEmpty(t, imports.runs, "and the upload, still on disk, is checked again")
 	assert.Contains(t, callbacks(b.tg.last("sendMessage").markup), encode(actImportApply, 1, 0))
 }

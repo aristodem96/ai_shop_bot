@@ -113,11 +113,7 @@ type Bot struct {
 	// Timezone decides the hours reminders may be sent in.
 	Timezone string
 
-	// ImportProfilesDir holds the supplier profiles the managers' chat can
-	// import price lists with. ImportDir keeps uploaded files until they
-	// are applied; it is emptied on start.
-	ImportProfilesDir string
-	ImportDir         string
+	ImportDir string
 
 	// PickupAddress is where buyers collect orders, with the shop's hours;
 	// empty offers Nova Poshta only.
@@ -162,7 +158,6 @@ func LoadBot() (*Bot, error) {
 		CartReminderAfter: envDuration("CART_REMINDER_AFTER", 24*time.Hour, collect),
 		CartReminderEvery: envDuration("CART_REMINDER_EVERY", 10*time.Minute, collect),
 		Timezone:          envString("BOT_TIMEZONE", "Europe/Kyiv"),
-		ImportProfilesDir: envString("IMPORT_PROFILES_DIR", "profiles"),
 		PickupAddress:     envString("SHOP_PICKUP_ADDRESS", ""),
 		AutoDB: AutoDB{
 			URL:      envString("AUTODB_API_URL", "https://auto-db.pro/api/v1/"),

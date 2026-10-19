@@ -207,7 +207,7 @@ func (b *Bot) addCar(ctx context.Context, cc callbackCtx, d *carDraft) (string, 
 		// name is mapped at its next import or session.
 		return "", b.editText(ctx, cc, carAddedText(kept), nil)
 	}
-	if err := b.matching.AddVehicleAlias(ctx, job.profile, d.name, ids); err != nil {
+	if err := b.matching.AddVehicleAlias(ctx, job.supplier, d.name, ids); err != nil {
 		return "", err
 	}
 	if job.models, err = b.matching.VehicleModels(ctx); err != nil {

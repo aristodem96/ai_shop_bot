@@ -34,16 +34,15 @@ run: ## Run the bot locally (needs Postgres up and TELEGRAM_BOT_TOKEN in .env)
 seed: ## Migrate and load (or reset) the demo catalogue
 	go run ./cmd/seed
 
-# The example stock file by default; a real one with
-#   make import PROFILE=supplier.json FILE=price.xlsx
-# and always with DRY_RUN=1 first.
-PROFILE ?= profiles/demo-stock.json
+# A supplier is set up in the managers' chat from its first file; then
+#   make import SUPPLIER="China Avto" FILE=price.xlsx
+# loads its next ones from the command line too, with DRY_RUN=1 first.
 FILE    ?= docs/import/example-price.csv
 DRY_RUN ?=
 
 .PHONY: import
-import: ## Import a price list: make import PROFILE=... FILE=... [DRY_RUN=1]
-	go run ./cmd/import -profile $(PROFILE) -file $(FILE) $(if $(DRY_RUN),-dry-run)
+import: ## Import a price list of a supplier set up in the chat: make import SUPPLIER=... FILE=... [DRY_RUN=1]
+	go run ./cmd/import -supplier "$(SUPPLIER)" -file $(FILE) $(if $(DRY_RUN),-dry-run)
 
 VEHICLES ?= data/vehicles.csv
 
