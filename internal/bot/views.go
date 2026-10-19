@@ -83,17 +83,23 @@ func productPageView(pg *service.ProductPage) (string, *telegram.InlineKeyboard)
 		text += "\n🚗 " + esc(pg.Vehicle.Label())
 	}
 	switch {
-	case len(pg.Products) == 0 && pg.Vehicle != nil:
+	case len(pg.Products) == 0 && len(pg.OnOrder) == 0 && pg.Vehicle != nil:
 		text += "\n\nДля вашого авто в цій категорії поки нічого немає."
-	case len(pg.Products) == 0:
+	case len(pg.Products) == 0 && len(pg.OnOrder) == 0:
 		text += "\n\nУ цій категорії поки порожньо."
 	default:
 		text += "\n\nОберіть товар:"
+	}
+	if len(pg.OnOrder) > 0 {
+		text += "\n\n" + msgOnOrderLegend
 	}
 
 	kb := &telegram.InlineKeyboard{}
 	for _, p := range pg.Products {
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(productLabel(p), actProduct, p.ID)})
+	}
+	for _, p := range pg.OnOrder {
+		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(orderPartLabel(p), actRequest, p.ID)})
 	}
 
 	if pg.Pages > 1 {
@@ -148,6 +154,15 @@ func backButton(pg *service.ProductPage) telegram.InlineButton {
 		return button("⬅️ "+pg.Parent.Title, actCategory, pg.Parent.ID, 0)
 	}
 	return button("⬅️ Розділи", actCategories)
+}
+
+// msgOnOrderLegend explains the parts on order under a category.
+const msgOnOrderLegend = "🔎 — під замовлення: таких немає на складі, ціну й термін назве менеджер після запиту."
+
+// orderPartLabel fits a part on order on one button, marked apart from the
+// stock: it has no price yet.
+func orderPartLabel(p domain.CatalogPart) string {
+	return strings.TrimSpace(fmt.Sprintf("🔎 %s · %s %s", p.Name, p.Brand, p.Number))
 }
 
 // productLabel fits a product on one button. Button text is plain, so it is

@@ -137,3 +137,22 @@ func TestProductPageBackLeadsUp(t *testing.T) {
 	assert.Contains(t, callbacks(kb), encode(actCategoryAll, 1, 1), "paging a whole section stays in it")
 	assert.Equal(t, encode(actCategory, 1, 0), kb.Rows[len(kb.Rows)-1][0].CallbackData, "and goes back to its menu")
 }
+
+func TestProductPageListsPartsOnOrder(t *testing.T) {
+	pg := &service.ProductPage{
+		Category: domain.Category{ID: 3, Title: "Рульове керування"},
+		Vehicle:  &octavia,
+		Products: []domain.Product{{ID: 5, Name: "Тяга рульова", Brand: "Febi", Price: domain.UAH(900), Stock: 1}},
+		OnOrder:  []domain.CatalogPart{{ID: 31, Name: "Наконечник рульової тяги", Brand: "LEMFORDER", Number: "37143 01"}},
+		Pages:    1,
+	}
+	text, kb := productPageView(pg)
+	assert.Contains(t, text, "під замовлення")
+	assert.Equal(t, encode(actProduct, 5), kb.Rows[0][0].CallbackData, "the stock first")
+	assert.Equal(t, "🔎 Наконечник рульової тяги · LEMFORDER 37143 01", kb.Rows[1][0].Text)
+	assert.Equal(t, encode(actRequest, 31), kb.Rows[1][0].CallbackData, "a part on order opens its request")
+
+	pg.Products = nil
+	text, _ = productPageView(pg)
+	assert.NotContains(t, text, "нічого немає", "parts on order alone are not an empty page")
+}

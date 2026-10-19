@@ -360,6 +360,8 @@ func (a *app) wireConsultant() error {
 	consultant.UseOrderCatalog(catalogParts)
 	consultant.UseCatalogLoader(c.crawl)
 	a.bot.UseRequests(requests, catalogParts)
+	// The buttons' catalogue lists them too, after the stock.
+	a.catalog.UseOrderParts(catalogParts)
 	a.every(10*time.Minute, "expiring quotes", func(ctx context.Context) error {
 		_, err := requests.Expire(ctx)
 		return err

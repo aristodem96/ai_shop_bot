@@ -148,3 +148,76 @@ func TestSectionWithEmptySubcategoriesShowsProducts(t *testing.T) {
 	require.Len(t, page.Products, 1, "not an empty menu")
 	assert.True(t, page.All, "paging stays on the whole section")
 }
+
+// fakeOrderParts are parts on order, all for vehicle 7 in category 1.
+type fakeOrderParts struct{ n int }
+
+func (f fakeOrderParts) CategoryCounts(_ context.Context, vehicleID int64) (map[int64]int, error) {
+	if vehicleID != 7 {
+		return map[int64]int{}, nil
+	}
+	return map[int64]int{1: f.n}, nil
+}
+
+func (f fakeOrderParts) ByCategory(_ context.Context, categoryID, vehicleID int64, limit, offset int) ([]domain.CatalogPart, int, error) {
+	if vehicleID != 7 || categoryID != 1 {
+		return nil, 0, nil
+	}
+	var out []domain.CatalogPart
+	for i := offset; i < min(offset+limit, f.n); i++ {
+		out = append(out, domain.CatalogPart{ID: int64(100 + i)})
+	}
+	return out, f.n, nil
+}
+
+func TestCategoryPageListsPartsOnOrderAfterTheStock(t *testing.T) {
+	svc, f := newCatalogFixture(0)
+	for i := range PageSize + 3 {
+		f.products = append(f.products, domain.Product{ID: int64(i + 1), CategoryID: 1, Fits: []domain.Vehicle{{ID: 7}}})
+	}
+	svc.UseOrderParts(fakeOrderParts{n: 10})
+	car := &domain.Vehicle{ID: 7}
+	ctx := context.Background()
+
+	menu, err := svc.Menu(ctx, car)
+	require.NoError(t, err)
+	require.Len(t, menu, 1)
+	assert.Equal(t, PageSize+3+10, menu[0].Count, "the menu counts the stock and the parts on order")
+
+	first, err := svc.CategoryPage(ctx, 1, car, 0, false)
+	require.NoError(t, err)
+	assert.Len(t, first.Products, PageSize)
+	assert.Empty(t, first.OnOrder, "the stock comes first")
+	assert.Equal(t, 3, first.Pages, "21 parts, 8 a page")
+	assert.Equal(t, PageSize+13, first.Total)
+
+	second, err := svc.CategoryPage(ctx, 1, car, 1, false)
+	require.NoError(t, err)
+	assert.Len(t, second.Products, 3, "the end of the stock")
+	require.Len(t, second.OnOrder, PageSize-3, "and the parts on order fill the page")
+	assert.Equal(t, int64(100), second.OnOrder[0].ID)
+
+	third, err := svc.CategoryPage(ctx, 1, car, 2, false)
+	require.NoError(t, err)
+	assert.Empty(t, third.Products)
+	require.Len(t, third.OnOrder, 5)
+	assert.Equal(t, int64(105), third.OnOrder[0].ID, "picking up where the last page left off")
+
+	all, err := svc.CategoryPage(ctx, 1, nil, 0, false)
+	require.NoError(t, err)
+	assert.Empty(t, all.OnOrder, "without a car there is no catalogue to order from")
+}
+
+func TestPartsOnOrderAloneFillAnEmptyShop(t *testing.T) {
+	svc, _ := newCatalogFixture(0)
+	svc.UseOrderParts(fakeOrderParts{n: 3})
+	car := &domain.Vehicle{ID: 7}
+
+	menu, err := svc.Menu(context.Background(), car)
+	require.NoError(t, err)
+	require.Len(t, menu, 1, "a shop with nothing on the shelves still has a catalogue for the car")
+	page, err := svc.CategoryPage(context.Background(), 1, car, 0, false)
+	require.NoError(t, err)
+	assert.Len(t, page.OnOrder, 3)
+	assert.Equal(t, 1, page.Pages)
+}

@@ -60,7 +60,9 @@ the buttons. Most of this README is about that boundary.
 - **Parts on order** — what the catalogue lists for the car and the shop does
   not stock is offered with a button: the buyer picks a quantity, a manager
   finds a supplier and names the price and the lead time, and the buyer pays
-  for it like any other part. A quote holds for 24 hours.
+  for it like any other part. A quote holds for 24 hours. With a car chosen,
+  the catalogue's buttons list these parts too, after the stock, so even a
+  shop with empty shelves has a full catalogue for every car.
 - **Analogues** — the same part from other brands (a shared OEM number, or the
   catalogue's cross list), or an equivalent for the same car.
 - **Photos** — from the price list, or the catalogue's when it has the part.

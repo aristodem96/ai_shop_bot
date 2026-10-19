@@ -30,6 +30,80 @@ func NewCatalogPartRepository(pool *pgxpool.Pool) *CatalogPartRepository {
 // catalogPartColumns read a part with its translation, when there is one.
 const catalogPartColumns = `mp.id, mp.brand, mp.supplier_id, mp.number, coalesce(n.name_uk, mp.name) AS name, coalesce(n.category, '') AS category`
 
+// notStocked keeps a catalogue part the shop has no product for: the same
+// article, from the same brand or one the shop's product names no brand.
+const notStocked = `NOT EXISTS (
+	SELECT 1 FROM products p WHERE p.part_key = mp.article_key AND ` + listed + `
+	AND (p.brand = '' OR p.brand_key = mp.brand_key OR EXISTS (
+		SELECT 1 FROM brand_aliases a JOIN brands b ON b.id = a.brand_id
+		WHERE a.alias = mp.brand_key AND b.name = p.brand)))`
+
+// filedParts are a vehicle's catalogue parts the shop does not stock that
+// have a category, once each: a part only gets one when its name is
+// translated, and the menu has nowhere to put the rest.
+const filedParts = `
+	SELECT DISTINCT ON (mp.article_key, mp.brand_key) ` + catalogPartColumns + `
+	FROM vehicles v
+	JOIN autodb_mod_parts mp ON mp.mod_id = v.autodb_mod_id
+	JOIN autodb_part_names n ON n.name = mp.name AND n.category <> ''
+	WHERE v.id = $1 AND ` + notStocked + `
+	ORDER BY mp.article_key, mp.brand_key, mp.id`
+
+// CategoryCounts counts a vehicle's catalogue parts on order in each
+// category, for the menu.
+func (r *CatalogPartRepository) CategoryCounts(ctx context.Context, vehicleID int64) (map[int64]int, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT c.id, count(*) FROM (`+filedParts+`) x JOIN categories c ON c.slug = x.category
+		GROUP BY c.id`, vehicleID)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: catalogue parts per category of vehicle %d: %w", vehicleID, err)
+	}
+	out := make(map[int64]int)
+	var id int64
+	var n int
+	if _, err := pgx.ForEachRow(rows, []any{&id, &n}, func() error {
+		out[id] = n
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("postgres: scan catalogue part counts: %w", err)
+	}
+	return out, nil
+}
+
+// ByCategory returns one page of a vehicle's catalogue parts on order in a
+// category and its subcategories, by name, and how many there are.
+func (r *CatalogPartRepository) ByCategory(ctx context.Context, categoryID, vehicleID int64, limit, offset int) ([]domain.CatalogPart, int, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, brand, supplier_id, number, name, category, count(*) OVER () FROM (`+filedParts+`) x
+		WHERE x.category IN (SELECT slug FROM categories WHERE id = $2 OR parent_id = $2)
+		ORDER BY name, brand, number
+		LIMIT $3 OFFSET $4`, vehicleID, categoryID, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("postgres: catalogue parts of category %d: %w", categoryID, err)
+	}
+	var (
+		parts []domain.CatalogPart
+		total int
+	)
+	var p domain.CatalogPart
+	if _, err := pgx.ForEachRow(rows, []any{&p.ID, &p.Brand, &p.SupplierID, &p.Number, &p.Name, &p.Category, &total}, func() error {
+		parts = append(parts, p)
+		return nil
+	}); err != nil {
+		return nil, 0, fmt.Errorf("postgres: scan catalogue parts: %w", err)
+	}
+	if len(parts) == 0 && offset > 0 {
+		// Past the end: the total still matters for paging back.
+		if err := r.pool.QueryRow(ctx, `
+			SELECT count(*) FROM (`+filedParts+`) x
+			WHERE x.category IN (SELECT slug FROM categories WHERE id = $2 OR parent_id = $2)`,
+			vehicleID, categoryID).Scan(&total); err != nil {
+			return nil, 0, fmt.Errorf("postgres: count catalogue parts of category %d: %w", categoryID, err)
+		}
+	}
+	return parts, total, nil
+}
+
 // ForVehicle finds the catalogue's parts for a vehicle that the shop has no
 // product for. Query words match the Ukrainian name or the Russian one, a
 // category its subcategories too. A part listed in several sections comes
@@ -52,11 +126,7 @@ func (r *CatalogPartRepository) ForVehicle(ctx context.Context, f service.Search
 			       FROM unnest($3::text[]) w)
 			  AND ($4 = '' OR mp.article_key = $4)
 			  AND ($5 = '' OR mp.brand_key = $5)
-			  AND NOT EXISTS (
-			      SELECT 1 FROM products p WHERE p.part_key = mp.article_key AND `+listed+`
-			      AND (p.brand = '' OR p.brand_key = mp.brand_key OR EXISTS (
-			          SELECT 1 FROM brand_aliases a JOIN brands b ON b.id = a.brand_id
-			          WHERE a.alias = mp.brand_key AND b.name = p.brand)))
+			  AND `+notStocked+`
 			ORDER BY mp.article_key, mp.brand_key, mp.id
 		) x
 		ORDER BY category = '', brand, number

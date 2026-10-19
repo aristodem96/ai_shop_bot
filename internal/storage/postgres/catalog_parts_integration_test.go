@@ -83,4 +83,22 @@ func TestCatalogParts(t *testing.T) {
 	assert.Equal(t, all[0], *one)
 	_, err = repo.CatalogPart(ctx, -1)
 	require.ErrorIs(t, err, domain.ErrNotFound)
+
+	// The menu: only filed parts, once each, not those the shop stocks.
+	padsID, brakesID := categoryBySlug(t, "brake-pads"), categoryBySlug(t, "brakes")
+	counts, err := repo.CategoryCounts(ctx, vehicleID)
+	require.NoError(t, err)
+	assert.Equal(t, map[int64]int{padsID: 1}, counts, "the oil filter has no category yet, the Delphi is in stock")
+
+	for _, cat := range []int64{padsID, brakesID} {
+		page, total, err := repo.ByCategory(ctx, cat, vehicleID, 8, 0)
+		require.NoError(t, err)
+		assert.Equal(t, 1, total)
+		require.Len(t, page, 1, "a section holds its subcategories' parts")
+		assert.Equal(t, all[0], page[0])
+	}
+	page, total, err := repo.ByCategory(ctx, padsID, vehicleID, 8, 8)
+	require.NoError(t, err)
+	assert.Empty(t, page)
+	assert.Equal(t, 1, total, "past the end, still counted for paging back")
 }

@@ -34,6 +34,10 @@ type ProductPage struct {
 	// All lists the products of a whole section.
 	All      bool
 	Products []domain.Product
+	// OnOrder are the parts catalogue's parts for the vehicle that the shop
+	// does not stock, listed after the stock: a manager names their price
+	// on request. Total counts them too.
+	OnOrder []domain.CatalogPart
 	// Vehicle is the car the page is filtered for, nil for the whole range.
 	Vehicle *domain.Vehicle
 	// Page is zero-based; Pages is at least 1, so "1/1" renders for an empty
@@ -42,10 +46,26 @@ type ProductPage struct {
 	Pages int
 }
 
+// OrderParts are the parts catalogue's parts for a vehicle that the shop
+// does not stock. postgres.CatalogPartRepository is the implementation.
+type OrderParts interface {
+	// CategoryCounts counts them by the category they are filed in.
+	CategoryCounts(ctx context.Context, vehicleID int64) (map[int64]int, error)
+	// ByCategory returns one page of them in a category and its
+	// subcategories, and how many there are.
+	ByCategory(ctx context.Context, categoryID, vehicleID int64, limit, offset int) ([]domain.CatalogPart, int, error)
+}
+
 // CatalogService browses the catalogue.
 type CatalogService struct {
-	repo CatalogRepository
+	repo  CatalogRepository
+	order OrderParts // nil: the stock alone
 }
+
+// UseOrderParts has the catalogue of a chosen car list, after the stock,
+// the parts the shop can order for it: a shop with little on its shelves
+// still shows every part the car takes.
+func (s *CatalogService) UseOrderParts(o OrderParts) { s.order = o }
 
 // NewCatalogService wires a CatalogService.
 func NewCatalogService(repo CatalogRepository) *CatalogService {
@@ -76,11 +96,31 @@ func (s *CatalogService) tree(ctx context.Context, vehicle *domain.Vehicle) ([]d
 	if err != nil {
 		return nil, nil, err
 	}
-	counts, err := s.repo.CategoryCounts(ctx, vehicleIDOf(vehicle))
+	counts, err := s.counts(ctx, vehicleIDOf(vehicle))
 	if err != nil {
 		return nil, nil, err
 	}
 	return cats, counts, nil
+}
+
+// counts are the parts filed directly in each category: the stock, and for
+// a car the parts on order too.
+func (s *CatalogService) counts(ctx context.Context, vehicleID int64) (map[int64]int, error) {
+	counts, err := s.repo.CategoryCounts(ctx, vehicleID)
+	if err != nil {
+		return nil, err
+	}
+	if s.order == nil || vehicleID == 0 {
+		return counts, nil
+	}
+	order, err := s.order.CategoryCounts(ctx, vehicleID)
+	if err != nil {
+		return nil, fmt.Errorf("parts on order per category: %w", err)
+	}
+	for id, n := range order {
+		counts[id] += n
+	}
+	return counts, nil
 }
 
 // entries lists the children of parentID (the sections, for zero) that hold
@@ -142,7 +182,7 @@ func (s *CatalogService) CategoryPage(ctx context.Context, categoryID int64, veh
 	vehicleID := vehicleIDOf(vehicle)
 
 	if hasChildren && !all {
-		counts, err := s.repo.CategoryCounts(ctx, vehicleID)
+		counts, err := s.counts(ctx, vehicleID)
 		if err != nil {
 			return nil, err
 		}
@@ -160,24 +200,44 @@ func (s *CatalogService) CategoryPage(ctx context.Context, categoryID int64, veh
 	}
 
 	page = max(page, 0)
-	products, total, err := s.repo.ProductsByCategory(ctx, cat.ID, vehicleID, PageSize, page*PageSize)
+	pg := &ProductPage{Category: *cat, Parent: parent, All: hasChildren, Vehicle: vehicle}
+	total, err := s.fill(ctx, pg, vehicleID, page)
 	if err != nil {
 		return nil, err
 	}
-
-	pages := max((total+PageSize-1)/PageSize, 1)
-	if page >= pages {
-		page = pages - 1
-		products, _, err = s.repo.ProductsByCategory(ctx, cat.ID, vehicleID, PageSize, page*PageSize)
-		if err != nil {
+	pg.Total, pg.Page, pg.Pages = total, page, max((total+PageSize-1)/PageSize, 1)
+	if page >= pg.Pages {
+		pg.Page = pg.Pages - 1
+		if _, err := s.fill(ctx, pg, vehicleID, pg.Page); err != nil {
 			return nil, err
 		}
 	}
+	return pg, nil
+}
 
-	return &ProductPage{
-		Category: *cat, Parent: parent, All: hasChildren, Total: total,
-		Products: products, Vehicle: vehicle, Page: page, Pages: pages,
-	}, nil
+// fill puts one page of a category on pg -- the stock first, then the parts
+// on order, as one list -- and returns how long the list is.
+func (s *CatalogService) fill(ctx context.Context, pg *ProductPage, vehicleID int64, page int) (int, error) {
+	from := page * PageSize
+	products, stock, err := s.repo.ProductsByCategory(ctx, pg.Category.ID, vehicleID, PageSize, from)
+	if err != nil {
+		return 0, err
+	}
+	pg.Products, pg.OnOrder = products, nil
+	if s.order == nil || vehicleID == 0 {
+		return stock, nil
+	}
+	// The page starts in the stock or past it; what the stock leaves of it
+	// is the parts on order, from where the stock ended.
+	offset, limit := max(from-stock, 0), PageSize-len(products)
+	parts, onOrder, err := s.order.ByCategory(ctx, pg.Category.ID, vehicleID, max(limit, 1), offset)
+	if err != nil {
+		return 0, fmt.Errorf("parts on order of category %d: %w", pg.Category.ID, err)
+	}
+	if limit > 0 {
+		pg.OnOrder = parts
+	}
+	return stock + onOrder, nil
 }
 
 // Product returns a product card's data.
