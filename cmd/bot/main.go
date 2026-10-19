@@ -21,8 +21,10 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/aristodem96/ai_shop_bot/internal/agent"
+	"github.com/aristodem96/ai_shop_bot/internal/autodb"
 	"github.com/aristodem96/ai_shop_bot/internal/bot"
 	"github.com/aristodem96/ai_shop_bot/internal/config"
+	"github.com/aristodem96/ai_shop_bot/internal/directory"
 	"github.com/aristodem96/ai_shop_bot/internal/importer"
 	"github.com/aristodem96/ai_shop_bot/internal/llm"
 	"github.com/aristodem96/ai_shop_bot/internal/llm/claude"
@@ -87,7 +89,18 @@ func run() error {
 
 	catalog := service.NewCatalogService(catalogRepo)
 	cart := service.NewCartService(cartRepo, catalogRepo)
-	garage := service.NewGarageService(vehicleRepo, vehicleRepo)
+	// With an Auto-DB account, buyers' cars come from its catalogue of every
+	// vehicle; without one, from the shop's own list.
+	var (
+		vehicles service.VehicleRepository = vehicleRepo
+		dir      *directory.Directory
+	)
+	if cfg.AutoDB.User != "" {
+		api := autodb.New(autodb.Config{BaseURL: cfg.AutoDB.URL, User: cfg.AutoDB.User, Password: cfg.AutoDB.Password})
+		dir = directory.New(api, postgres.NewDirectoryRepository(pool), log)
+		vehicles = dir
+	}
+	garage := service.NewGarageService(vehicles, vehicleRepo)
 	kits := service.NewMaintenanceService(catalogRepo, vehicleRepo)
 
 	tg := telegram.NewWithBaseURL(cfg.TelegramAPIURL, cfg.TelegramToken)
@@ -103,6 +116,14 @@ func run() error {
 	}, log)
 
 	group, gctx := errgroup.WithContext(ctx)
+	if dir != nil {
+		// Makes and models in the cache before buyers ask; the API takes
+		// seconds a call, and a cold lookup would keep a buyer waiting.
+		group.Go(func() error {
+			dir.Warm(gctx)
+			return nil
+		})
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

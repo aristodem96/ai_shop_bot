@@ -96,7 +96,7 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, ord
 				"make":   str("Make in Latin letters, e.g. \"Skoda\"."),
 				"model":  str("Model in Latin letters, e.g. \"Octavia\"."),
 				"year":   integer("Year of manufacture."),
-				"engine": str("Engine as the buyer gives it, e.g. \"1.4\", \"TDI\"."),
+				"engine": str("Engine as the buyer gives it: a displacement (\"1.6\"), an engine code (\"F16D3\") or a fuel (\"дизель\")."),
 			}),
 		},
 		{
