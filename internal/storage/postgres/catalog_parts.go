@@ -53,7 +53,7 @@ func (r *CatalogPartRepository) ForVehicle(ctx context.Context, f service.Search
 			  AND ($4 = '' OR mp.article_key = $4)
 			  AND ($5 = '' OR mp.brand_key = $5)
 			  AND NOT EXISTS (
-			      SELECT 1 FROM products p WHERE p.part_key = mp.article_key AND p.is_active AND p.request_id IS NULL
+			      SELECT 1 FROM products p WHERE p.part_key = mp.article_key AND `+listed+`
 			      AND (p.brand = '' OR p.brand_key = mp.brand_key OR EXISTS (
 			          SELECT 1 FROM brand_aliases a JOIN brands b ON b.id = a.brand_id
 			          WHERE a.alias = mp.brand_key AND b.name = p.brand)))

@@ -24,7 +24,7 @@ func (r *ImportRepository) ProductsContaining(ctx context.Context, word string) 
 	rows, err := r.pool.Query(ctx, `
 		SELECT p.id, p.name, c.slug FROM products p
 		JOIN categories c ON c.id = p.category_id
-		WHERE p.is_active AND p.request_id IS NULL AND strpos(lower(p.name), $1) > 0
+		WHERE `+listed+` AND strpos(lower(p.name), $1) > 0
 		ORDER BY p.name, p.id`, word)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: products containing %q: %w", word, err)

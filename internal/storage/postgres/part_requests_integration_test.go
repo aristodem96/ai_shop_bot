@@ -56,6 +56,11 @@ func TestPartRequestQuoteSellsOnlyThroughTheRequest(t *testing.T) {
 	found, err := NewCatalogRepository(testPool).Search(ctx, service.SearchFilter{PartNumber: "P85075", Limit: 10})
 	require.NoError(t, err)
 	assert.Empty(t, found, "a quote is not in the catalogue")
+	page, _, err := NewCatalogRepository(testPool).ProductsByCategory(ctx, p.CategoryID, 0, 1000, 0)
+	require.NoError(t, err)
+	for _, x := range page {
+		assert.NotEqual(t, req.ProductID, x.ID, "nor in its category's pages")
+	}
 
 	buyerCart(t, 7001, req.ProductID, 2)
 	o := place(t, 7001)

@@ -31,7 +31,7 @@ func (w *whereBuilder) add(cond string) { w.conds = append(w.conds, cond) }
 // of the filter.
 func (r *CatalogRepository) Search(ctx context.Context, f service.SearchFilter) ([]domain.Product, error) {
 	var w whereBuilder
-	w.add("p.is_active AND p.request_id IS NULL")
+	w.add(listed)
 	w.add(available)
 
 	if f.Category != "" {
