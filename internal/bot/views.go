@@ -24,15 +24,16 @@ func button(text string, act action, args ...int64) telegram.InlineButton {
 	return telegram.InlineButton{Text: text, CallbackData: encode(act, args...)}
 }
 
-func mainMenu() *telegram.ReplyKeyboard {
+func mainMenu(placeholder string) *telegram.ReplyKeyboard {
 	return &telegram.ReplyKeyboard{
 		Rows: [][]telegram.KeyboardButton{
 			{{Text: btnCatalog}, {Text: btnCart}},
 			{{Text: btnCar}, {Text: btnOrders}},
 			{{Text: btnHelp}},
 		},
-		Resize:     true,
-		Persistent: true,
+		Resize:      true,
+		Persistent:  true,
+		Placeholder: placeholder,
 	}
 }
 

@@ -224,6 +224,13 @@ func (a *app) wireShop() {
 	if err := a.tg.SetCommands(a.startup, bot.Commands); err != nil {
 		a.log.Warn("could not register the command menu", slog.Any("error", err))
 	}
+	// What a newcomer reads before Start: that the bot is talked to. It
+	// would promise a consultant that a bot without one does not have.
+	if a.cfg.LLM.Provider != "none" {
+		if err := a.tg.SetDescription(a.startup, bot.Description, bot.ShortDescription); err != nil {
+			a.log.Warn("could not set the bot's description", slog.Any("error", err))
+		}
+	}
 	a.bot = bot.New(a.tg, a.tg, a.catalog, a.cart, a.garage, a.kits, bot.Config{
 		MaxPending:     a.cfg.MaxPending,
 		HandlerTimeout: a.cfg.HandlerTimeout,

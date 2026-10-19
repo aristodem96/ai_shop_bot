@@ -278,3 +278,22 @@ func TestWithoutConsultantTheWholeCatalogueOpens(t *testing.T) {
 	b.Handle(context.Background(), text(btnCatalog))
 	assert.Contains(t, b.tg.last("sendMessage").text, "Оберіть розділ", "no consultant, no way to name a car")
 }
+
+func TestNewcomersAreToldToWrite(t *testing.T) {
+	b, tg := withConsultant(&fakeConsultant{}, fakeLimiter{allow: true})
+	ctx := context.Background()
+	b.Handle(ctx, text("/start"))
+	welcome := tg.calls[0]
+	assert.Equal(t, msgWelcome, welcome.text)
+	assert.Equal(t, msgPlaceholder, welcome.markup.(*telegram.ReplyKeyboard).Placeholder, "the empty input field says to write")
+	assert.Equal(t, msgAskCar, tg.last("sendMessage").text)
+
+	b.garage.car = &octavia
+	b.Handle(ctx, text(btnCatalog))
+	assert.True(t, strings.HasSuffix(tg.last("sendMessage").text, msgTypeHint), "browsing points to the quicker way")
+
+	plain := newTestBot()
+	plain.Handle(ctx, text("/start"))
+	assert.Equal(t, msgWelcomeButtons, plain.tg.calls[0].text, "no consultant, no promise of one")
+	assert.Empty(t, plain.tg.calls[0].markup.(*telegram.ReplyKeyboard).Placeholder)
+}

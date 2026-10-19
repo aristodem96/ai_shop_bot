@@ -28,6 +28,24 @@ func (b *Bot) car(ctx context.Context, user int64) *domain.Vehicle {
 	return v
 }
 
+// mainMenu is the keyboard under the input field. With the consultant on,
+// the empty field itself says what to do: write.
+func (b *Bot) mainMenu() *telegram.ReplyKeyboard {
+	if b.consultant == nil {
+		return mainMenu("")
+	}
+	return mainMenu(msgPlaceholder)
+}
+
+// typeHint ends a screen the buyer browses with the shorter way: writing.
+// Empty without the consultant.
+func (b *Bot) typeHint() string {
+	if b.consultant == nil {
+		return ""
+	}
+	return "\n\n" + msgTypeHint
+}
+
 // start follows the greeting: a buyer without a car is asked to name it,
 // because nearly every part depends on it.
 func (b *Bot) start(ctx context.Context, chat, user int64) {
@@ -60,7 +78,7 @@ func (b *Bot) sendCategories(ctx context.Context, chat, user int64) {
 		return
 	}
 	text, kb := categoriesView(menu, car, b.progress(ctx, car))
-	b.send(ctx, chat, text, kb)
+	b.send(ctx, chat, text+b.typeHint(), kb)
 }
 
 func (b *Bot) editCategories(ctx context.Context, cc callbackCtx) error {
@@ -73,7 +91,7 @@ func (b *Bot) editCategories(ctx context.Context, cc callbackCtx) error {
 		return err
 	}
 	text, kb := categoriesView(menu, car, b.progress(ctx, car))
-	return b.editText(ctx, cc, text, kb)
+	return b.editText(ctx, cc, text+b.typeHint(), kb)
 }
 
 func (b *Bot) editProductPage(ctx context.Context, cc callbackCtx, categoryID int64, page int, all bool) error {
@@ -187,7 +205,7 @@ func (b *Bot) changeCart(ctx context.Context, cc callbackCtx, change func() (*do
 func (b *Bot) sendCar(ctx context.Context, chat, user int64) {
 	if car := b.car(ctx, user); car != nil {
 		text, kb := carView(car, b.progress(ctx, car))
-		b.send(ctx, chat, text, kb)
+		b.send(ctx, chat, text+b.typeHint(), kb)
 		return
 	}
 	b.send(ctx, chat, msgAskCar, nil)
@@ -200,7 +218,7 @@ func (b *Bot) editCar(ctx context.Context, cc callbackCtx) error {
 		return b.editText(ctx, cc, msgAskCar, nil)
 	}
 	text, kb := carView(car, b.progress(ctx, car))
-	return b.editText(ctx, cc, text, kb)
+	return b.editText(ctx, cc, text+b.typeHint(), kb)
 }
 
 // errNoCar is a kit asked for before the buyer named a car.

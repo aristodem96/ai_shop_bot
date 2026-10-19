@@ -2,6 +2,7 @@ package bot
 
 import (
 	"testing"
+	"unicode/utf16"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -16,4 +17,11 @@ func TestAdminMenuNamesEachCommandOnce(t *testing.T) {
 			seen[c.Command] = true
 		}
 	}
+}
+
+// Telegram refuses longer ones and the bot would start without them.
+func TestDescriptionsFitTelegram(t *testing.T) {
+	assert.LessOrEqual(t, len(utf16.Encode([]rune(Description))), 512)
+	assert.LessOrEqual(t, len(utf16.Encode([]rune(ShortDescription))), 120)
+	assert.LessOrEqual(t, len(utf16.Encode([]rune(msgPlaceholder))), 64)
 }

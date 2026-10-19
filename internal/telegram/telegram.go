@@ -174,6 +174,8 @@ type ReplyKeyboard struct {
 	Resize bool `json:"resize_keyboard,omitempty"`
 	// Persistent keeps it shown even after the user hides it.
 	Persistent bool `json:"is_persistent,omitempty"`
+	// Placeholder is the hint in the empty input field, up to 64 characters.
+	Placeholder string `json:"input_field_placeholder,omitempty"`
 }
 
 func (*ReplyKeyboard) replyMarkup() {}
@@ -444,6 +446,15 @@ type Command struct {
 // SetCommands registers the command menu.
 func (c *Client) SetCommands(ctx context.Context, commands []Command) error {
 	return c.call(ctx, "setMyCommands", map[string]any{"commands": commands}, nil)
+}
+
+// SetDescription sets what the bot's empty chat shows before Start (up to
+// 512 characters) and the line on its profile (up to 120).
+func (c *Client) SetDescription(ctx context.Context, description, short string) error {
+	if err := c.call(ctx, "setMyDescription", map[string]any{"description": description}, nil); err != nil {
+		return err
+	}
+	return c.call(ctx, "setMyShortDescription", map[string]any{"short_description": short}, nil)
 }
 
 // SetChatCommands registers the command menu of one chat, which replaces the

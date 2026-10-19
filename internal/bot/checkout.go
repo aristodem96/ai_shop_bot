@@ -147,7 +147,7 @@ func (b *Bot) inCheckout(ctx context.Context, chat int64, m *telegram.Message) (
 func (b *Bot) checkoutInput(ctx context.Context, chat, user int64, m *telegram.Message, st *checkoutState) {
 	if m.Text == btnCancelCheckout || m.Text == "/cancel" {
 		_ = b.sessions.Delete(ctx, chat)
-		b.send(ctx, chat, msgCheckoutCancelled, mainMenu())
+		b.send(ctx, chat, msgCheckoutCancelled, b.mainMenu())
 		return
 	}
 	text := strings.TrimSpace(m.Text)
@@ -228,7 +228,7 @@ func (b *Bot) confirmCheckout(ctx context.Context, chat, user int64, st *checkou
 		return
 	}
 	// The reply keyboard goes back to the menu before the inline confirm.
-	b.send(ctx, chat, msgContactsSaved, mainMenu())
+	b.send(ctx, chat, msgContactsSaved, b.mainMenu())
 	confirm, kb := confirmView(cart, st.Contacts)
 	b.send(ctx, chat, confirm, kb)
 }

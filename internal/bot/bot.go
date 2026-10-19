@@ -313,7 +313,11 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 
 	switch m.Text {
 	case "/start":
-		b.send(ctx, chat, msgWelcome, mainMenu())
+		welcome := msgWelcome
+		if b.consultant == nil {
+			welcome = msgWelcomeButtons
+		}
+		b.send(ctx, chat, welcome, b.mainMenu())
 		b.start(ctx, chat, user)
 	case "/catalog", btnCatalog:
 		b.sendCategories(ctx, chat, user)
@@ -322,7 +326,7 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 	case "/cart", btnCart:
 		b.sendCart(ctx, chat, user)
 	case "/help", btnHelp:
-		b.send(ctx, chat, msgHelp, mainMenu())
+		b.send(ctx, chat, msgHelp, b.mainMenu())
 	case "/orders", btnOrders:
 		b.sendOrders(ctx, chat, user)
 	case "/new":
