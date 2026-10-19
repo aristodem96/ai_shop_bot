@@ -87,6 +87,8 @@ services:
       # Supplier profiles for price lists sent to the managers' chat. A new
       # supplier is a new file in ./profiles; no rebuild needed.
       IMPORT_PROFILES_DIR: /profiles
+      # Uploaded price lists wait here for "Apply", across restarts.
+      IMPORT_DIR: /imports
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LOG_FORMAT: ${LOG_FORMAT:-json}
     ports:
@@ -98,6 +100,8 @@ services:
     stop_grace_period: 70s
     volumes:
       - ./profiles:/profiles:ro
+      - imports:/imports
 
 volumes:
   pgdata:
+  imports:

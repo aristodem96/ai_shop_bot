@@ -453,3 +453,6 @@ func TestStaleButtonsSaySo(t *testing.T) {
 	b.Handle(context.Background(), press(encode(actProduct, 404)))
 	assert.True(t, strings.Contains(b.tg.last("answerCallbackQuery").text, "недоступний"))
 }
+
+// Dialog ids start at 1 in tests, so a test can name the button it presses.
+func init() { firstJobID = func() int64 { return 0 } }

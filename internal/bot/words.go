@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/aristodem96/ai_shop_bot/internal/importer"
@@ -46,18 +45,11 @@ type wordJob struct {
 	created time.Time
 }
 
-type wordJobs struct {
-	mu   sync.Mutex
-	next int64
-	jobs map[int64]*wordJob
-	// awaiting is the job whose new category's title the chat is typing.
-	awaiting map[int64]int64
-}
-
 // UseWords turns on /word and /words in the managers' chat.
 func (b *Bot) UseWords(words Words) {
 	b.words = words
-	b.wordJobs = &wordJobs{jobs: make(map[int64]*wordJob), awaiting: make(map[int64]int64)}
+	// The reply awaited is the title of a new category the chat is typing.
+	b.wordJobs = newJobs[wordJob](wordTTL, b.dialogs("dialog:word:", wordTTL), b.dialogs("dialog:word-reply:", wordTTL), b.log)
 }
 
 // commandArg matches a command, with or without the bot's name a group
@@ -76,12 +68,12 @@ func commandArg(text, cmd string) (string, bool) {
 func (b *Bot) handleWordsMessage(ctx context.Context, m *telegram.Message) bool {
 	chat := m.Chat.ID
 	if arg, ok := commandArg(m.Text, cmdWord); ok {
-		b.wordJobs.forget(chat)
+		b.wordJobs.forget(ctx, chat)
 		b.startWord(ctx, chat, arg)
 		return true
 	}
 	if _, ok := commandArg(m.Text, cmdWords); ok {
-		b.wordJobs.forget(chat)
+		b.wordJobs.forget(ctx, chat)
 		text, kb := b.wordsList(ctx)
 		b.send(ctx, chat, text, kb)
 		return true
@@ -89,11 +81,12 @@ func (b *Bot) handleWordsMessage(ctx context.Context, m *telegram.Message) bool 
 	if m.Text == "" || strings.HasPrefix(m.Text, "/") {
 		return false
 	}
-	job, ok := b.wordJobs.awaitingTitle(chat)
-	if !ok {
+	job, ok := b.wordJobs.awaited(ctx, chat)
+	if !ok || job.create == nil {
 		return false
 	}
 	job.create.Title = m.Text
+	b.wordJobs.save(ctx, job)
 	b.previewWord(ctx, chat, job, 0)
 	return true
 }
@@ -124,7 +117,7 @@ func (b *Bot) startWord(ctx context.Context, chat int64, arg string) {
 		b.fail(ctx, chat, "list categories", err)
 		return
 	}
-	job := b.wordJobs.add(&wordJob{chat: chat, word: word, created: time.Now()})
+	job := b.wordJobs.add(ctx, &wordJob{chat: chat, word: word, created: time.Now()})
 	b.send(ctx, chat, wordStartText(info), sectionsKeyboard(job.id, cats))
 }
 
@@ -143,6 +136,7 @@ func (b *Bot) pickWordCategory(ctx context.Context, cc callbackCtx, id, idx int6
 		return "", b.editText(ctx, cc, fmt.Sprintf(msgWordPickSub, esc(job.word), esc(c.Title)), subcategoriesKeyboard(job.id, cats, idx))
 	}
 	job.slug, job.create = c.Slug, nil
+	b.wordJobs.save(ctx, job)
 	b.previewWord(ctx, cc.chat, job, cc.msg)
 	return "", nil
 }
@@ -164,7 +158,8 @@ func (b *Bot) newWordCategory(ctx context.Context, cc callbackCtx, id, idx int64
 		question = fmt.Sprintf(msgWordNewSub, esc(cats[idx].Title))
 	}
 	job.slug, job.create = "", create
-	b.wordJobs.await(cc.chat, job.id)
+	b.wordJobs.save(ctx, job)
+	b.wordJobs.await(ctx, cc.chat, job.id)
 	if err := b.removeButtons(ctx, cc); err != nil {
 		return "", err
 	}
@@ -211,7 +206,7 @@ func (b *Bot) applyWord(ctx context.Context, cc callbackCtx, id int64) (string, 
 	if !b.isAdmin(cc.chat) {
 		return "", errBadCallback
 	}
-	job, ok := b.wordJobs.take(id)
+	job, ok := b.wordJobs.take(ctx, id)
 	if !ok {
 		return msgImportGone, b.removeButtons(ctx, cc)
 	}
@@ -233,8 +228,8 @@ func (b *Bot) cancelWord(ctx context.Context, cc callbackCtx, id int64) (string,
 	if !b.isAdmin(cc.chat) {
 		return "", errBadCallback
 	}
-	b.wordJobs.take(id)
-	b.wordJobs.forget(cc.chat)
+	b.wordJobs.take(ctx, id)
+	b.wordJobs.forget(ctx, cc.chat)
 	return msgImportCancelled, b.editText(ctx, cc, msgWordCancelled, nil)
 }
 
@@ -301,7 +296,7 @@ func (b *Bot) wordStep(ctx context.Context, cc callbackCtx, id int64) (*wordJob,
 	if !b.isAdmin(cc.chat) {
 		return nil, nil, errBadCallback
 	}
-	job, ok := b.wordJobs.get(id)
+	job, ok := b.wordJobs.get(ctx, id)
 	if !ok {
 		return nil, nil, b.editText(ctx, cc, msgWordExpired, nil)
 	}
@@ -328,68 +323,4 @@ func hasChildren(cats []importer.Category, slug string) bool {
 		}
 	}
 	return false
-}
-
-func (s *wordJobs) add(job *wordJob) *wordJob {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, j := range s.jobs {
-		if time.Since(j.created) > wordTTL {
-			delete(s.jobs, id)
-		}
-	}
-	s.next++
-	job.id = s.next
-	s.jobs[job.id] = job
-	return job
-}
-
-func (s *wordJobs) get(id int64) (*wordJob, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	j, ok := s.jobs[id]
-	if !ok || time.Since(j.created) > wordTTL {
-		return nil, false
-	}
-	return j, true
-}
-
-func (s *wordJobs) take(id int64) (*wordJob, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	j, ok := s.jobs[id]
-	delete(s.jobs, id)
-	if !ok || time.Since(j.created) > wordTTL {
-		return nil, false
-	}
-	return j, true
-}
-
-func (s *wordJobs) await(chat, id int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.awaiting[chat] = id
-}
-
-// awaitingTitle returns the job whose new category the chat names next,
-// once: a second message is an ordinary message again.
-func (s *wordJobs) awaitingTitle(chat int64) (*wordJob, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	id, ok := s.awaiting[chat]
-	if !ok {
-		return nil, false
-	}
-	delete(s.awaiting, chat)
-	j, ok := s.jobs[id]
-	if !ok || j.create == nil || time.Since(j.created) > wordTTL {
-		return nil, false
-	}
-	return j, true
-}
-
-func (s *wordJobs) forget(chat int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.awaiting, chat)
 }

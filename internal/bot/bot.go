@@ -98,12 +98,12 @@ type Bot struct {
 
 	// matching is nil until UseVehicleMatching is called.
 	matching  VehicleMatching
-	matchJobs *matchJobs
-	carDrafts *carDrafts
+	matchJobs *jobs[matchJob, *matchJob]
+	carDrafts *jobs[carDraft, *carDraft]
 
 	// words is nil until UseWords is called.
 	words    Words
-	wordJobs *wordJobs
+	wordJobs *jobs[wordJob, *wordJob]
 
 	// photos and enricher are nil until UsePhotos and UseEnrichment are
 	// called.
@@ -114,11 +114,15 @@ type Bot struct {
 	requests PartRequests
 	parts    CatalogParts
 
+	// dialogStore keeps the managers' dialogs across restarts; nil keeps
+	// them in memory. Set by KeepDialogs, before the Use calls.
+	dialogStore func(prefix string, ttl time.Duration) Sessions
+
 	// imports is nil until UseImports is called.
 	imports     Imports
 	importFiles Files
 	importDir   string
-	importJobs  *importJobs
+	importJobs  *jobs[importJob, *importJob]
 }
 
 // New wires a Bot.

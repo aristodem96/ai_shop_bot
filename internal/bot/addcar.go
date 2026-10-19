@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/aristodem96/ai_shop_bot/internal/importer"
@@ -49,17 +48,6 @@ func (d *carDraft) kept() []importer.Vehicle {
 	return out
 }
 
-type carDrafts struct {
-	mu       sync.Mutex
-	next     int64
-	drafts   map[int64]*carDraft
-	awaiting map[int64]int64 // chat -> draft waiting for a typed reply
-}
-
-func newCarDrafts() *carDrafts {
-	return &carDrafts{drafts: make(map[int64]*carDraft), awaiting: make(map[int64]int64)}
-}
-
 // addFromMatch is "add to the directory" on a name of a matching session.
 // The session's message turns into the draft.
 func (b *Bot) addFromMatch(ctx context.Context, cc callbackCtx, id, item int64) (string, error) {
@@ -68,7 +56,8 @@ func (b *Bot) addFromMatch(ctx context.Context, cc callbackCtx, id, item int64) 
 		return msgMatchStale, err
 	}
 	cur := job.current()
-	d := b.carDrafts.add(&carDraft{chat: cc.chat, name: cur.Name, examples: cur.Examples, match: job.id, item: job.idx})
+	d := b.carDrafts.add(ctx, &carDraft{chat: cc.chat, name: cur.Name, examples: cur.Examples, match: job.id, item: job.idx,
+		dropped: make(map[int]bool)})
 	return "", b.proposeCar(ctx, cc, d, "")
 }
 
@@ -82,7 +71,7 @@ func (b *Bot) startCar(ctx context.Context, chat int64, text string) {
 		b.send(ctx, chat, help, nil)
 		return
 	}
-	d := b.carDrafts.add(&carDraft{chat: chat, name: text})
+	d := b.carDrafts.add(ctx, &carDraft{chat: chat, name: text, dropped: make(map[int]bool)})
 	if !b.matching.CanPropose() {
 		b.takeCarText(ctx, chat, d, text)
 		return
@@ -110,6 +99,7 @@ func (b *Bot) proposeCar(ctx context.Context, cc callbackCtx, d *carDraft, corre
 		d.vehicles, d.note, d.rejected = p.Vehicles, p.Note, p.Rejected
 		d.dropped = make(map[int]bool)
 	}
+	b.carDrafts.save(ctx, d)
 	text, kb := carDraftView(d, b.matching.CanPropose())
 	return b.editText(ctx, cc, text, kb)
 }
@@ -117,7 +107,7 @@ func (b *Bot) proposeCar(ctx context.Context, cc callbackCtx, d *carDraft, corre
 // askCarText asks for a reply: a correction to the model, or the vehicle
 // typed by hand.
 func (b *Bot) askCarText(ctx context.Context, cc callbackCtx, d *carDraft) error {
-	b.carDrafts.await(cc.chat, d.id)
+	b.carDrafts.await(ctx, cc.chat, d.id)
 	question := msgCarManual
 	if b.matching.CanPropose() && len(d.vehicles) > 0 {
 		question = msgCarCorrect
@@ -143,6 +133,7 @@ func (b *Bot) takeCarText(ctx context.Context, chat int64, d *carDraft, text str
 		return
 	}
 	d.vehicles = append(d.vehicles, v)
+	b.carDrafts.save(ctx, d)
 	text2, kb := carDraftView(d, false)
 	b.send(ctx, chat, text2, kb)
 }
@@ -152,14 +143,14 @@ func (b *Bot) takeCarText(ctx context.Context, chat int64, d *carDraft, text str
 func (b *Bot) handleCarText(ctx context.Context, m *telegram.Message) bool {
 	chat := m.Chat.ID
 	if arg, ok := commandArg(m.Text, cmdCar); ok {
-		b.carDrafts.forget(chat)
+		b.carDrafts.forget(ctx, chat)
 		b.startCar(ctx, chat, arg)
 		return true
 	}
 	if m.Text == "" || strings.HasPrefix(m.Text, "/") {
 		return false
 	}
-	d, ok := b.carDrafts.awaitingReply(chat)
+	d, ok := b.carDrafts.awaited(ctx, chat)
 	if !ok {
 		return false
 	}
@@ -171,7 +162,7 @@ func (b *Bot) routeCar(ctx context.Context, cc callbackCtx, cb callback) (string
 	if !b.isAdmin(cc.chat) {
 		return "", errBadCallback
 	}
-	d, ok := b.carDrafts.get(cb.args[0])
+	d, ok := b.carDrafts.get(ctx, cb.args[0])
 	if !ok {
 		return "", b.editText(ctx, cc, msgMatchExpired, nil)
 	}
@@ -182,12 +173,13 @@ func (b *Bot) routeCar(ctx context.Context, cc callbackCtx, cb callback) (string
 			return "", errBadCallback
 		}
 		d.dropped[i] = !d.dropped[i]
+		b.carDrafts.save(ctx, d)
 		text, kb := carDraftView(d, b.matching.CanPropose())
 		return "", b.editText(ctx, cc, text, kb)
 	case actCarText:
 		return "", b.askCarText(ctx, cc, d)
 	case actCarBack:
-		b.carDrafts.remove(d.id)
+		b.carDrafts.remove(ctx, d.id)
 		return "", b.backToMatchOrClose(ctx, cc, d)
 	default:
 		return b.addCar(ctx, cc, d)
@@ -201,7 +193,7 @@ func (b *Bot) addCar(ctx context.Context, cc callbackCtx, d *carDraft) (string, 
 	if len(kept) == 0 {
 		return msgCarNothing, nil
 	}
-	b.carDrafts.remove(d.id)
+	b.carDrafts.remove(ctx, d.id)
 	ids, err := b.matching.AddVehicles(ctx, kept)
 	if err != nil {
 		return "", err
@@ -209,7 +201,7 @@ func (b *Bot) addCar(ctx context.Context, cc callbackCtx, d *carDraft) (string, 
 	if d.match == 0 {
 		return "", b.editText(ctx, cc, carAddedText(kept), nil)
 	}
-	job, ok := b.matchJobs.get(d.match)
+	job, ok := b.matchJobs.get(ctx, d.match)
 	if !ok || job.idx != d.item {
 		// The session ended or moved on meanwhile: the vehicles are in, the
 		// name is mapped at its next import or session.
@@ -229,71 +221,10 @@ func (b *Bot) addCar(ctx context.Context, cc callbackCtx, d *carDraft) (string, 
 // /car, closed.
 func (b *Bot) backToMatchOrClose(ctx context.Context, cc callbackCtx, d *carDraft) error {
 	if d.match != 0 {
-		if job, ok := b.matchJobs.get(d.match); ok && job.idx == d.item {
+		if job, ok := b.matchJobs.get(ctx, d.match); ok && job.idx == d.item {
 			text, kb := matchItemView(job, b.matching.CanSuggest())
 			return b.editText(ctx, cc, text, kb)
 		}
 	}
 	return b.editText(ctx, cc, msgWordCancelled, nil)
-}
-
-func (s *carDrafts) add(d *carDraft) *carDraft {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, x := range s.drafts {
-		if time.Since(x.created) > importTTL {
-			delete(s.drafts, id)
-		}
-	}
-	s.next++
-	d.id, d.created = s.next, time.Now()
-	if d.dropped == nil {
-		d.dropped = make(map[int]bool)
-	}
-	s.drafts[d.id] = d
-	return d
-}
-
-func (s *carDrafts) get(id int64) (*carDraft, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	d, ok := s.drafts[id]
-	if !ok || time.Since(d.created) > importTTL {
-		return nil, false
-	}
-	return d, true
-}
-
-func (s *carDrafts) remove(id int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.drafts, id)
-}
-
-func (s *carDrafts) await(chat, id int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.awaiting[chat] = id
-}
-
-// awaitingReply returns the draft the chat's next message answers, once.
-func (s *carDrafts) awaitingReply(chat int64) (*carDraft, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	id, ok := s.awaiting[chat]
-	if !ok {
-		return nil, false
-	}
-	delete(s.awaiting, chat)
-	d, ok := s.drafts[id]
-	if !ok || time.Since(d.created) > importTTL {
-		return nil, false
-	}
-	return d, true
-}
-
-func (s *carDrafts) forget(chat int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.awaiting, chat)
 }

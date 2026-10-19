@@ -254,6 +254,11 @@ func run() error {
 	}
 
 	// --- catalogue imports from the managers' chat ----------------------------
+	// Managers' dialogs -- an upload waiting for Apply, a matching session --
+	// are kept in Redis, so a restart halfway through loses nothing.
+	b.KeepDialogs(func(prefix string, ttl time.Duration) bot.Sessions {
+		return redisstore.NewSessions(rdb, prefix, ttl)
+	})
 	if cfg.Payments.AdminChatID != 0 {
 		importRepo := postgres.NewImportRepository(pool)
 		deps := importer.Deps{Prices: importRepo, Vehicles: importRepo, Keywords: importRepo, Aliases: importRepo}

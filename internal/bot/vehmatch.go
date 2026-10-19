@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/aristodem96/ai_shop_bot/internal/importer"
@@ -67,18 +66,12 @@ func (j *matchJob) model(id int64) (importer.Model, bool) {
 	return importer.Model{}, false
 }
 
-type matchJobs struct {
-	mu   sync.Mutex
-	next int64
-	jobs map[int64]*matchJob
-}
-
 // UseVehicleMatching turns on mapping vehicle names from import reports, and
 // /cars.
 func (b *Bot) UseVehicleMatching(m VehicleMatching) {
 	b.matching = m
-	b.matchJobs = &matchJobs{jobs: make(map[int64]*matchJob)}
-	b.carDrafts = newCarDrafts()
+	b.matchJobs = newJobs[matchJob](importTTL, b.dialogs("dialog:match:", importTTL), nil, b.log)
+	b.carDrafts = newJobs[carDraft](importTTL, b.dialogs("dialog:car:", importTTL), b.dialogs("dialog:car-reply:", importTTL), b.log)
 }
 
 // routeMatch dispatches the vehicle matching buttons.
@@ -111,7 +104,7 @@ func (b *Bot) startMatch(ctx context.Context, cc callbackCtx, importID int64) (s
 	if !b.isAdmin(cc.chat) {
 		return "", errBadCallback
 	}
-	ij, ok := b.importJobs.get(importID)
+	ij, ok := b.importJobs.get(ctx, importID)
 	if !ok || ij.report == nil || ij.cars {
 		return msgImportExpired, b.removeButtons(ctx, cc)
 	}
@@ -144,7 +137,7 @@ func (b *Bot) startMatch(ctx context.Context, cc callbackCtx, importID int64) (s
 		s := suggestions[u.Name]
 		job.items = append(job.items, matchItem{UnknownVehicle: u, suggested: s.ModelIDs, note: s.Note})
 	}
-	b.matchJobs.add(job)
+	b.matchJobs.add(ctx, job)
 	text, kb := matchItemView(job, b.matching.CanSuggest())
 	b.send(ctx, cc.chat, text, kb)
 	return "", nil
@@ -233,6 +226,7 @@ func (b *Bot) nextMatch(ctx context.Context, cc callbackCtx, job *matchJob) erro
 	if job.idx >= len(job.items) {
 		return b.finishMatch(ctx, cc, job)
 	}
+	b.matchJobs.save(ctx, job)
 	text, kb := matchItemView(job, b.matching.CanSuggest())
 	return b.editText(ctx, cc, text, kb)
 }
@@ -240,13 +234,13 @@ func (b *Bot) nextMatch(ctx context.Context, cc callbackCtx, job *matchJob) erro
 // finishMatch sums the session up and checks the file again: the new
 // mappings turn into fitments, and the new report has the Apply button.
 func (b *Bot) finishMatch(ctx context.Context, cc callbackCtx, job *matchJob) error {
-	b.matchJobs.remove(job.id)
+	b.matchJobs.remove(ctx, job.id)
 	// Stopped early, the names not reached count as skipped too.
 	skipped := job.skipped + max(len(job.items)-job.idx, 0)
 	if err := b.editText(ctx, cc, fmt.Sprintf(msgMatchDone, num(job.matched), num(skipped)), nil); err != nil {
 		return err
 	}
-	ij, ok := b.importJobs.get(job.importJob)
+	ij, ok := b.importJobs.get(ctx, job.importJob)
 	if !ok {
 		b.send(ctx, cc.chat, msgMatchFileGone, nil)
 		return nil
@@ -270,7 +264,7 @@ func (b *Bot) matchStep(ctx context.Context, cc callbackCtx, id int64) (*matchJo
 	if !b.isAdmin(cc.chat) {
 		return nil, errBadCallback
 	}
-	job, ok := b.matchJobs.get(id)
+	job, ok := b.matchJobs.get(ctx, id)
 	if !ok {
 		return nil, b.editText(ctx, cc, msgMatchExpired, nil)
 	}
@@ -317,33 +311,4 @@ func modelMakes(models []importer.Model) []string {
 	}
 	slices.Sort(makes)
 	return makes
-}
-
-func (s *matchJobs) add(job *matchJob) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, j := range s.jobs {
-		if time.Since(j.created) > importTTL {
-			delete(s.jobs, id)
-		}
-	}
-	s.next++
-	job.id = s.next
-	s.jobs[job.id] = job
-}
-
-func (s *matchJobs) get(id int64) (*matchJob, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	j, ok := s.jobs[id]
-	if !ok || time.Since(j.created) > importTTL {
-		return nil, false
-	}
-	return j, true
-}
-
-func (s *matchJobs) remove(id int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.jobs, id)
 }

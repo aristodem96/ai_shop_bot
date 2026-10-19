@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/aristodem96/ai_shop_bot/internal/importer"
@@ -56,15 +55,6 @@ func (j *importJob) target() string {
 	return "профіль «" + j.profile + "»"
 }
 
-// importJobs holds uploads between preview and apply. In memory: the bot is
-// one process, and a restart losing a preview only means sending the file
-// again.
-type importJobs struct {
-	mu   sync.Mutex
-	next int64
-	jobs map[int64]*importJob
-}
-
 // UseImports lets the managers' chat load price lists and the vehicle
 // directory by sending the file. dir holds uploads while they wait; anything
 // left in it from an earlier run is removed.
@@ -73,14 +63,17 @@ func (b *Bot) UseImports(imports Imports, files Files, dir string, adminChat int
 		return errors.New("bot: imports need the managers' chat")
 	}
 	b.adminChat = adminChat
-	if err := os.RemoveAll(dir); err != nil {
-		return fmt.Errorf("bot: clear import directory: %w", err)
-	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("bot: create import directory: %w", err)
 	}
+	// Uploads outlive a restart while their preview may still be applied;
+	// older ones are left from runs that never came back to them.
+	if err := removeStale(dir, importTTL); err != nil {
+		b.log.Warn("could not clear old uploads", slog.Any("error", err))
+	}
 	b.imports, b.importFiles, b.importDir = imports, files, dir
-	b.importJobs = &importJobs{jobs: make(map[int64]*importJob)}
+	b.importJobs = newJobs[importJob](importTTL, b.dialogs("dialog:import:", importTTL), nil, b.log)
+	b.importJobs.drop = func(j *importJob) { j.remove(b.log) }
 	return nil
 }
 
@@ -152,7 +145,7 @@ func (b *Bot) saveUpload(ctx context.Context, job *importJob, doc *telegram.Docu
 		return fmt.Errorf("bot: save import file: %w", err)
 	}
 	job.dir, job.path = dir, path
-	b.importJobs.add(job, b.log)
+	b.importJobs.add(ctx, job)
 	return nil
 }
 
@@ -163,9 +156,12 @@ func (b *Bot) previewImport(ctx context.Context, job *importJob) {
 	text, kb := b.runImport(ctx, job, importer.Options{DryRun: true})
 	if kb == nil {
 		// Nothing to apply: the file did not parse.
-		if j, ok := b.importJobs.take(job.id); ok {
+		if j, ok := b.importJobs.take(ctx, job.id); ok {
 			j.remove(b.log)
 		}
+	} else {
+		// The profile chosen and the report, for applying and mapping.
+		b.importJobs.save(ctx, job)
 	}
 	b.send(ctx, job.chat, text, kb)
 }
@@ -191,7 +187,7 @@ func (b *Bot) chooseImport(ctx context.Context, cc callbackCtx, id, choice int64
 	if !b.isAdmin(cc.chat) {
 		return "", errBadCallback
 	}
-	job, ok := b.importJobs.get(id)
+	job, ok := b.importJobs.get(ctx, id)
 	if !ok {
 		return "", b.editText(ctx, cc, msgImportExpired, nil)
 	}
@@ -222,7 +218,7 @@ func (b *Bot) applyImport(ctx context.Context, cc callbackCtx, id, force int64) 
 	}
 	// Taken out before it runs: a second press of the same button, or a
 	// press while the first is still running, finds nothing to apply.
-	job, ok := b.importJobs.take(id)
+	job, ok := b.importJobs.take(ctx, id)
 	if !ok {
 		return msgImportGone, b.removeButtons(ctx, cc)
 	}
@@ -231,7 +227,7 @@ func (b *Bot) applyImport(ctx context.Context, cc callbackCtx, id, force int64) 
 	if kb != nil {
 		// Stopped again (the limit, a file that no longer parses): the job
 		// stays, so the manager can still decide.
-		b.importJobs.put(job)
+		b.importJobs.put(ctx, job)
 	} else {
 		job.remove(b.log)
 	}
@@ -247,7 +243,7 @@ func (b *Bot) cancelImport(ctx context.Context, cc callbackCtx, id int64) (strin
 	if !b.isAdmin(cc.chat) {
 		return "", errBadCallback
 	}
-	if job, ok := b.importJobs.take(id); ok {
+	if job, ok := b.importJobs.take(ctx, id); ok {
 		job.remove(b.log)
 	}
 	return msgImportCancelled, b.removeButtons(ctx, cc)
@@ -272,51 +268,22 @@ func (j *importJob) remove(log *slog.Logger) {
 	}
 }
 
-// add registers a job under a new id and drops the ones that waited too
-// long, with their files.
-func (s *importJobs) add(job *importJob, log *slog.Logger) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, j := range s.jobs {
-		if time.Since(j.created) > importTTL {
-			j.remove(log)
-			delete(s.jobs, id)
+// removeStale removes the job directories older than ttl.
+func removeStale(dir string, ttl time.Duration) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("bot: list uploads: %w", err)
+	}
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil || time.Since(info.ModTime()) < ttl {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
+			return fmt.Errorf("bot: remove an old upload: %w", err)
 		}
 	}
-	s.next++
-	job.id = s.next
-	s.jobs[job.id] = job
-}
-
-func (s *importJobs) get(id int64) (*importJob, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	j, ok := s.jobs[id]
-	if ok && time.Since(j.created) > importTTL {
-		return nil, false
-	}
-	return j, ok
-}
-
-func (s *importJobs) take(id int64) (*importJob, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	j, ok := s.jobs[id]
-	if !ok {
-		return nil, false
-	}
-	delete(s.jobs, id)
-	if time.Since(j.created) > importTTL {
-		_ = os.RemoveAll(j.dir)
-		return nil, false
-	}
-	return j, true
-}
-
-func (s *importJobs) put(job *importJob) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.jobs[job.id] = job
+	return nil
 }
 
 func profileList(profiles []string) string {
