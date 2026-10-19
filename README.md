@@ -87,6 +87,9 @@ the buttons. Most of this README is about that boundary.
 - **Price lists from the chat** — send the supplier's Excel or CSV, read the
   report of the dry run, press *Apply*. Unknown vehicle names are mapped and
   unrecognised products filed in the same chat.
+- **Commands** — `/admin` lists what the managers' chat can do: `/report`,
+  `/suppliers`, `/categories`, `/groups`, `/cars`, `/word`. They work only
+  in that chat.
 
 ---
 
@@ -334,8 +337,8 @@ separated from its call.
 ### The prefix is cached, so a turn costs fractions of a cent
 
 The system prompt and the tool definitions are identical on every request —
-no date, no buyer name, categories loaded once at start, enum values in a
-stable order — and a test asserts that they do not move by a byte. With cache
+no date, no buyer name, enum values in a stable order; they are rebuilt
+only when the category tree changes — and a test asserts that they do not move by a byte. With cache
 breakpoints on them and on the conversation, a typical turn reads 5–8 thousand
 tokens from cache and pays full price for a handful; the evals' 28 model
 calls cost about half a cent.
@@ -479,7 +482,7 @@ rather than one per restart.
 [DEPLOYMENT.md](DEPLOYMENT.md) covers both a local Docker run and a server: a
 compose overlay with Caddy for HTTPS, where only the webhook and the health
 check are reachable, Postgres and Redis publish nothing, and compose refuses to
-start without the secrets. The image is 31 MB on distroless.
+start without the secrets. The image is distroless.
 
 ---
 
@@ -656,7 +659,9 @@ internal/
   enrich/              stock matched to catalogue articles
   partnames/           catalogue part names translated
   photos/              photos converted and sent by file id
+  reports/             sales reports for a period, and their Excel
   config/              environment configuration
+  observability/       the process logger
 migrations/            goose migrations, embedded in the binary
 data/                  the category tree and the vehicle directory
 docs/import/           how to connect a supplier; example price lists

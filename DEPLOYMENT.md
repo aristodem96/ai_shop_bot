@@ -87,13 +87,17 @@ cp .env.prod.example .env
 nano .env
 ```
 
-Fill in every empty value. Generate the passwords with `openssl rand -hex 32`: the Postgres password goes inside a URL, where the `/` and `+` that base64 produces would break it.
+Fill in every empty value. Generate the passwords with `openssl rand -hex 32`:
+the Postgres password goes inside a URL, where the `/` and `+` that base64
+produces would break it.
 `COMPOSE_FILE` in that file makes every `docker compose` command use both
 compose files, so the commands below need no `-f` flags.
 
-`ADMIN_CHAT_ID` is the chat where managers get paid orders. Start the stack
-once, send `/id` to the bot from that chat (a private chat or a managers'
-group), put the number in `.env`, and run `docker compose up -d` again.
+`ADMIN_CHAT_ID` is the chat where managers get paid orders. You learn it from
+the bot, but compose will not start without it: put `0` there first (no
+managers' chat), start the stack, send `/id` to the bot from that chat (a
+private chat or a managers' group; in a group, add the bot first), put the
+number in `.env`, and run `docker compose up -d` again.
 
 `AUTODB_USER` and `AUTODB_PASSWORD` turn on the Auto-DB parts catalogue. The
 account lets requests in from one IP address only: put the server's address
@@ -135,8 +139,9 @@ docker compose up -d --build
 
 Migrations run on start. Uploaded price lists waiting for *Apply* live in
 the `imports` volume and the managers' dialogs in Redis, so a deploy midway
-through an import or a vehicle matching session loses neither. The bot finishes in-flight updates on `SIGTERM`
-(`stop_grace_period: 70s`), so a deploy does not cut a buyer off mid-checkout.
+through an import or a vehicle matching session loses neither. The bot
+finishes in-flight updates on `SIGTERM` (`stop_grace_period: 70s`), so a
+deploy does not cut a buyer off mid-checkout.
 
 ### Logs
 
@@ -152,16 +157,19 @@ Every consultant turn logs its token counts (`input_tokens`,
 
 The data lives in the `ai_shop_bot_pgdata` Docker volume, not in the project
 directory, so backing up `/opt/ai_shop_bot` backs up nothing. Dump the database
-instead:
+instead (`shop shop` is `POSTGRES_USER` and `POSTGRES_DB` from `.env`):
 
 ```bash
 docker compose exec -T postgres pg_dump -U shop shop | gzip > backup-$(date +%F).sql.gz
 ```
 
-Restore into a fresh stack:
+Restore into a fresh stack before the bot first starts, since the bot
+creates the tables on start and the dump would collide with them:
 
 ```bash
+docker compose up -d postgres
 gunzip -c backup-2026-10-16.sql.gz | docker compose exec -T postgres psql -U shop shop
+docker compose up -d
 ```
 
 Redis needs no backup: it holds conversations, checkout forms and rate limits,
