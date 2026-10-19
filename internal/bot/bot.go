@@ -101,9 +101,9 @@ type Bot struct {
 	matchJobs *jobs[matchJob, *matchJob]
 	carDrafts *jobs[carDraft, *carDraft]
 
-	// words is nil until UseWords is called.
-	words    Words
-	wordJobs *jobs[wordJob, *wordJob]
+	// cats is nil until UseCategories is called.
+	cats    Categories
+	catJobs *jobs[catJob, *catJob]
 
 	// photos and enricher are nil until UsePhotos and UseEnrichment are
 	// called.
@@ -260,7 +260,7 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 		if b.matching != nil && b.handleCarText(ctx, m) {
 			return
 		}
-		if b.words != nil && b.handleWordsMessage(ctx, m) {
+		if b.cats != nil && b.handleCategoriesMessage(ctx, m) {
 			return
 		}
 	}
@@ -392,28 +392,11 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 		return "", b.cancelCheckout(ctx, cc)
 	case actManage:
 		return b.manage(ctx, cc, a[0], a[1])
-	case actWordPick, actWordNew, actWordBack, actWordApply, actWordCancel, actWordDelete, actWordRemove, actWordKeep:
-		if b.words == nil {
+	case actCatOpen, actCatNew, actCatRename, actCatAddWord, actCatRemoveWord, actCatDelete, actCatPick, actCatApply, actCatCancel:
+		if b.cats == nil {
 			return "", errBadCallback
 		}
-		switch cb.act {
-		case actWordPick:
-			return b.pickWordCategory(ctx, cc, a[0], a[1])
-		case actWordNew:
-			return b.newWordCategory(ctx, cc, a[0], a[1])
-		case actWordBack:
-			return b.backToSections(ctx, cc, a[0])
-		case actWordApply:
-			return b.applyWord(ctx, cc, a[0])
-		case actWordCancel:
-			return b.cancelWord(ctx, cc, a[0])
-		case actWordRemove:
-			return b.confirmDeleteWord(ctx, cc, a[0])
-		case actWordKeep:
-			return b.keepWord(ctx, cc)
-		default:
-			return b.deleteWord(ctx, cc, a[0])
-		}
+		return b.routeCategories(ctx, cc, cb)
 	case actCarAdd, actCarToggle, actCarText, actCarBack:
 		if b.matching == nil {
 			return "", errBadCallback

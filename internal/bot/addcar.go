@@ -226,5 +226,5 @@ func (b *Bot) backToMatchOrClose(ctx context.Context, cc callbackCtx, d *carDraf
 			return b.editText(ctx, cc, text, kb)
 		}
 	}
-	return b.editText(ctx, cc, msgWordCancelled, nil)
+	return b.editText(ctx, cc, msgCancelled, nil)
 }

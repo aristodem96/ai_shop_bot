@@ -20,7 +20,6 @@ var ErrUnknownProfile = errors.New("importer: no such profile")
 type Service struct {
 	store    Store
 	vehicles VehicleStore
-	keywords KeywordStore
 	aliases  AliasStore
 	matcher  VehicleMatcher
 	proposer VehicleProposer
@@ -32,7 +31,6 @@ type Service struct {
 type Deps struct {
 	Prices   Store
 	Vehicles VehicleStore
-	Keywords KeywordStore
 	Aliases  AliasStore
 	Matcher  VehicleMatcher
 	Proposer VehicleProposer
@@ -40,7 +38,7 @@ type Deps struct {
 
 // NewService returns a Service reading profiles from dir.
 func NewService(d Deps, dir string) *Service {
-	return &Service{store: d.Prices, vehicles: d.Vehicles, keywords: d.Keywords, aliases: d.Aliases,
+	return &Service{store: d.Prices, vehicles: d.Vehicles, aliases: d.Aliases,
 		matcher: d.Matcher, proposer: d.Proposer, dir: dir}
 }
 

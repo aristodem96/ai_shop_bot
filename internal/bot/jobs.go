@@ -9,7 +9,7 @@ import (
 
 // KeepDialogs keeps the managers' dialogs in stores newStore makes, one per
 // kind, so a restart does not lose them. Call it before UseImports,
-// UseVehicleMatching and UseWords.
+// UseVehicleMatching and UseCategories.
 func (b *Bot) KeepDialogs(newStore func(prefix string, ttl time.Duration) Sessions) {
 	b.dialogStore = func(prefix string, ttl time.Duration) Sessions { return newStore(prefix, ttl) }
 }

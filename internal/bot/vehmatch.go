@@ -289,7 +289,7 @@ func (b *Bot) deleteCar(ctx context.Context, cc callbackCtx, id int64) (string, 
 	a, err := b.matching.RemoveVehicleAlias(ctx, id)
 	if errors.Is(err, importer.ErrNoAlias) {
 		text, kb := b.carsList(ctx)
-		return msgWordGone, b.editText(ctx, cc, text, kb)
+		return msgCarGone, b.editText(ctx, cc, text, kb)
 	}
 	if err != nil {
 		return "", err

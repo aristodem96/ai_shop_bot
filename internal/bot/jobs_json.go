@@ -23,10 +23,6 @@ func (d *carDraft) jobID() int64              { return d.id }
 func (d *carDraft) setJobID(id int64)         { d.id = id }
 func (d *carDraft) createdAt() time.Time      { return d.created }
 func (d *carDraft) setCreatedAt(t time.Time)  { d.created = t }
-func (j *wordJob) jobID() int64               { return j.id }
-func (j *wordJob) setJobID(id int64)          { j.id = id }
-func (j *wordJob) createdAt() time.Time       { return j.created }
-func (j *wordJob) setCreatedAt(t time.Time)   { j.created = t }
 
 type importJobJSON struct {
 	ID      int64            `json:"id"`
@@ -132,29 +128,5 @@ func (d *carDraft) UnmarshalJSON(b []byte) error {
 	if d.dropped == nil {
 		d.dropped = make(map[int]bool)
 	}
-	return nil
-}
-
-type wordJobJSON struct {
-	ID      int64                 `json:"id"`
-	Chat    int64                 `json:"chat"`
-	Word    string                `json:"word"`
-	Slug    string                `json:"slug,omitempty"`
-	Create  *importer.NewCategory `json:"create,omitempty"`
-	Created time.Time             `json:"created"`
-}
-
-// MarshalJSON writes the wordJob for Redis.
-func (j *wordJob) MarshalJSON() ([]byte, error) {
-	return json.Marshal(wordJobJSON{ID: j.id, Chat: j.chat, Word: j.word, Slug: j.slug, Create: j.create, Created: j.created})
-}
-
-// UnmarshalJSON reads the wordJob back.
-func (j *wordJob) UnmarshalJSON(b []byte) error {
-	var x wordJobJSON
-	if err := json.Unmarshal(b, &x); err != nil {
-		return err
-	}
-	*j = wordJob{id: x.ID, chat: x.Chat, word: x.Word, slug: x.Slug, create: x.Create, created: x.Created}
 	return nil
 }

@@ -31,6 +31,7 @@ import (
 	"github.com/aristodem96/ai_shop_bot/internal/agent"
 	"github.com/aristodem96/ai_shop_bot/internal/autodb"
 	"github.com/aristodem96/ai_shop_bot/internal/bot"
+	"github.com/aristodem96/ai_shop_bot/internal/categories"
 	"github.com/aristodem96/ai_shop_bot/internal/config"
 	"github.com/aristodem96/ai_shop_bot/internal/crawler"
 	"github.com/aristodem96/ai_shop_bot/internal/directory"
@@ -121,7 +122,7 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
-	if err := postgres.SyncCategories(startup, pool); err != nil {
+	if err := postgres.SeedCategories(startup, pool); err != nil {
 		return err
 	}
 	rdb, err := redisstore.NewClient(startup, cfg.Redis.Addr, cfg.Redis.Password, cfg.Redis.DB)
@@ -358,7 +359,7 @@ func (a *app) wireManagers() error {
 		return nil
 	}
 	importRepo := postgres.NewImportRepository(a.pool)
-	deps := importer.Deps{Prices: importRepo, Vehicles: importRepo, Keywords: importRepo, Aliases: importRepo}
+	deps := importer.Deps{Prices: importRepo, Vehicles: importRepo, Aliases: importRepo}
 	if a.model != nil {
 		matcher := vehiclematch.New(a.model)
 		deps.Matcher, deps.Proposer = matcher, matcher
@@ -367,7 +368,7 @@ func (a *app) wireManagers() error {
 	if err := a.bot.UseImports(imports, a.tg, a.cfg.ImportDir, chat); err != nil {
 		return err
 	}
-	a.bot.UseWords(imports)
+	a.bot.UseCategories(categories.New(postgres.NewCategoryRepository(a.pool)))
 	a.bot.UseVehicleMatching(imports)
 	if err := a.tg.SetChatCommands(a.startup, chat, bot.AdminMenu(chat)); err != nil {
 		a.log.Warn("could not register the managers' command menu", slog.Any("error", err))

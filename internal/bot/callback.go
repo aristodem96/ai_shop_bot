@@ -40,14 +40,15 @@ const (
 	actImportProfile  action = "ip"   // ip:<job>:<choice> what an uploaded file is
 	actImportApply    action = "ia"   // ia:<job>:<force> apply a checked file
 	actImportCancel   action = "ix"   // ix:<job> drop an uploaded file
-	actWordPick       action = "wk"   // wk:<job>:<category index> file a word there, or open the section
-	actWordNew        action = "wn"   // wn:<job>:<section index or -1> a new subcategory or section
-	actWordBack       action = "wb"   // wb:<job> back to the sections
-	actWordApply      action = "wa"   // wa:<job> store the word, move the products
-	actWordCancel     action = "wx"   // wx:<job> drop the change
-	actWordDelete     action = "wd"   // wd:<keyword> preview forgetting an owner's word
-	actWordRemove     action = "wr"   // wr:<keyword> forget it, move its products back
-	actWordKeep       action = "wz"   // wz:<keyword> keep it, back to the list
+	actCatOpen        action = "ko"   // ko:<category> a category's screen; 0 the sections
+	actCatNew         action = "kn"   // kn:<section or 0> a new subcategory, or section: asks its title
+	actCatRename      action = "kr"   // kr:<category> asks the new title
+	actCatAddWord     action = "kw"   // kw:<category> asks the word
+	actCatRemoveWord  action = "kx"   // kx:<word> plan removing it
+	actCatDelete      action = "kd"   // kd:<category> plan deleting it
+	actCatPick        action = "kp"   // kp:<job>:<category> the category of a /word, 0 the sections
+	actCatApply       action = "ka"   // ka:<job> apply the planned change
+	actCatCancel      action = "kc"   // kc:<job> drop it
 	actMatchStart     action = "vm"   // vm:<import job> map the report's unknown vehicle names
 	actMatchPick      action = "vp"   // vp:<session>:<item>:<model, 0 for all suggested> confirm
 	actMatchMakes     action = "vo"   // vo:<session> pick by hand: the makes
@@ -78,8 +79,8 @@ var arity = map[action]int{
 	actClear: 0, actForgetCar: 0, actKit: 0, actKitAdd: 0, actNoop: 0,
 	actCheckout: 0, actPay: 0, actEditContacts: 0, actCancelCheckout: 0, actManage: 2,
 	actImportProfile: 2, actImportApply: 2, actImportCancel: 1,
-	actWordPick: 2, actWordNew: 2, actWordBack: 1, actWordApply: 1, actWordCancel: 1, actWordDelete: 1,
-	actWordRemove: 1, actWordKeep: 1,
+	actCatOpen: 1, actCatNew: 1, actCatRename: 1, actCatAddWord: 1, actCatRemoveWord: 1, actCatDelete: 1,
+	actCatPick: 2, actCatApply: 1, actCatCancel: 1,
 	actMatchStart: 1, actMatchPick: 3, actMatchMakes: 1, actMatchMake: 2, actMatchBack: 1,
 	actMatchSkip: 2, actMatchStop: 1, actCarDelete: 1, actMatchAdd: 2,
 	actCarAdd: 1, actCarToggle: 2, actCarText: 1, actCarBack: 1,

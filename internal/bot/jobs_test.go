@@ -28,7 +28,6 @@ func TestDialogsSurviveARestart(t *testing.T) {
 		require.NoError(t, b.UseImports(imports, files, dir, managers))
 		m := &fakeMatching{canSuggest: true}
 		b.UseVehicleMatching(m)
-		b.UseWords(&fakeWords{})
 		return b, imports, m
 	}
 

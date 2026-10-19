@@ -43,7 +43,7 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
-	if err := postgres.SyncCategories(ctx, pool); err != nil {
+	if err := postgres.SeedCategories(ctx, pool); err != nil {
 		return err
 	}
 

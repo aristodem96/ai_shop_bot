@@ -108,9 +108,12 @@ type Product struct {
 	Description string
 	Image       string
 	Category    string // slug
-	PartType    string
-	Universal   bool
-	OEM         []string
+	// Group is the supplier's own group of the row, kept to sort the
+	// product again when the category tree changes.
+	Group     string
+	PartType  string
+	Universal bool
+	OEM       []string
 	// PartKey is the supplier's part number, normalised: the key the
 	// product meets the parts catalogue's lists by.
 	PartKey  string
@@ -245,6 +248,7 @@ func Resolve(ctx context.Context, store Store, p *Profile, parsed *Parsed) (*Bat
 			Price:       o.Price,
 			Stock:       o.Stock,
 			Category:    p.DefaultCategory,
+			Group:       o.Category,
 		}
 		if prod.Stock == nil {
 			prod.LeadDays = p.LeadTimeDays

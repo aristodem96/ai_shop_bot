@@ -63,15 +63,14 @@ func (r *ImportRepository) VehicleModels(ctx context.Context) ([]importer.Model,
 }
 
 // Categories lists the category tree in menu order, sections before their
-// subcategories, each with the file's keywords and then the owner's.
+// subcategories, each with its words.
 func (r *ImportRepository) Categories(ctx context.Context) ([]importer.Category, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT c.slug, coalesce(p.slug, ''), c.title, c.part_type, c.universal,
-			c.keywords || coalesce((SELECT array_agg(k.word ORDER BY k.id)
-				FROM category_keywords k WHERE k.category_id = c.id), '{}')
+		SELECT c.slug, coalesce(s.slug, ''), c.title, c.part_type, c.universal,
+			coalesce((SELECT array_agg(k.word ORDER BY k.id) FROM category_keywords k WHERE k.category_id = c.id), '{}')
 		FROM categories c
-		LEFT JOIN categories p ON p.id = c.parent_id
-		ORDER BY c.position, c.id`)
+		LEFT JOIN categories s ON s.id = c.parent_id
+		`+treeOrder)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: list categories: %w", err)
 	}
@@ -126,15 +125,20 @@ func (r *ImportRepository) Apply(ctx context.Context, b *importer.Batch, dryRun 
 		// second time.
 		rows, err := tx.Query(ctx, `
 			INSERT INTO products (source, external_id, sku, category_id, name, brand, description,
-				oem_numbers, part_key, price, stock, lead_time_days, image_url, part_type, universal)
+				oem_numbers, part_key, price, stock, lead_time_days, image_url, part_type, universal, source_group)
 			SELECT $1, i.external_id, i.sku, c.id, i.name, i.brand, i.description,
-				i.oem, i.part_key, i.price, coalesce(i.stock, 0), i.lead_days, i.image, i.part_type, i.universal
+				i.oem, i.part_key, i.price, coalesce(i.stock, 0), i.lead_days, i.image, i.part_type, i.universal, i.grp
 			FROM import_products i
 			JOIN categories c ON c.slug = i.category
 			ON CONFLICT (source, external_id) DO UPDATE SET
 				category_id = EXCLUDED.category_id, name = EXCLUDED.name, brand = EXCLUDED.brand,
 				description = coalesce(nullif(EXCLUDED.description, ''), products.description),
-				oem_numbers = EXCLUDED.oem_numbers, part_key = EXCLUDED.part_key, price = EXCLUDED.price,
+				-- The file's numbers first, then those the catalogue added.
+				oem_numbers = EXCLUDED.oem_numbers || array(
+					SELECT k FROM unnest(products.oem_numbers) k WHERE k <> ALL(EXCLUDED.oem_numbers)),
+				part_key = EXCLUDED.part_key, price = EXCLUDED.price, source_group = EXCLUDED.source_group,
+				-- A corrected article is another part: look it up again.
+				autodb_checked_at = CASE WHEN products.part_key = EXCLUDED.part_key THEN products.autodb_checked_at END,
 				stock = greatest(EXCLUDED.stock - (
 					SELECT coalesce(sum(oi.qty), 0) FROM order_items oi
 					JOIN orders o ON o.id = oi.order_id
@@ -263,7 +267,7 @@ func stage(ctx context.Context, tx pgx.Tx, products []importer.Product) error {
 		CREATE TEMP TABLE import_products (
 			external_id text PRIMARY KEY,
 			sku text, name text, brand text, description text, oem text[], part_key text, price bigint,
-			stock int, lead_days int, image text, category text, part_type text, universal boolean
+			stock int, lead_days int, image text, category text, part_type text, universal boolean, grp text
 		) ON COMMIT DROP;
 		CREATE TEMP TABLE import_fits (
 			external_id text, model_id bigint, year_from int, year_to int, position text, note text, via text
@@ -273,7 +277,7 @@ func stage(ctx context.Context, tx pgx.Tx, products []importer.Product) error {
 
 	_, err := tx.CopyFrom(ctx, pgx.Identifier{"import_products"},
 		[]string{"external_id", "sku", "name", "brand", "description", "oem", "part_key", "price",
-			"stock", "lead_days", "image", "category", "part_type", "universal"},
+			"stock", "lead_days", "image", "category", "part_type", "universal", "grp"},
 		pgx.CopyFromSlice(len(products), func(i int) ([]any, error) {
 			p := products[i]
 			oem := p.OEM
@@ -281,7 +285,7 @@ func stage(ctx context.Context, tx pgx.Tx, products []importer.Product) error {
 				oem = []string{}
 			}
 			return []any{p.ExternalID, p.SKU, p.Name, p.Brand, p.Description, oem, p.PartKey, int64(p.Price),
-				p.Stock, p.LeadDays, p.Image, p.Category, p.PartType, p.Universal}, nil
+				p.Stock, p.LeadDays, p.Image, p.Category, p.PartType, p.Universal, p.Group}, nil
 		}))
 	if err != nil {
 		return fmt.Errorf("postgres: copy products: %w", err)
