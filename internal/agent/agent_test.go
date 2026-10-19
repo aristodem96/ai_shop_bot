@@ -220,18 +220,26 @@ func TestFindCarSearchShowAnswer(t *testing.T) {
 	assert.Equal(t, "передні колодки на октавію 2015 1.4", saved[0].Text)
 }
 
-func TestUnknownCarListsCoveredMakes(t *testing.T) {
+func TestUnknownCarListsSimilarMakes(t *testing.T) {
 	model := llm.NewFake(
-		llm.Call("c1", "find_vehicle", map[string]any{"make": "Tesla", "model": "Model 3"}),
+		llm.Call("c1", "find_vehicle", map[string]any{"make": "Skodda", "model": "Octavia"}),
+		llm.Call("c2", "find_vehicle", map[string]any{"make": "Tesla", "model": "Model 3"}),
 		llm.Say("На жаль, на Tesla деталей немає."),
 	)
 	f := newAgent(t, model)
 
-	_, err := f.agent.Reply(context.Background(), chat, chat, "колодки на теслу")
+	_, err := f.agent.Reply(context.Background(), chat, chat, "колодки")
 	require.NoError(t, err)
-	got := result(model, 1).Content
+	assert.Contains(t, result(model, 1).Content, `"similar_makes":["Skoda"]`, "a misspelt make is suggested")
+	got := result(model, 2).Content
 	assert.Contains(t, got, `"vehicles":[]`)
-	assert.Contains(t, got, `"makes_covered":["Skoda"]`)
+	assert.Contains(t, got, `"similar_makes":[]`, "not the catalogue's two hundred makes")
+}
+
+func TestSimilarMakes(t *testing.T) {
+	makes := []string{"Chery", "Chevrolet", "Mercedes-Benz", "Skoda", "VW"}
+	assert.Equal(t, []string{"Chery", "Chevrolet"}, similarMakes("Cheri", makes))
+	assert.Equal(t, []string{"Mercedes-Benz"}, similarMakes("mercedes", makes))
 }
 
 func TestSaveMyCarAndCheckFit(t *testing.T) {

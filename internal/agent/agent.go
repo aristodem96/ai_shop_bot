@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
@@ -107,14 +108,20 @@ type Reply struct {
 type Agent struct {
 	llm     llm.Client
 	history History
-	tools   *toolbox
 	cfg     Config
 	log     *slog.Logger
+
+	// tools carry the category tree in search_parts' schema. The owner
+	// edits the tree in the managers' chat, so it is read every turn and
+	// the tools rebuilt when it changed -- rarely: the schema must stay
+	// byte-identical between requests for the provider's prompt cache to
+	// hit.
+	mu      sync.RWMutex
+	tools   *toolbox
+	treeSig string
 }
 
-// New builds an Agent. The categories are read once here, because they go
-// into a tool schema that must stay byte-identical between requests for the
-// provider's prompt cache to hit.
+// New builds an Agent.
 func New(ctx context.Context, client llm.Client, catalog Catalog, cart Cart, garage Garage, kits Maintenance, orders Orders, history History, cfg Config, log *slog.Logger) (*Agent, error) {
 	cats, err := catalog.Categories(ctx)
 	if err != nil {
@@ -124,6 +131,7 @@ func New(ctx context.Context, client llm.Client, catalog Catalog, cart Cart, gar
 		llm:     client,
 		history: history,
 		tools:   newToolbox(catalog, cart, garage, kits, orders, cats),
+		treeSig: treeSignature(cats),
 		cfg:     cfg,
 		log:     log,
 	}, nil
@@ -131,11 +139,50 @@ func New(ctx context.Context, client llm.Client, catalog Catalog, cart Cart, gar
 
 // UseOrderCatalog lets searches offer parts the shop can order beyond its
 // stock. Without it the agent sells the stock alone.
-func (a *Agent) UseOrderCatalog(c OrderCatalog) { a.tools.parts = c }
+func (a *Agent) UseOrderCatalog(c OrderCatalog) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.tools.parts = c
+}
 
 // UseCatalogFits adds to get_part the cars a product fits by the parts
 // catalogue.
-func (a *Agent) UseCatalogFits(f CatalogFits) { a.tools.fits = f }
+func (a *Agent) UseCatalogFits(f CatalogFits) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.tools.fits = f
+}
+
+// toolsFor returns the tools for a turn, rebuilt if the category tree
+// changed since the last one. A tree that cannot be read keeps the tools
+// as they are: an outdated category list beats no answer.
+func (a *Agent) toolsFor(ctx context.Context) *toolbox {
+	a.mu.RLock()
+	cur, sig := a.tools, a.treeSig
+	a.mu.RUnlock()
+	cats, err := cur.catalog.Categories(ctx)
+	if err != nil {
+		a.log.WarnContext(ctx, "could not read the category tree", slog.Any("error", err))
+		return cur
+	}
+	if s := treeSignature(cats); s != sig {
+		next := newToolbox(cur.catalog, cur.cart, cur.garage, cur.kits, cur.orders, cats)
+		next.parts, next.fits = cur.parts, cur.fits
+		a.mu.Lock()
+		a.tools, a.treeSig, cur = next, s, next
+		a.mu.Unlock()
+	}
+	return cur
+}
+
+// treeSignature is what of the tree the tools show: slugs, titles, parents.
+func treeSignature(cats []domain.Category) string {
+	var b strings.Builder
+	for _, c := range cats {
+		fmt.Fprintf(&b, "%d|%s|%s|%d;", c.ID, c.Slug, c.Title, c.ParentID)
+	}
+	return b.String()
+}
 
 // Fixed answers for the turns that end without a usable model answer. They
 // are shop wording, not model output.
@@ -173,6 +220,7 @@ func (a *Agent) Reply(ctx context.Context, userID, chatID int64, text string, im
 		text = strings.TrimSpace(photoNote + "\n" + text)
 	}
 	turn := []llm.Message{{Role: llm.RoleUser, Text: text, Images: images}}
+	tools := a.toolsFor(ctx)
 	run := &runState{userID: userID}
 	var usage llm.Usage
 	start := time.Now()
@@ -180,7 +228,7 @@ func (a *Agent) Reply(ctx context.Context, userID, chatID int64, text string, im
 	for step := range a.cfg.MaxSteps {
 		resp, err := a.llm.Chat(ctx, llm.Request{
 			System:   systemPrompt,
-			Tools:    a.tools.defs,
+			Tools:    tools.defs,
 			Messages: concat(history, turn),
 		})
 		if err != nil {
@@ -197,7 +245,7 @@ func (a *Agent) Reply(ctx context.Context, userID, chatID int64, text string, im
 			return &Reply{Text: replyRefusal}, nil
 
 		case llm.StopToolUse:
-			results := a.tools.run(ctx, run, resp.Message.ToolCalls)
+			results := tools.run(ctx, run, resp.Message.ToolCalls)
 			turn = append(turn, llm.Message{Role: llm.RoleUser, ToolResults: results})
 			if !answered(resp.Message, results) {
 				continue

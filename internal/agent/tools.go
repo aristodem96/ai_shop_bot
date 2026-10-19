@@ -97,8 +97,8 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, ord
 	tb.defs = []llm.Tool{
 		{
 			Name: "find_vehicle",
-			Description: "Find vehicles in the shop's list by make, model, year and engine. " +
-				"Returns the matching vehicles with their ids; with no match, the makes the shop covers.",
+			Description: "Find vehicles by make, model, year and engine, in the parts catalogue of every car and the shop's own list. " +
+				"Returns the matching vehicles with their ids; with no match, the makes known by a similar name, to spot a misspelling.",
 			Schema: object(map[string]any{
 				"make":   str("Make in Latin letters, e.g. \"Skoda\"."),
 				"model":  str("Model in Latin letters, e.g. \"Octavia\"."),
@@ -344,16 +344,36 @@ func (tb *toolbox) findVehicle(ctx context.Context, _ *runState, input json.RawM
 	}
 	out := map[string]any{"vehicles": views}
 
-	// Nothing matched: tell the model what the shop does cover, so it can
-	// spot a misspelt make or say plainly which cars are served.
-	if len(found) == 0 {
+	// Nothing matched: the makes with a similar name, so the model can spot
+	// a misspelt one. Not all of them: the catalogue knows two hundred.
+	if len(found) == 0 && in.Make != "" {
 		makes, err := tb.garage.Makes(ctx)
 		if err != nil {
 			return nil, err
 		}
-		out["makes_covered"] = makes
+		out["similar_makes"] = similarMakes(in.Make, makes)
 	}
 	return out, nil
+}
+
+// maxSimilarMakes bounds the makes a failed lookup suggests.
+const maxSimilarMakes = 15
+
+// similarMakes are the makes that contain the name asked for, or start with
+// its first letter.
+func similarMakes(name string, makes []string) []string {
+	want := strings.ToLower(strings.TrimSpace(name))
+	out := []string{}
+	for _, m := range makes {
+		lm := strings.ToLower(m)
+		if strings.Contains(lm, want) || strings.Contains(want, lm) || (want != "" && lm != "" && lm[0] == want[0]) {
+			out = append(out, m)
+			if len(out) == maxSimilarMakes {
+				break
+			}
+		}
+	}
+	return out
 }
 
 // decodeVIN reads what a VIN reliably says. An invalid one is an input error
@@ -688,6 +708,13 @@ var statusMeanings = map[domain.OrderStatus]string{
 	domain.OrderNeedsRefund:     "paid, but the stock ran out; a manager will refund the money",
 }
 
+// pickupMeanings replace statusMeanings for an order the buyer collects at
+// the shop: confirmed is ready there, shipped is handed over.
+var pickupMeanings = map[domain.OrderStatus]string{
+	domain.OrderConfirmed: "confirmed by a manager and ready to collect at the shop, at the address and hours in delivery",
+	domain.OrderShipped:   "collected at the shop",
+}
+
 // orderStatus lists the buyer's orders. Only the buyer's own: the user id
 // comes from the chat, never from the model.
 func (tb *toolbox) orderStatus(ctx context.Context, run *runState, input json.RawMessage) (any, error) {
@@ -708,14 +735,17 @@ func (tb *toolbox) orderStatus(ctx context.Context, run *runState, input json.Ra
 		Items         []string `json:"items"`
 		Delivery      string   `json:"delivery"`
 		// Pickup orders are collected at the shop, delivery being its
-		// address: confirmed means ready to collect, shipped means handed
-		// over.
+		// address.
 		Pickup bool `json:"pickup,omitempty"`
 	}
 	views := make([]view, len(orders))
 	for i, o := range orders {
+		meaning := statusMeanings[o.Status]
+		if m, ok := pickupMeanings[o.Status]; ok && o.Contacts.Pickup {
+			meaning = m
+		}
 		v := view{
-			ID: o.ID, Status: string(o.Status), Meaning: statusMeanings[o.Status],
+			ID: o.ID, Status: string(o.Status), Meaning: meaning,
 			TotalUAH: int64(o.Total) / 100, CreatedAt: o.CreatedAt.Format(time.RFC3339), Delivery: o.Contacts.Delivery,
 			Pickup: o.Contacts.Pickup,
 		}

@@ -2,7 +2,10 @@ package agent
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -105,4 +108,59 @@ func TestGetPartCarriesCatalogueFits(t *testing.T) {
 	res := result(model, 1).Content
 	assert.Contains(t, res, `"catalog_fits":["Daewoo Nubira (J100) 1.6 (1997–1999)"]`)
 	assert.Contains(t, res, `"catalog_fits_complete":false`, "the model is told the list may be cut")
+}
+
+// treeCatalog is the catalogue with a tree the owner edits.
+type treeCatalog struct {
+	fakeCatalog
+	cats []domain.Category
+}
+
+func (c *treeCatalog) Categories(context.Context) ([]domain.Category, error) { return c.cats, nil }
+
+func TestToolsFollowTheCategoryTree(t *testing.T) {
+	catalog := &treeCatalog{cats: []domain.Category{{ID: 1, Slug: "brakes", Title: "Гальма"}}}
+	model := llm.NewFake(llm.Say("1"), llm.Say("2"), llm.Say("3"))
+	a, err := New(context.Background(), model, catalog, &fakeCart{}, &fakeGarage{saved: map[int64]int64{}}, fakeKits{},
+		&fakeOrders{}, newFakeHistory(), Config{MaxSteps: 3, MaxHistory: 10, Timeout: time.Second},
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	require.NoError(t, err)
+	ctx := context.Background()
+	schema := func(n int) string {
+		for _, tool := range model.Requests[n].Tools {
+			if tool.Name == "search_parts" {
+				return tool.Description
+			}
+		}
+		return ""
+	}
+
+	_, err = a.Reply(ctx, 1, 1, "колодки")
+	require.NoError(t, err)
+	_, err = a.Reply(ctx, 1, 1, "ще")
+	require.NoError(t, err)
+	assert.Equal(t, schema(0), schema(1), "an unchanged tree keeps the schema byte for byte, for the cache")
+
+	catalog.cats = append(catalog.cats, domain.Category{ID: 2, Slug: "tiuninh", Title: "Тюнінг"})
+	_, err = a.Reply(ctx, 1, 1, "спойлер")
+	require.NoError(t, err)
+	assert.Contains(t, schema(2), "tiuninh (Тюнінг)", "a category the owner added is searchable at once")
+}
+
+type pickupOrders struct{}
+
+func (pickupOrders) OrdersOf(context.Context, int64, int) ([]domain.Order, error) {
+	return []domain.Order{{ID: 9, Status: domain.OrderConfirmed, Total: domain.UAH(900),
+		Contacts: domain.Contacts{Pickup: true, Delivery: "Київ, вул. Автозаводська 1"}}}, nil
+}
+
+func TestPickupOrderIsReadyToCollect(t *testing.T) {
+	model := llm.NewFake(llm.Call("c1", "order_status", map[string]any{}), llm.Say("Готове."))
+	a, err := New(context.Background(), model, &fakeCatalog{}, &fakeCart{}, &fakeGarage{saved: map[int64]int64{}}, fakeKits{},
+		pickupOrders{}, newFakeHistory(), Config{MaxSteps: 3, MaxHistory: 10, Timeout: time.Second},
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	require.NoError(t, err)
+	_, err = a.Reply(context.Background(), 1, 1, "де моє замовлення?")
+	require.NoError(t, err)
+	assert.Contains(t, result(model, 1).Content, "ready to collect at the shop, at the address", "not «being prepared for shipping»")
 }
