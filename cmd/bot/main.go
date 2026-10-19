@@ -99,6 +99,7 @@ func run() error {
 	b := bot.New(tg, tg, catalog, cart, garage, kits, bot.Config{
 		MaxPending:     cfg.MaxPending,
 		HandlerTimeout: cfg.HandlerTimeout,
+		PickupAddress:  cfg.PickupAddress,
 	}, log)
 
 	group, gctx := errgroup.WithContext(ctx)

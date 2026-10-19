@@ -598,12 +598,17 @@ func (tb *toolbox) orderStatus(ctx context.Context, run *runState, input json.Ra
 		ReservedUntil string   `json:"reserved_until,omitempty"`
 		Items         []string `json:"items"`
 		Delivery      string   `json:"delivery"`
+		// Pickup orders are collected at the shop, delivery being its
+		// address: confirmed means ready to collect, shipped means handed
+		// over.
+		Pickup bool `json:"pickup,omitempty"`
 	}
 	views := make([]view, len(orders))
 	for i, o := range orders {
 		v := view{
 			ID: o.ID, Status: string(o.Status), Meaning: statusMeanings[o.Status],
 			TotalUAH: int64(o.Total) / 100, CreatedAt: o.CreatedAt.Format(time.RFC3339), Delivery: o.Contacts.Delivery,
+			Pickup: o.Contacts.Pickup,
 		}
 		if o.Status == domain.OrderAwaitingPayment {
 			v.ReservedUntil = o.ReservedUntil.Format(time.RFC3339)

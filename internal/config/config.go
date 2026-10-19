@@ -118,6 +118,10 @@ type Bot struct {
 	// are applied; it is emptied on start.
 	ImportProfilesDir string
 	ImportDir         string
+
+	// PickupAddress is where buyers collect orders, with the shop's hours;
+	// empty offers Nova Poshta only.
+	PickupAddress string
 }
 
 // LoadBot reads the bot configuration.
@@ -143,6 +147,7 @@ func LoadBot() (*Bot, error) {
 		CartReminderEvery: envDuration("CART_REMINDER_EVERY", 10*time.Minute, collect),
 		Timezone:          envString("BOT_TIMEZONE", "Europe/Kyiv"),
 		ImportProfilesDir: envString("IMPORT_PROFILES_DIR", "profiles"),
+		PickupAddress:     envString("SHOP_PICKUP_ADDRESS", ""),
 		ImportDir:         envString("IMPORT_DIR", filepath.Join(os.TempDir(), "ai_shop_bot-imports")),
 		Redis: Redis{
 			Addr:     envString("REDIS_ADDR", "localhost:6380"),

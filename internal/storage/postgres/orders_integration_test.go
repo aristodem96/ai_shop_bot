@@ -381,3 +381,27 @@ func ids(ps []domain.Product) []int64 {
 	}
 	return out
 }
+
+func TestPickupOrderKeepsTheShopAddress(t *testing.T) {
+	skipShort(t)
+	ctx := context.Background()
+	repo := NewOrderRepository(testPool)
+	const user = int64(5501)
+	pads := withStock(t, "BRK-002", 5)
+	buyerCart(t, user, pads.ID, 1)
+
+	pickup := domain.Contacts{Name: "Тарас Шевченко", Phone: "+380671234567",
+		Delivery: "Київ, вул. Автозаводська 1", Pickup: true}
+	o, created, err := repo.PlaceOrder(ctx, user, pickup, time.Now().Add(domain.ReservationTTL))
+	require.NoError(t, err)
+	require.True(t, created)
+	assert.Equal(t, pickup, o.Contacts)
+
+	got, err := repo.Order(ctx, o.ID)
+	require.NoError(t, err)
+	assert.True(t, got.Contacts.Pickup, "read back as pickup")
+
+	c, err := repo.Customer(ctx, user)
+	require.NoError(t, err)
+	assert.True(t, c.Pickup, "the next checkout offers the same way")
+}

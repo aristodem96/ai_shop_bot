@@ -69,6 +69,10 @@ type Config struct {
 	MaxPending int
 	// HandlerTimeout bounds the handling of one update.
 	HandlerTimeout time.Duration
+	// PickupAddress is where buyers collect orders from the shop, with its
+	// hours: "Київ, вул. Автозаводська 1, пн–сб 9:00–19:00". Empty offers
+	// delivery only.
+	PickupAddress string
 }
 
 // Bot handles chat updates.

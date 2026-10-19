@@ -78,6 +78,7 @@ services:
       CART_REMINDER_AFTER: ${CART_REMINDER_AFTER:-24h}
       CART_REMINDER_EVERY: ${CART_REMINDER_EVERY:-10m}
       BOT_TIMEZONE: ${BOT_TIMEZONE:-Europe/Kyiv}
+      SHOP_PICKUP_ADDRESS: ${SHOP_PICKUP_ADDRESS:-}
       # Supplier profiles for price lists sent to the managers' chat. A new
       # supplier is a new file in ./profiles; no rebuild needed.
       IMPORT_PROFILES_DIR: /profiles

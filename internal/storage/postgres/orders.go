@@ -32,7 +32,7 @@ func NewOrderRepository(pool *pgxpool.Pool) *OrderRepository {
 	return &OrderRepository{pool: pool}
 }
 
-const orderColumns = `o.id, o.user_id, o.status, o.total, o.customer_name, o.phone, o.delivery,
+const orderColumns = `o.id, o.user_id, o.status, o.total, o.customer_name, o.phone, o.delivery, o.pickup,
 	coalesce(o.invoice_id, ''), coalesce(o.payment_url, ''), o.reserved_until, o.created_at,
 	coalesce(o.paid_at, 'epoch'::timestamptz)`
 
@@ -43,7 +43,7 @@ func scanOrder(row pgx.Row) (*domain.Order, error) {
 		total  int64
 	)
 	err := row.Scan(&o.ID, &o.UserID, &status, &total, &o.Contacts.Name, &o.Contacts.Phone,
-		&o.Contacts.Delivery, &o.InvoiceID, &o.PaymentURL, &o.ReservedUntil, &o.CreatedAt, &o.PaidAt)
+		&o.Contacts.Delivery, &o.Contacts.Pickup, &o.InvoiceID, &o.PaymentURL, &o.ReservedUntil, &o.CreatedAt, &o.PaidAt)
 	if err != nil {
 		return nil, err
 	}
@@ -151,11 +151,11 @@ func (r *OrderRepository) PlaceOrder(ctx context.Context, userID int64, c domain
 		}
 
 		order, err = scanOrder(tx.QueryRow(ctx, `
-			INSERT INTO orders (user_id, status, total, customer_name, phone, delivery, reserved_until)
-			VALUES ($1, 'awaiting_payment', $2, $3, $4, $5, $6)
-			RETURNING id, user_id, status, total, customer_name, phone, delivery,
+			INSERT INTO orders (user_id, status, total, customer_name, phone, delivery, pickup, reserved_until)
+			VALUES ($1, 'awaiting_payment', $2, $3, $4, $5, $6, $7)
+			RETURNING id, user_id, status, total, customer_name, phone, delivery, pickup,
 				'', '', reserved_until, created_at, 'epoch'::timestamptz`,
-			userID, int64(o.Total), c.Name, c.Phone, c.Delivery, reservedUntil))
+			userID, int64(o.Total), c.Name, c.Phone, c.Delivery, c.Pickup, reservedUntil))
 		if err != nil {
 			return fmt.Errorf("postgres: insert order: %w", err)
 		}
@@ -176,10 +176,10 @@ func (r *OrderRepository) PlaceOrder(ctx context.Context, userID int64, c domain
 			return fmt.Errorf("postgres: clear cart: %w", err)
 		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO customers (user_id, name, phone, delivery) VALUES ($1, $2, $3, $4)
+			INSERT INTO customers (user_id, name, phone, delivery, pickup) VALUES ($1, $2, $3, $4, $5)
 			ON CONFLICT (user_id) DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone,
-				delivery = EXCLUDED.delivery, updated_at = now()`,
-			userID, c.Name, c.Phone, c.Delivery); err != nil {
+				delivery = EXCLUDED.delivery, pickup = EXCLUDED.pickup, updated_at = now()`,
+			userID, c.Name, c.Phone, c.Delivery, c.Pickup); err != nil {
 			return fmt.Errorf("postgres: save contacts: %w", err)
 		}
 		created = true
@@ -522,8 +522,8 @@ func (r *OrderRepository) OpenOrders(ctx context.Context, limit int) ([]domain.O
 // Customer returns the contacts a buyer used last, or nil.
 func (r *OrderRepository) Customer(ctx context.Context, userID int64) (*domain.Contacts, error) {
 	var c domain.Contacts
-	err := r.pool.QueryRow(ctx, `SELECT name, phone, delivery FROM customers WHERE user_id = $1`, userID).
-		Scan(&c.Name, &c.Phone, &c.Delivery)
+	err := r.pool.QueryRow(ctx, `SELECT name, phone, delivery, pickup FROM customers WHERE user_id = $1`, userID).
+		Scan(&c.Name, &c.Phone, &c.Delivery, &c.Pickup)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

@@ -234,3 +234,76 @@ func TestNotifier(t *testing.T) {
 	require.Len(t, tg.calls, 1, "an expired order is the buyer's business only")
 	assert.Contains(t, tg.calls[0].text, "Час на оплату")
 }
+
+const shopAddress = "Київ, вул. Автозаводська 1, пн–сб 9:00–19:00"
+
+func TestCheckoutPickup(t *testing.T) {
+	b, orders, _ := withOrders()
+	b.cfg.PickupAddress = shopAddress
+	ctx := context.Background()
+
+	b.Handle(ctx, press(encode(actCheckout)))
+	b.Handle(ctx, text("Тарас Шевченко"))
+	b.Handle(ctx, text("067 123 45 67"))
+	ask := b.tg.last("sendMessage")
+	assert.Contains(t, ask.text, shopAddress, "the buyer sees where the shop is before choosing")
+	rows := ask.markup.(*telegram.ReplyKeyboard).Rows
+	assert.Equal(t, btnPickup, rows[0][0].Text)
+	assert.Equal(t, btnNovaPoshta, rows[1][0].Text)
+
+	b.Handle(ctx, text("щось інше"))
+	assert.Equal(t, msgPickMethod, b.tg.last("sendMessage").text)
+
+	b.Handle(ctx, text(btnPickup))
+	confirm := b.tg.last("sendMessage")
+	assert.Contains(t, confirm.text, "🏪 Самовивіз: "+shopAddress, "no city or branch is asked")
+
+	b.Handle(ctx, press(encode(actPay)))
+	require.Len(t, orders.placed, 1)
+	assert.Equal(t, domain.Contacts{Name: "Тарас Шевченко", Phone: "+380671234567", Delivery: shopAddress, Pickup: true}, orders.placed[0])
+}
+
+func TestCheckoutNovaPoshtaWhenPickupIsOffered(t *testing.T) {
+	b, orders, _ := withOrders()
+	b.cfg.PickupAddress = shopAddress
+	ctx := context.Background()
+
+	b.Handle(ctx, press(encode(actCheckout)))
+	b.Handle(ctx, text("Тарас Шевченко"))
+	b.Handle(ctx, text("067 123 45 67"))
+	b.Handle(ctx, text(btnNovaPoshta))
+	assert.Equal(t, msgAskDelivery, b.tg.last("sendMessage").text)
+	b.Handle(ctx, text("Київ, відділення 25"))
+	b.Handle(ctx, press(encode(actPay)))
+	require.Len(t, orders.placed, 1)
+	assert.False(t, orders.placed[0].Pickup)
+	assert.Equal(t, "Київ, відділення 25", orders.placed[0].Delivery)
+}
+
+func TestSavedPickupGetsTodaysAddress(t *testing.T) {
+	b, orders, _ := withOrders()
+	b.cfg.PickupAddress = shopAddress
+	orders.saved = &domain.Contacts{Name: "Тарас", Phone: "+380671234567", Delivery: "стара адреса", Pickup: true}
+
+	b.Handle(context.Background(), press(encode(actCheckout)))
+	confirm := b.tg.last("sendMessage")
+	assert.Contains(t, confirm.text, "🏪 Самовивіз: "+shopAddress)
+	assert.NotContains(t, confirm.text, "стара адреса")
+}
+
+func TestPickupOrderForManagersAndBuyer(t *testing.T) {
+	o := &domain.Order{ID: 42, Status: domain.OrderConfirmed, Total: domain.UAH(1450),
+		Contacts: domain.Contacts{Name: "Тарас", Phone: "+380671234567", Delivery: shopAddress, Pickup: true}}
+
+	text, kb := adminOrderView(o)
+	assert.Contains(t, text, "🏪 Самовивіз: "+shopAddress)
+	assert.Equal(t, "🏪 Видано", kb.Rows[0][0].Text, "a pickup order is handed over, not shipped")
+
+	notice, _ := buyerNotice(o, domain.OrderPaid)
+	assert.Contains(t, notice, "готове! Можна забирати: "+shopAddress)
+
+	o.Status = domain.OrderShipped
+	notice, _ = buyerNotice(o, domain.OrderConfirmed)
+	assert.Contains(t, notice, "видано")
+	assert.Equal(t, "🏪 видано", orderStatusLabel(o))
+}

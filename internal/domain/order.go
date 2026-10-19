@@ -57,8 +57,11 @@ func (s OrderStatus) HoldsStock() bool {
 type Contacts struct {
 	Name  string
 	Phone string // normalised, +380XXXXXXXXX
-	// Delivery is the city and Nova Poshta branch as the buyer wrote it.
+	// Delivery is the city and Nova Poshta branch as the buyer wrote it, or,
+	// for pickup, the shop's address the buyer was given.
 	Delivery string
+	// Pickup is collecting from the shop instead of a parcel.
+	Pickup bool
 }
 
 // Order is a placed order.

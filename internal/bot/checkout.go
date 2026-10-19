@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -33,14 +34,15 @@ func (b *Bot) UseOrders(orders Orders, sessions Sessions, adminChat int64) {
 	b.orders, b.sessions, b.adminChat = orders, sessions, adminChat
 }
 
-// Checkout is deterministic, not conversational: name, phone, delivery,
-// confirm. A form is what a payment needs -- exact fields, validated -- and a
+// Checkout is deterministic, not conversational: name, phone, how to get
+// the order (pickup or Nova Poshta), the branch for Nova Poshta, confirm. A form is what a payment needs -- exact fields, validated -- and a
 // model in that path would only add cost and a way to get the fields wrong.
 type checkoutStep string
 
 const (
 	stepName     checkoutStep = "name"
 	stepPhone    checkoutStep = "phone"
+	stepMethod   checkoutStep = "method"
 	stepDelivery checkoutStep = "delivery"
 	stepConfirm  checkoutStep = "confirm"
 )
@@ -52,6 +54,18 @@ type checkoutState struct {
 
 // btnCancelCheckout leaves the checkout from the reply keyboard.
 const btnCancelCheckout = "✖️ Скасувати оформлення"
+
+// The two ways to get an order.
+const (
+	btnPickup     = "🏪 Самовивіз з магазину"
+	btnNovaPoshta = "🚚 Нова Пошта"
+)
+
+func methodKeyboard() *telegram.ReplyKeyboard {
+	return &telegram.ReplyKeyboard{Resize: true, Rows: [][]telegram.KeyboardButton{
+		{{Text: btnPickup}}, {{Text: btnNovaPoshta}}, {{Text: btnCancelCheckout}},
+	}}
+}
 
 func checkoutKeyboard(askPhone bool) *telegram.ReplyKeyboard {
 	rows := [][]telegram.KeyboardButton{{{Text: btnCancelCheckout}}}
@@ -76,7 +90,15 @@ func (b *Bot) startCheckout(ctx context.Context, cc callbackCtx) (string, error)
 	if err != nil {
 		return "", err
 	}
+	if saved != nil && saved.Pickup && b.cfg.PickupAddress == "" {
+		saved = nil // pickup is no longer offered: ask again
+	}
 	if saved != nil {
+		if saved.Pickup {
+			// The address the buyer is sent to is today's, not the one
+			// from their last order.
+			saved.Delivery = b.cfg.PickupAddress
+		}
 		st := checkoutState{Step: stepConfirm, Contacts: *saved}
 		if err := b.sessions.Save(ctx, cc.chat, st); err != nil {
 			return "", err
@@ -156,31 +178,59 @@ func (b *Bot) checkoutInput(ctx context.Context, chat, user int64, m *telegram.M
 			b.send(ctx, chat, msgBadPhone, nil)
 			return
 		}
-		st.Contacts.Phone, st.Step = phone, stepDelivery
-		b.saveCheckout(ctx, chat, st, msgAskDelivery, checkoutKeyboard(false))
+		st.Contacts.Phone = phone
+		if b.cfg.PickupAddress == "" {
+			st.Step = stepDelivery
+			b.saveCheckout(ctx, chat, st, msgAskDelivery, checkoutKeyboard(false))
+			return
+		}
+		st.Step = stepMethod
+		b.saveCheckout(ctx, chat, st, fmt.Sprintf(msgAskMethod, esc(b.cfg.PickupAddress)), methodKeyboard())
+
+	case stepMethod:
+		switch text {
+		case btnPickup:
+			st.Contacts.Pickup, st.Contacts.Delivery = true, b.cfg.PickupAddress
+			b.confirmCheckout(ctx, chat, user, st)
+		case btnNovaPoshta:
+			st.Contacts.Pickup, st.Step = false, stepDelivery
+			b.saveCheckout(ctx, chat, st, msgAskDelivery, checkoutKeyboard(false))
+		default:
+			b.send(ctx, chat, msgPickMethod, methodKeyboard())
+		}
 
 	case stepDelivery:
 		st.Contacts.Delivery = text
-		c, err := service.ValidateContacts(st.Contacts)
-		if err != nil {
+		if _, err := service.ValidateContacts(st.Contacts); err != nil {
 			b.send(ctx, chat, msgBadDelivery, nil)
 			return
 		}
-		st.Contacts, st.Step = c, stepConfirm
-		cart, err := b.cart.Get(ctx, user)
-		if err != nil {
-			b.fail(ctx, chat, "get cart", err)
-			return
-		}
-		if err := b.sessions.Save(ctx, chat, st); err != nil {
-			b.fail(ctx, chat, "save checkout", err)
-			return
-		}
-		// The reply keyboard goes back to the menu before the inline confirm.
-		b.send(ctx, chat, msgContactsSaved, mainMenu())
-		confirm, kb := confirmView(cart, st.Contacts)
-		b.send(ctx, chat, confirm, kb)
+		b.confirmCheckout(ctx, chat, user, st)
 	}
+}
+
+// confirmCheckout ends the form: the contacts are checked and saved with the
+// session, and the order is shown for confirmation.
+func (b *Bot) confirmCheckout(ctx context.Context, chat, user int64, st *checkoutState) {
+	c, err := service.ValidateContacts(st.Contacts)
+	if err != nil {
+		b.fail(ctx, chat, "validate contacts", err)
+		return
+	}
+	st.Contacts, st.Step = c, stepConfirm
+	cart, err := b.cart.Get(ctx, user)
+	if err != nil {
+		b.fail(ctx, chat, "get cart", err)
+		return
+	}
+	if err := b.sessions.Save(ctx, chat, st); err != nil {
+		b.fail(ctx, chat, "save checkout", err)
+		return
+	}
+	// The reply keyboard goes back to the menu before the inline confirm.
+	b.send(ctx, chat, msgContactsSaved, mainMenu())
+	confirm, kb := confirmView(cart, st.Contacts)
+	b.send(ctx, chat, confirm, kb)
 }
 
 func (b *Bot) saveCheckout(ctx context.Context, chat int64, st *checkoutState, ask string, kb telegram.ReplyMarkup) {
@@ -264,5 +314,5 @@ func (b *Bot) manage(ctx context.Context, cc callbackCtx, orderID int64, move in
 	if err := b.editText(ctx, cc, text, kb); err != nil {
 		return "", err
 	}
-	return "Статус: " + statusLabel(o.Status), nil
+	return "Статус: " + orderStatusLabel(o), nil
 }
