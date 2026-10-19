@@ -174,3 +174,13 @@ func TestProductOnDemand(t *testing.T) {
 	assert.NotNil(t, store.matched[7])
 	require.NoError(t, e.Product(context.Background(), 8), "a product matched before, or unknown, is no work")
 }
+
+func TestSeveralUnknownHitsAreAskedWhoseTheyAre(t *testing.T) {
+	api := mannAPI()
+	store := newMemStore(Product{ID: 1, PartKey: "W71295", BrandKeys: []string{"MANNFILTER"}})
+
+	_, err := newEnricher(api, store).Pass(context.Background(), 10)
+	require.NoError(t, err)
+	require.NotNil(t, store.matched[1])
+	assert.Equal(t, int64(4), store.matched[1].SupplierID, "the card that names MANN-FILTER")
+}

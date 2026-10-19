@@ -233,24 +233,37 @@ func (e *Enricher) match(ctx context.Context, p Product) error {
 	if err != nil {
 		return err
 	}
-	hit, ok := pick(p, same, names)
-	if !ok {
-		// One hit from a brand no crawl has named yet: its card may name
-		// it. One more call, made only here.
-		if len(same) != 1 || names[same[0].SupplierID] != "" || len(p.BrandKeys) == 0 {
-			return e.store.Unmatched(ctx, p.ID)
+	if hit, ok := pick(p, same, names); ok {
+		a, err := e.Article(ctx, hit.SupplierID, hit.Number)
+		if err != nil {
+			return fmt.Errorf("enrich: article %s of %d: %w", hit.Number, hit.SupplierID, err)
 		}
-		hit = same[0]
+		return e.store.Matched(ctx, p.ID, a)
 	}
-	a, err := e.Article(ctx, hit.SupplierID, hit.Number)
-	if err != nil {
-		return fmt.Errorf("enrich: article %s of %d: %w", hit.Number, hit.SupplierID, err)
+	// Hits from brands no crawl has named yet: their cards may name them,
+	// the cross list listing the article itself. A call each, made only
+	// here, for a few.
+	if len(p.BrandKeys) > 0 {
+		asked := 0
+		for _, h := range same {
+			if names[h.SupplierID] != "" || asked == maxUnknownHits {
+				continue
+			}
+			asked++
+			a, err := e.Article(ctx, h.SupplierID, h.Number)
+			if err != nil {
+				return fmt.Errorf("enrich: article %s of %d: %w", h.Number, h.SupplierID, err)
+			}
+			if slices.Contains(p.BrandKeys, domain.NormalizeOEM(a.Brand)) {
+				return e.store.Matched(ctx, p.ID, a)
+			}
+		}
 	}
-	if !ok && !slices.Contains(p.BrandKeys, domain.NormalizeOEM(a.Brand)) {
-		return e.store.Unmatched(ctx, p.ID)
-	}
-	return e.store.Matched(ctx, p.ID, a)
+	return e.store.Unmatched(ctx, p.ID)
 }
+
+// maxUnknownHits bounds the cards read to learn whose hits are.
+const maxUnknownHits = 3
 
 // pick chooses the product's own article among hits with its number: the
 // one from its brand, or for a product with no brand the only one.

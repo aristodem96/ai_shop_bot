@@ -94,14 +94,18 @@ func (r *EnrichRepository) SaveArticle(ctx context.Context, a *enrich.Article) e
 	})
 }
 
-// pendingSelect reads a product to match with the keys its brand goes by.
-// A product made for a part request is matched by its request already.
+// pendingSelect reads a product to match with the keys its brand goes by:
+// one never looked for, or one not found a month ago, when crawls have
+// named more brands. A product made for a part request is matched by its
+// request already.
 const pendingSelect = `
 	SELECT p.id, p.part_key, CASE WHEN p.brand_key = '' THEN '{}'::text[] ELSE array(
 		SELECT p.brand_key UNION
 		SELECT a.alias FROM brand_aliases a JOIN brands b ON b.id = a.brand_id WHERE b.name = p.brand) END
 	FROM products p
-	WHERE p.autodb_checked_at IS NULL AND p.part_key <> '' AND p.request_id IS NULL`
+	WHERE (p.autodb_checked_at IS NULL
+	       OR (p.autodb_supplier_id IS NULL AND p.autodb_checked_at < now() - interval '30 days'))
+	  AND p.part_key <> '' AND p.request_id IS NULL`
 
 // Pending returns products not looked for yet, those buyers opened first.
 func (r *EnrichRepository) Pending(ctx context.Context, limit int) ([]enrich.Product, error) {
