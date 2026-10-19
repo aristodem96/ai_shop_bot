@@ -111,11 +111,12 @@ docker compose ps
 curl https://shop-bot.example.com/healthz          # {"status":"ok"}
 ```
 
-For a real shop, skip the demo catalogue and load the stock instead: put the
-supplier's profile in `profiles/` on the server (real profiles are the shop's
-business data and stay out of git) and send the price list to the managers'
-chat — [docs/import/README.md](docs/import/README.md) walks through it. Then
-the vehicle directory for the makes Auto-DB lacks, once:
+For a real shop, skip the demo catalogue and load the stock instead: send
+the export from 1C, or a supplier's price list, to the managers' chat — the
+bot reads its columns, asks to confirm them and to name the supplier, and
+shows a report before anything changes.
+[docs/import/README.md](docs/import/README.md) walks through it. Then the
+vehicle directory for the makes Auto-DB lacks, once:
 `docker compose run --rm --entrypoint /import bot -vehicles /data/vehicles.csv`.
 
 There is nothing to configure in the Monobank cabinet: the webhook address is

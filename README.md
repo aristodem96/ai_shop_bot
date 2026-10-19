@@ -481,18 +481,18 @@ start without the secrets. The image is 31 MB on distroless.
 
 ## Loading a real catalogue
 
-A step-by-step guide for whoever connects a shop or a supplier, in Ukrainian,
-is in [docs/import/README.md](docs/import/README.md): what a profile holds,
-field by field, and how to read the report.
+A step-by-step guide for the shop's owner and managers, in Ukrainian, is in
+[docs/import/README.md](docs/import/README.md). This section is how it works.
 
-The demo catalogue is code; a shop's is a file. The catalogue was shaped
-against a real Ukrainian price list of 81 654 rows, which is what a supplier
-actually sends:
+The demo catalogue is code; a shop's is a file — an export from 1C or BAS,
+or a supplier's price list. The importer was shaped against a real
+Ukrainian price list of 81 654 rows, which is what a supplier actually
+sends:
 
 - **a vehicle is named only as "Make Model"**, so a fitment can point at a whole
   model, optionally within years, and applies to every engine of it;
 - **one part number is sold under several brands** (those are the analogues),
-  so the supplier's own id, not the part number, is the key a re-import
+  so the supplier's own code, not the part number, is the key a re-import
   matches on;
 - **brands come spelt five ways** ("KYB", "Kyb", "K.Y.B."): a brand directory
   keeps one name and every spelling met;
@@ -501,62 +501,34 @@ actually sends:
 - **no photos, often no category**: a card without a photo goes out as text,
   and the category comes from the name.
 
-**Categories are a tree, and the tree sorts the rows.**
-[data/categories.csv](data/categories.csv) holds 13 sections and about 50
-subcategories — brakes, engine, bodywork, steering, wheels — each with the
-word fragments, Ukrainian and Russian, that file a part there. When several
-match, the longest wins: "фильтр масл" (oil filter) beats "масл" (oil),
-"амортизатор багаж" (a boot strut) beats "амортиз" (a shock absorber). On the
-real price list this left 2.6% of 80 942 products uncategorised; the profile
-had no rules at all. The file ships in the binary and is synced on start. The
-bot's menu goes section → subcategory → products, counts what is behind each
-button for the buyer's car, and hides what is empty for it.
+**A supplier is set up from its first file, in the chat.** A file is sent to
+the managers' chat with no caption. Its header row is found under any
+preamble, on any sheet, in a CSV of any delimiter or in Windows-1251, and
+each column is read against the names Ukrainian and Russian price lists and
+1C exports use ("Номенклатура", "Цена", "Остаток", "Код"), a purchase price
+and a barcode excluded. The bot shows the reading field by field; the
+manager corrects it with buttons and is asked only what a file cannot say:
+the delivery time when there is no stock column, the markup, and the
+supplier's name. On the real price list and both examples every column was
+read right. The next file whose header has all of a supplier's columns is
+that supplier's, and goes straight to the report. A supplier that changed
+its export is picked from the list instead of named, so its products update
+rather than double: the key they are matched on is made from the first name
+and never changes. `/suppliers` lists them with their terms.
 
-**The owner teaches it new words, in the chat.** The import report lists the
-names no category recognised. `/word вал распредел` in the managers' chat
-counts the products with that fragment, asks for a category by buttons — or
-a new subcategory or section, named in a reply — and previews what would
-move before anything does: "37 products, 35 of them from Other; 2 stay, a
-longer word files them elsewhere". Apply stores the word and moves them;
-`/words` lists the owner's words with a delete button each, which
-previews too: the word's products go where the tree without it files them. They are kept
-apart from the file's, so a deploy that syncs the file does not erase them.
-
-Two steps, vehicles first, since a price list's fitments can only point at
-cars the catalogue knows:
-
-```bash
-make import-vehicles                    # data/vehicles.csv: ~200 cars common in Ukraine
-make import PROFILE=profiles/supplier.json FILE=price.xlsx DRY_RUN=1
-make import PROFILE=profiles/supplier.json FILE=price.xlsx
-```
-
-**Or from Telegram**, which is how a shop's staff would do it: send the file
-to the managers' chat (`ADMIN_CHAT_ID`), with the profile's name as the
-caption — or `авто` for the vehicle directory, or nothing when there is one
-profile. The bot runs the dry run and answers with its report and two
-buttons, *Apply* and *Cancel*. Profiles are the files in
-[profiles/](profiles/), mounted into the container, so adding a supplier
-needs no rebuild. Only the managers' chat can upload, and its buttons are
-checked against it like the order buttons are. That chat has a command menu
-of its own — `/admin` explains what managers can do there — while buyers
-keep theirs.
-
-A **profile** is a JSON file per supplier: which column is the name, price,
-brand, part number and vehicle, the words that sort rows into categories, the
-delivery time for parts on order, and a map for vehicle names the directory
-does not use verbatim (`"Chevrolet Aveo": ["Chevrolet Aveo T200", "Chevrolet
-Aveo T250"]`). A new supplier is a new JSON file, not a release.
-[profiles/demo-stock.json](profiles/demo-stock.json) with
-[docs/import/example-price.csv](docs/import/example-price.csv) is a working
-example, and what the integration test imports.
-
-Files arrive in whatever shape the supplier's software writes. Columns are
-found by name, in any order, under any preamble, on any sheet. A CSV in
-Windows-1251 (Excel on Windows, 1C) is recognised, and so is its delimiter.
-When a supplier renames a column, the error names the missing column and
-shows the row that came closest — where the new name is usually plain to
-see.
+**The category tree is the shop's, kept in the database.**
+[data/categories.csv](data/categories.csv) fills an empty database with 13
+sections, about 50 subcategories and some 530 word fragments, Ukrainian and
+Russian, that file a product there; after that the tree is edited only in
+the chat. A product goes where the longest word in its name or its 1C
+group sends it: "фильтр масл" (oil filter) beats "масл" (oil), "амортизатор
+багаж" (a boot strut) beats "амортиз" (a shock absorber). On the real price
+list this left 2.6% of 80 942 products in Other. `/categories` shows the
+tree with buttons to add, rename and delete categories and to add and
+remove words; `/word вал распредел` files a word straight from a report.
+Every change is worked out as an import would sort the products, shown
+first ("37 products move, 35 of them from Other"), and applied in one
+transaction.
 
 The **dry run** applies everything in a transaction and rolls it back, so its
 numbers are exact: how many products would be added, updated and taken off
@@ -589,17 +561,21 @@ run is logged in `import_runs`.
 
 A truncated file — one sheet of six, an export cut off halfway — looks
 exactly like a supplier dropping most of its range. An import that would
-take more than 20% of the supplier's products off sale (adjustable per
-profile) stops and changes nothing; applying it anyway is a second,
-deliberate step (`-force`, or the button in the chat).
+take more than a fifth of the supplier's products off sale stops and
+changes nothing; applying it anyway is a second, deliberate step (`-force`,
+or the button in the chat).
 
-On a server the command is in the image:
+A supplier set up in the chat loads from the command line too:
 
 ```bash
-docker compose run --rm --entrypoint /import bot -vehicles /data/vehicles.csv
-docker compose run --rm -v $PWD/imports:/imports --entrypoint /import bot \
-  -profile /profiles/supplier.json -file /imports/price.xlsx -dry-run
+make import-vehicles                                      # data/vehicles.csv, for makes Auto-DB lacks
+make import SUPPLIER="China Avto" FILE=price.xlsx DRY_RUN=1
+docker compose run --rm -v $PWD/imports:/files --entrypoint /import bot \
+  -supplier "China Avto" -file /files/price.xlsx -dry-run
 ```
+
+An automatic exchange with 1C (CommerceML, its "exchange with a website") is
+not built yet; it would load into the same suppliers and the same tree.
 
 ---
 
@@ -651,7 +627,8 @@ internal/
   storage/postgres/    repositories and their integration tests
   storage/redis/       conversations, sessions, rate limiter
   seed/                the demo catalogue
-  importer/            price list profiles, parsing, brand and vehicle matching
+  importer/            suppliers, reading their files, brand and vehicle matching
+  categories/          the category tree and its words, changes planned before applied
   vehiclematch/        the model proposing vehicles for supplier names
   autodb/              Auto-DB Pro client
   directory/           buyers' cars from the catalogue and the shop's list
@@ -662,6 +639,5 @@ internal/
   config/              environment configuration
 migrations/            goose migrations, embedded in the binary
 data/                  the category tree and the vehicle directory
-profiles/              supplier profiles the managers' chat imports with
 docs/import/           how to connect a supplier; example price lists
 ```
