@@ -11,8 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -240,6 +242,46 @@ func (c *Client) SendPhoto(ctx context.Context, chatID int64, photoURL, captionH
 	return c.call(ctx, "sendPhoto", params, nil)
 }
 
+// UploadPhoto sends a photo from its bytes and returns the file_id Telegram
+// keeps it under: sent again by that id, as SendPhoto's photo, it is not
+// uploaded twice.
+func (c *Client) UploadPhoto(ctx context.Context, chatID int64, filename string, data []byte, captionHTML string, markup ReplyMarkup) (string, error) {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	fields := [][2]string{{"chat_id", strconv.FormatInt(chatID, 10)}, {"caption", captionHTML}, {"parse_mode", "HTML"}}
+	if present(markup) {
+		raw, err := json.Marshal(markup)
+		if err != nil {
+			return "", fmt.Errorf("telegram: encode reply markup: %w", err)
+		}
+		fields = append(fields, [2]string{"reply_markup", string(raw)})
+	}
+	for _, f := range fields {
+		if err := w.WriteField(f[0], f[1]); err != nil {
+			return "", fmt.Errorf("telegram: write %s: %w", f[0], err)
+		}
+	}
+	fw, err := w.CreateFormFile("photo", filename)
+	if err != nil {
+		return "", fmt.Errorf("telegram: attach photo: %w", err)
+	}
+	if _, err := fw.Write(data); err != nil {
+		return "", fmt.Errorf("telegram: attach photo: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return "", fmt.Errorf("telegram: close upload: %w", err)
+	}
+	var sent Message
+	if err := c.send(ctx, "sendPhoto", buf.Bytes(), w.FormDataContentType(), &sent); err != nil {
+		return "", err
+	}
+	// Telegram keeps the photo in several sizes; any id sends all of them.
+	if len(sent.Photo) == 0 {
+		return "", errors.New("telegram: sendPhoto returned no photo")
+	}
+	return sent.Photo[len(sent.Photo)-1].FileID, nil
+}
+
 // present reports whether a keyboard was given. A nil *InlineKeyboard in a
 // ReplyMarkup is an interface that is not nil, and it marshals to null,
 // which Telegram rejects with the whole message ("object expected as reply
@@ -406,8 +448,13 @@ func (c *Client) call(ctx context.Context, method string, params map[string]any,
 	if err != nil {
 		return fmt.Errorf("telegram: encode %s: %w", method, err)
 	}
+	return c.send(ctx, method, body, "application/json", out)
+}
+
+// send makes a call, sitting out a short flood wait.
+func (c *Client) send(ctx context.Context, method string, body []byte, contentType string, out any) error {
 	for attempt := 0; ; attempt++ {
-		wait, err := c.do(ctx, method, body, out)
+		wait, err := c.do(ctx, method, body, contentType, out)
 		if wait == 0 || attempt == floodRetries {
 			return err
 		}
@@ -421,13 +468,13 @@ func (c *Client) call(ctx context.Context, method string, params map[string]any,
 
 // do makes one call. A short flood wait comes back as wait, with the error
 // to return if the caller does not retry.
-func (c *Client) do(ctx context.Context, method string, body []byte, out any) (wait time.Duration, err error) {
+func (c *Client) do(ctx context.Context, method string, body []byte, contentType string, out any) (wait time.Duration, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.baseURL+"/bot"+c.token+"/"+method, bytes.NewReader(body))
 	if err != nil {
 		return 0, fmt.Errorf("telegram: build %s request: %w", method, redact(err))
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 
 	resp, err := c.http.Do(req)
 	if err != nil {

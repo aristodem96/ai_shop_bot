@@ -82,6 +82,7 @@ func (b *Bot) sendProductPage(ctx context.Context, cc callbackCtx, categoryID in
 // still goes out as text. A missing photo should cost the picture, not the
 // sale. A product imported without a photo goes out as text from the start.
 func (b *Bot) sendProduct(ctx context.Context, cc callbackCtx, productID int64) error {
+	b.enrich(ctx, productID)
 	p, err := b.catalog.Product(ctx, productID)
 	if err != nil {
 		return err
@@ -90,14 +91,23 @@ func (b *Bot) sendProduct(ctx context.Context, cc callbackCtx, productID int64) 
 	if p.ImageURL == "" {
 		return b.tg.SendMessage(ctx, cc.chat, caption, kb)
 	}
+	return b.sendPhoto(ctx, cc.chat, p.ImageURL, caption, kb)
+}
 
-	err = b.tg.SendPhoto(ctx, cc.chat, p.ImageURL, caption, kb)
+// sendPhoto sends a photo with its caption, or the caption alone when the
+// photo cannot be had: the card matters more than its picture.
+func (b *Bot) sendPhoto(ctx context.Context, chat int64, url, caption string, kb telegram.ReplyMarkup) error {
+	var err error
+	if b.photos != nil {
+		err = b.photos.Send(ctx, chat, url, caption, kb)
+	} else {
+		err = b.tg.SendPhoto(ctx, chat, url, caption, kb)
+	}
 	if err == nil || ctx.Err() != nil {
 		return err
 	}
-	b.log.WarnContext(ctx, "could not send product photo, falling back to text",
-		slog.Int64("product_id", p.ID), slog.Any("error", err))
-	return b.tg.SendMessage(ctx, cc.chat, caption, kb)
+	b.log.WarnContext(ctx, "could not send a photo, falling back to text", slog.String("url", url), slog.Any("error", err))
+	return b.tg.SendMessage(ctx, chat, caption, kb)
 }
 
 // addToCart adds one unit. A part that does not fit the buyer's car is still

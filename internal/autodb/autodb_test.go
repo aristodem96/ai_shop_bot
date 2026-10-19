@@ -81,8 +81,9 @@ func TestVehicleSide(t *testing.T) {
 func TestPartSide(t *testing.T) {
 	c, asked := server(t, map[string]string{
 		"search": `[{"supplierId":"34","DataSupplierArticleNumber":"OC 90","NormalizedDescription":"Фильтр","ArticleStateDisplayValue":"Нормальный"}]`,
-		"getArtInfo": `{"status":{"NormalizedDescription":"Фильтр"},"specs":[{"description":"Высота [мм]","displayvalue":"142"}],
-			"images":[{"url":"https://image.auto-db.pro/OC90.jpg"}],"oem":[{"description":"FORD","OENbr":"5009285"}],
+		"getArtInfo": `{"status":{"NormalizedDescription":"Фильтр"},"specs":[{"description":"для артикула №","displayvalue":"OC 90"},
+			{"description":"Высота [мм]","displayvalue":"142"},{"description":"Высота [мм]","displayvalue":"142"}],
+			"images":[{"url":"https://image.auto-db.pro/OC90.webp"},{"url":"https://image.auto-db.pro/images/B.webp"}],"oem":[{"description":"FORD","OENbr":"5009285"}],
 			"cross":[{"description":"MANN-FILTER","PartsDataSupplierArticleNumber":"W 712/22"}],"vehicles":null}`,
 	})
 	ctx := context.Background()
@@ -96,10 +97,10 @@ func TestPartSide(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, &ArticleInfo{Name: "Фильтр",
 		Specs:  []Spec{{Name: "Высота [мм]", Value: "142"}},
-		Images: []Image{{URL: "https://image.auto-db.pro/OC90.jpg"}},
+		Images: []Image{{URL: "https://image.auto-db.pro/images/OC90.webp"}, {URL: "https://image.auto-db.pro/images/B.webp"}},
 		OEM:    []OEM{{Make: "FORD", Number: "5009285"}},
 		Cross:  []Cross{{Brand: "MANN-FILTER", Number: "W 712/22"}},
-	}, info)
+	}, info, "photos where they are, each characteristic once")
 	assert.Contains(t, (*asked)[1], "brand=34")
 }
 

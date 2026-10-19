@@ -153,9 +153,12 @@ func NormalizeOEM(s string) string {
 // does not stock. It has no price: the shop can order it, and a manager
 // quotes the price once a supplier is found.
 type CatalogPart struct {
-	ID     int64
-	Brand  string
-	Number string
+	ID    int64
+	Brand string
+	// SupplierID is the brand's id in the catalogue, to ask it about the
+	// part.
+	SupplierID int64
+	Number     string
 	// Name is Ukrainian once translated, the catalogue's Russian until then.
 	Name string
 	// Category is the slug of the shop's category, "" when not yet known.

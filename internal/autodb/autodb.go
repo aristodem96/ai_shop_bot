@@ -284,11 +284,41 @@ func (c *Client) Info(ctx context.Context, supplierID int64, number string) (*Ar
 	if err := c.get(ctx, q, &raw); err != nil {
 		return nil, err
 	}
-	info := &ArticleInfo{Specs: raw.Specs, Images: raw.Images, OEM: raw.OEM, Cross: raw.Cross}
+	info := &ArticleInfo{Specs: specs(raw.Specs), OEM: raw.OEM, Cross: raw.Cross}
+	for _, im := range raw.Images {
+		info.Images = append(info.Images, Image{URL: imageURL(im.URL)})
+	}
 	if raw.Status != nil {
 		info.Name = raw.Status.Name
 	}
 	return info, nil
+}
+
+// imageHost serves the photos. The url the API builds lacks the /images/
+// directory the files are in, and answers 404 (October 2026); the client
+// adds it, and leaves a url that has it alone.
+const imageHost = "https://image.auto-db.pro/"
+
+func imageURL(u string) string {
+	if name, ok := strings.CutPrefix(u, imageHost); ok && !strings.HasPrefix(name, "images/") {
+		return imageHost + "images/" + name
+	}
+	return u
+}
+
+// specs drops what is no characteristic: the API lists every pair twice
+// and starts with the article's own number ("для артикула №").
+func specs(in []Spec) []Spec {
+	out := make([]Spec, 0, len(in))
+	seen := make(map[Spec]bool, len(in))
+	for _, s := range in {
+		if seen[s] || strings.HasPrefix(s.Name, "для артикула") || s.Value == "" {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
 }
 
 // bom is the UTF-8 byte order mark the API puts before its JSON.

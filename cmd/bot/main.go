@@ -26,12 +26,14 @@ import (
 	"github.com/aristodem96/ai_shop_bot/internal/config"
 	"github.com/aristodem96/ai_shop_bot/internal/crawler"
 	"github.com/aristodem96/ai_shop_bot/internal/directory"
+	"github.com/aristodem96/ai_shop_bot/internal/enrich"
 	"github.com/aristodem96/ai_shop_bot/internal/importer"
 	"github.com/aristodem96/ai_shop_bot/internal/llm"
 	"github.com/aristodem96/ai_shop_bot/internal/llm/claude"
 	"github.com/aristodem96/ai_shop_bot/internal/observability"
 	"github.com/aristodem96/ai_shop_bot/internal/partnames"
 	"github.com/aristodem96/ai_shop_bot/internal/payment/monobank"
+	"github.com/aristodem96/ai_shop_bot/internal/photos"
 	"github.com/aristodem96/ai_shop_bot/internal/service"
 	"github.com/aristodem96/ai_shop_bot/internal/storage/postgres"
 	redisstore "github.com/aristodem96/ai_shop_bot/internal/storage/redis"
@@ -97,12 +99,14 @@ func run() error {
 		vehicles service.VehicleRepository = vehicleRepo
 		dir      *directory.Directory
 		crawl    *crawler.Crawler
+		enricher *enrich.Enricher
 	)
 	if cfg.AutoDB.User != "" {
 		api := autodb.New(autodb.Config{BaseURL: cfg.AutoDB.URL, User: cfg.AutoDB.User, Password: cfg.AutoDB.Password})
 		dir = directory.New(api, postgres.NewDirectoryRepository(pool), log).WithFallback(vehicleRepo)
 		vehicles = dir
 		crawl = crawler.New(api, postgres.NewCrawlRepository(pool), crawler.Config{}, log)
+		enricher = enrich.New(api, postgres.NewEnrichRepository(pool), enrich.Config{}, log)
 	}
 	garage := service.NewGarageService(vehicles, vehicleRepo)
 	if crawl != nil {
@@ -128,7 +132,16 @@ func run() error {
 		PickupAddress:  cfg.PickupAddress,
 	}, log)
 
+	// Photos go to Telegram converted and are sent again by Telegram's id.
+	b.UsePhotos(photos.New(tg, postgres.NewPhotoRepository(pool), log))
+
 	group, gctx := errgroup.WithContext(ctx)
+	if enricher != nil {
+		// Photos, carmakers' numbers and analogues from the catalogue: for
+		// a card as it is opened, and for the whole stock in the background.
+		b.UseEnrichment(enricher)
+		group.Go(func() error { return enricher.Run(gctx) })
+	}
 	if dir != nil {
 		// Makes and models in the cache before buyers ask; the API takes
 		// seconds a call, and a cold lookup would keep a buyer waiting.

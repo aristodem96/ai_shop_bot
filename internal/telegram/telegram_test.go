@@ -182,3 +182,30 @@ func TestLongFloodWaitIsReported(t *testing.T) {
 	err := c.SendMessage(context.Background(), 5, "hi", nil)
 	require.ErrorContains(t, err, "429", "ten minutes is a limit to report, not to sit out")
 }
+
+func TestUploadPhotoSendsAFileAndReturnsItsID(t *testing.T) {
+	var (
+		fields = map[string]string{}
+		file   []byte
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseMultipartForm(1<<20))
+		for k, v := range r.MultipartForm.Value {
+			fields[k] = v[0]
+		}
+		f, _, err := r.FormFile("photo")
+		require.NoError(t, err)
+		file, _ = io.ReadAll(f)
+		_, _ = io.WriteString(w, `{"ok":true,"result":{"message_id":1,"chat":{"id":5},"photo":[{"file_id":"small"},{"file_id":"big"}]}}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	id, err := NewWithBaseURL(srv.URL, token).UploadPhoto(context.Background(), 5, "p.jpg", []byte("JPEG"), "<b>Колодки</b>",
+		&InlineKeyboard{Rows: [][]InlineButton{{{Text: "+", CallbackData: "a:1"}}}})
+	require.NoError(t, err)
+	assert.Equal(t, "big", id)
+	assert.Equal(t, []byte("JPEG"), file)
+	assert.Equal(t, "5", fields["chat_id"])
+	assert.Equal(t, "HTML", fields["parse_mode"])
+	assert.JSONEq(t, `{"inline_keyboard":[[{"text":"+","callback_data":"a:1"}]]}`, fields["reply_markup"])
+}

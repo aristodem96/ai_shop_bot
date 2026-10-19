@@ -28,7 +28,7 @@ func NewCatalogPartRepository(pool *pgxpool.Pool) *CatalogPartRepository {
 }
 
 // catalogPartColumns read a part with its translation, when there is one.
-const catalogPartColumns = `mp.id, mp.brand, mp.number, coalesce(n.name_uk, mp.name) AS name, coalesce(n.category, '') AS category`
+const catalogPartColumns = `mp.id, mp.brand, mp.supplier_id, mp.number, coalesce(n.name_uk, mp.name) AS name, coalesce(n.category, '') AS category`
 
 // ForVehicle finds the catalogue's parts for a vehicle that the shop has no
 // product for. Query words match the Ukrainian name or the Russian one, a
@@ -40,7 +40,7 @@ func (r *CatalogPartRepository) ForVehicle(ctx context.Context, f service.Search
 		words = []string{}
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, brand, number, name, category FROM (
+		SELECT id, brand, supplier_id, number, name, category FROM (
 			SELECT DISTINCT ON (mp.article_key, mp.brand_key) `+catalogPartColumns+`
 			FROM vehicles v
 			JOIN autodb_mod_parts mp ON mp.mod_id = v.autodb_mod_id

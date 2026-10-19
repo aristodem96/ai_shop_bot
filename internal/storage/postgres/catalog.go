@@ -227,16 +227,28 @@ func (r *CatalogRepository) Product(ctx context.Context, id int64) (*domain.Prod
 	return &p, nil
 }
 
-// Analogues ranks available interchangeable parts: those sharing an OEM number
-// with p first -- the same part from another brand -- then the same kind of
-// part for any of the same vehicles, closest in price first. No model is
+// Analogues ranks available interchangeable parts: the same part from
+// another brand first -- sharing an OEM number with p, or on the cross list
+// Auto-DB has for p's article, or listing p on its own -- then the same kind
+// of part for any of the same vehicles, closest in price first. No model is
 // involved: "analogues" from a button is a deterministic query, which is
 // cheaper, instant and gives the same answer twice.
 func (r *CatalogRepository) Analogues(ctx context.Context, p *domain.Product, vehicleID int64, limit int) ([]domain.Product, error) {
 	rows, err := r.pool.Query(ctx, `
+		WITH src AS (SELECT id, part_key, brand, brand_key, autodb_supplier_id FROM products WHERE id = $1),
+		crossed AS (
+			SELECT x.id FROM src
+			JOIN autodb_crosses c ON c.supplier_id = src.autodb_supplier_id AND c.article_key = src.part_key
+			JOIN products x ON x.part_key = c.cross_key AND `+brandIs("x", "c.brand_key")+`
+			UNION
+			SELECT x.id FROM src
+			JOIN autodb_crosses c ON c.cross_key = src.part_key AND `+brandIs("src", "c.brand_key")+`
+			JOIN products x ON x.autodb_supplier_id = c.supplier_id AND x.part_key = c.article_key
+		)
 		SELECT `+productColumns+` FROM products p
 		WHERE p.id <> $1 AND p.is_active AND p.request_id IS NULL AND `+available+` AND `+fitsVehicle("$5")+` AND (
 			p.oem_numbers && $2::text[]
+			OR p.id IN (SELECT id FROM crossed)
 			OR (p.category_id = $3 AND (
 				($6 AND p.universal)
 				OR EXISTS (
@@ -244,7 +256,8 @@ func (r *CatalogRepository) Analogues(ctx context.Context, p *domain.Product, ve
 					JOIN vehicle_fitments b ON b.vehicle_id = a.vehicle_id
 					WHERE a.product_id = p.id AND b.product_id = $1)))
 		)
-		ORDER BY (p.oem_numbers && $2::text[]) DESC, (p.stock > 0) DESC, abs(p.price - $4), p.id
+		ORDER BY (p.oem_numbers && $2::text[] OR p.id IN (SELECT id FROM crossed)) DESC,
+			(p.stock > 0) DESC, abs(p.price - $4), p.id
 		LIMIT $7`,
 		p.ID, p.OEMNumbers, p.CategoryID, int64(p.Price), vehicleID, p.Universal, limit)
 	if err != nil {
@@ -255,6 +268,14 @@ func (r *CatalogRepository) Analogues(ctx context.Context, p *domain.Product, ve
 		return nil, fmt.Errorf("postgres: scan analogues: %w", err)
 	}
 	return products, nil
+}
+
+// brandIs is the condition "product alias t is of the brand Auto-DB keys
+// as key": the same key, an alias of it, or a price list naming no brand.
+func brandIs(t, key string) string {
+	return `(` + t + `.brand = '' OR ` + t + `.brand_key = ` + key + ` OR EXISTS (
+		SELECT 1 FROM brand_aliases ba JOIN brands bb ON bb.id = ba.brand_id
+		WHERE ba.alias = ` + key + ` AND bb.name = ` + t + `.brand))`
 }
 
 // KitParts returns available parts of one type that fit the vehicle, those

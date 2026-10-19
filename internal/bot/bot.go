@@ -105,6 +105,11 @@ type Bot struct {
 	words    Words
 	wordJobs *wordJobs
 
+	// photos and enricher are nil until UsePhotos and UseEnrichment are
+	// called.
+	photos   Photos
+	enricher Enricher
+
 	// requests and parts are nil until UseRequests is called.
 	requests PartRequests
 	parts    CatalogParts

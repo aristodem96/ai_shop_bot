@@ -87,6 +87,13 @@ func (r *CrawlRepository) SaveParts(ctx context.Context, modID, sectionID int64,
 			ON CONFLICT DO NOTHING`, modID, sectionID, sup, art, num, brand, bkey, name); err != nil {
 			return fmt.Errorf("postgres: save section %d of %d: %w", sectionID, modID, err)
 		}
+		// The brands' names, to tell whose a search hit is.
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO autodb_suppliers (id, name, name_key)
+			SELECT DISTINCT ON (x.id) x.* FROM unnest($1::bigint[], $2::text[], $3::text[]) AS x(id, name, name_key)
+			ON CONFLICT DO NOTHING`, sup, brand, bkey); err != nil {
+			return fmt.Errorf("postgres: save suppliers of section %d: %w", sectionID, err)
+		}
 		return nil
 	})
 }

@@ -12,8 +12,9 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/redis v0.44.0
 	github.com/xuri/excelize/v2 v2.11.0
-	golang.org/x/sync v0.22.0
-	golang.org/x/text v0.40.0
+	golang.org/x/image v0.47.0
+	golang.org/x/sync v0.24.0
+	golang.org/x/text v0.43.0
 )
 
 require (
@@ -87,5 +88,5 @@ require (
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
 )

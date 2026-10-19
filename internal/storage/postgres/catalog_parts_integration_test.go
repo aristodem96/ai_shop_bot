@@ -64,7 +64,7 @@ func TestCatalogParts(t *testing.T) {
 	all, err := repo.ForVehicle(ctx, service.SearchFilter{VehicleID: vehicleID, Limit: 10})
 	require.NoError(t, err)
 	require.Len(t, all, 2, "the stocked Delphi is not offered on order, the Brembo comes once")
-	assert.Equal(t, domain.CatalogPart{ID: all[0].ID, Brand: "BREMBO", Number: "S 59 513", Name: "Гальмівні колодки", Category: "brake-pads"}, all[0],
+	assert.Equal(t, domain.CatalogPart{ID: all[0].ID, Brand: "BREMBO", SupplierID: 65, Number: "S 59 513", Name: "Гальмівні колодки", Category: "brake-pads"}, all[0],
 		"translated and filed first")
 	assert.Equal(t, "Масляный фильтр", all[1].Name, "untranslated yet, still offered")
 
