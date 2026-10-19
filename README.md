@@ -257,6 +257,8 @@ hundreds of sections; asking it while a buyer waits would make every answer
 take minutes. So choosing a car queues a crawl (a Postgres queue, `SKIP
 LOCKED`), a worker walks the tree in the background with retries, and the bot
 only ever reads what was stored. A car one buyer chose is there for the next.
+A buyer who chose a car or asked about one still loading is sent a message
+when it is loaded, and a failed crawl someone waits for is tried again.
 Every call to the API waits on one rate, with background work kept to a
 share of it, so a buyer's lookup never queues behind a crawl and the account
 never sees a burst.

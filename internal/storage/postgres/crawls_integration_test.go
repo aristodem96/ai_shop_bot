@@ -119,3 +119,55 @@ func TestCrawlQueue(t *testing.T) {
 	_, ok, _ = repo.Claim(ctx)
 	assert.False(t, ok, "a fresh crawl is not repeated")
 }
+
+func TestCrawlWaiters(t *testing.T) {
+	skipShort(t)
+	ctx := context.Background()
+	repo := NewCrawlRepository(testPool)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(ctx, `DELETE FROM autodb_crawls`)
+		_, _ = testPool.Exec(ctx, `DELETE FROM vehicles WHERE autodb_mod_id IS NOT NULL`)
+	})
+	vehicleID, err := NewDirectoryRepository(testPool).UpsertVehicle(ctx,
+		directory.ToVehicle("BMW", autodb.Model{Name: "3 (E46)"}, autodb.Modification{ID: 9101, Name: "BMW 3 (E46) 320 i",
+			Attrs: map[string][]string{"ConstructionInterval": {"02.2000 - 12.2005"}}}), 9101, 0)
+	require.NoError(t, err)
+
+	require.NoError(t, repo.Watch(ctx, 5, vehicleID), "nothing queued yet: nothing to wait for")
+	require.NoError(t, repo.Enqueue(ctx, vehicleID, time.Hour))
+	require.NoError(t, repo.Watch(ctx, 5, vehicleID))
+	require.NoError(t, repo.Watch(ctx, 5, vehicleID), "a buyer asking twice is told once")
+	require.NoError(t, repo.Watch(ctx, 6, vehicleID))
+	require.NoError(t, repo.Watch(ctx, 5, vehicleByCode(t, "lanos-15")), "a car not from Auto-DB has no catalogue to wait for")
+
+	modID, ok, err := repo.Claim(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NoError(t, repo.Finish(ctx, modID, assert.AnError))
+
+	require.NoError(t, repo.RetryFailed(ctx, time.Hour, 24*time.Hour))
+	_, ok, _ = repo.Claim(ctx)
+	assert.False(t, ok, "failed just now: not yet")
+	require.NoError(t, repo.RetryFailed(ctx, 0, 24*time.Hour))
+	modID, ok, err = repo.Claim(ctx)
+	require.NoError(t, err)
+	require.True(t, ok, "failed, and someone waits: queued again")
+
+	require.NoError(t, repo.Finish(ctx, modID, nil))
+	require.NoError(t, repo.Watch(ctx, 7, vehicleID), "done: nothing to wait for")
+	ws, err := repo.Waiters(ctx, modID)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []crawler.Waiter{{UserID: 5, VehicleID: vehicleID}, {UserID: 6, VehicleID: vehicleID}}, ws)
+	ws, err = repo.Waiters(ctx, modID)
+	require.NoError(t, err)
+	assert.Empty(t, ws, "each is told once")
+
+	// A failed crawl nobody waits for stays failed, and old waits are let go.
+	require.NoError(t, repo.Finish(ctx, modID, assert.AnError))
+	_, err = testPool.Exec(ctx, `INSERT INTO autodb_crawl_waiters (mod_id, user_id, vehicle_id, created_at)
+		VALUES ($1, 8, $2, now() - interval '8 days')`, modID, vehicleID)
+	require.NoError(t, err)
+	require.NoError(t, repo.RetryFailed(ctx, 0, 7*24*time.Hour))
+	_, ok, _ = repo.Claim(ctx)
+	assert.False(t, ok)
+}

@@ -64,6 +64,14 @@ type OrderCatalog interface {
 	CrawlState(ctx context.Context, vehicleID int64) (string, error)
 }
 
+// CatalogLoader loads a car's parts catalogue. crawler.Crawler is the
+// implementation.
+type CatalogLoader interface {
+	// Watch queues the car's catalogue unless it is loaded, and has the
+	// buyer told by the bot when it is.
+	Watch(ctx context.Context, userID, vehicleID int64) error
+}
+
 // CatalogFits says what cars a stock product fits by the parts catalogue.
 // enrich.Enricher is the implementation.
 type CatalogFits interface {
@@ -145,6 +153,14 @@ func (a *Agent) UseOrderCatalog(c OrderCatalog) {
 	a.tools.parts = c
 }
 
+// UseCatalogLoader has a search for a car whose catalogue is not loaded
+// load it, and the buyer told when it is.
+func (a *Agent) UseCatalogLoader(l CatalogLoader) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.tools.loader = l
+}
+
 // UseCatalogFits adds to get_part the cars a product fits by the parts
 // catalogue.
 func (a *Agent) UseCatalogFits(f CatalogFits) {
@@ -167,7 +183,7 @@ func (a *Agent) toolsFor(ctx context.Context) *toolbox {
 	}
 	if s := treeSignature(cats); s != sig {
 		next := newToolbox(cur.catalog, cur.cart, cur.garage, cur.kits, cur.orders, cats)
-		next.parts, next.fits = cur.parts, cur.fits
+		next.parts, next.fits, next.loader = cur.parts, cur.fits, cur.loader
 		a.mu.Lock()
 		a.tools, a.treeSig, cur = next, s, next
 		a.mu.Unlock()

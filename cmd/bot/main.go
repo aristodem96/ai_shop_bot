@@ -239,11 +239,21 @@ func (a *app) wireShop() {
 
 	if c := a.catalogue; c != nil {
 		// A car chosen is a car whose parts are fetched now, in the
-		// background, so they are there when the buyer asks for them.
-		a.garage.OnChoose(func(ctx context.Context, vehicleID int64) {
-			if err := c.crawl.Enqueue(ctx, vehicleID); err != nil {
+		// background, so they are there when the buyer asks for them; the
+		// buyer is told when they are.
+		a.garage.OnChoose(func(ctx context.Context, userID, vehicleID int64) {
+			if err := c.crawl.Watch(ctx, userID, vehicleID); err != nil {
 				a.log.WarnContext(ctx, "could not queue a crawl", slog.Int64("vehicle_id", vehicleID), slog.Any("error", err))
 			}
+		})
+		c.crawl.OnReady(func(ctx context.Context, w crawler.Waiter) {
+			v, err := a.garage.Vehicle(ctx, w.VehicleID)
+			if err != nil {
+				a.log.WarnContext(ctx, "could not tell a buyer their catalogue is loaded",
+					slog.Int64("vehicle_id", w.VehicleID), slog.Any("error", err))
+				return
+			}
+			a.bot.CatalogueReady(ctx, w.UserID, v)
 		})
 		// Photos, carmakers' numbers and analogues: for a card as it is
 		// opened, and for the whole stock in the background.
@@ -348,6 +358,7 @@ func (a *app) wireConsultant() error {
 	}
 	requests := postgres.NewPartRequestRepository(a.pool)
 	consultant.UseOrderCatalog(catalogParts)
+	consultant.UseCatalogLoader(c.crawl)
 	a.bot.UseRequests(requests, catalogParts)
 	a.every(10*time.Minute, "expiring quotes", func(ctx context.Context) error {
 		_, err := requests.Expire(ctx)

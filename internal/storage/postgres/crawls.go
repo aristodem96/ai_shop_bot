@@ -109,6 +109,53 @@ func (r *CrawlRepository) Progress(ctx context.Context, modID int64, total, done
 	return nil
 }
 
+// Watch records that a buyer waits for the vehicle's crawl. The crawl's row
+// is locked while it is read, so a crawl finishing at the same moment either
+// sees the buyer among its waiters or is seen done, and no one waits for a
+// crawl that has already ended. A buyer waits for one vehicle's crawl once.
+func (r *CrawlRepository) Watch(ctx context.Context, userID, vehicleID int64) error {
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO autodb_crawl_waiters (mod_id, user_id, vehicle_id)
+		SELECT c.mod_id, $1, v.id FROM vehicles v JOIN autodb_crawls c ON c.mod_id = v.autodb_mod_id
+		WHERE v.id = $2 AND c.status <> 'done'
+		FOR SHARE OF c
+		ON CONFLICT (mod_id, user_id) DO UPDATE SET vehicle_id = excluded.vehicle_id`, userID, vehicleID)
+	if err != nil {
+		return fmt.Errorf("postgres: watch crawl of vehicle %d: %w", vehicleID, err)
+	}
+	return nil
+}
+
+// Waiters takes the buyers waiting for a modification's crawl.
+func (r *CrawlRepository) Waiters(ctx context.Context, modID int64) ([]crawler.Waiter, error) {
+	rows, err := r.pool.Query(ctx, `
+		DELETE FROM autodb_crawl_waiters WHERE mod_id = $1 RETURNING user_id, vehicle_id`, modID)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: waiters of crawl %d: %w", modID, err)
+	}
+	ws, err := pgx.CollectRows(rows, pgx.RowToStructByPos[crawler.Waiter])
+	if err != nil {
+		return nil, fmt.Errorf("postgres: waiters of crawl %d: %w", modID, err)
+	}
+	return ws, nil
+}
+
+// RetryFailed queues again the failed crawls someone waits for that failed
+// more than after ago, and forgets waits older than keep.
+func (r *CrawlRepository) RetryFailed(ctx context.Context, after, keep time.Duration) error {
+	if _, err := r.pool.Exec(ctx, `
+		DELETE FROM autodb_crawl_waiters WHERE created_at < now() - make_interval(secs => $1)`, keep.Seconds()); err != nil {
+		return fmt.Errorf("postgres: forget old crawl waiters: %w", err)
+	}
+	if _, err := r.pool.Exec(ctx, `
+		UPDATE autodb_crawls c SET status = 'queued', queued_at = now(), error = ''
+		WHERE c.status = 'failed' AND c.finished_at < now() - make_interval(secs => $1)
+		  AND EXISTS (SELECT 1 FROM autodb_crawl_waiters w WHERE w.mod_id = c.mod_id)`, after.Seconds()); err != nil {
+		return fmt.Errorf("postgres: retry failed crawls: %w", err)
+	}
+	return nil
+}
+
 // Finish ends a crawl, done or failed.
 func (r *CrawlRepository) Finish(ctx context.Context, modID int64, failure error) error {
 	status, msg := "done", ""

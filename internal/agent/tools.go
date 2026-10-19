@@ -51,8 +51,9 @@ type toolbox struct {
 	garage   Garage
 	kits     Maintenance
 	orders   Orders
-	parts    OrderCatalog // nil: stock only
-	fits     CatalogFits  // nil: no catalogue fits
+	parts    OrderCatalog  // nil: stock only
+	fits     CatalogFits   // nil: no catalogue fits
+	loader   CatalogLoader // nil: catalogues load only when a car is chosen
 	now      func() time.Time
 	// catSlug maps category ids to the slugs the model knows them by.
 	catSlug map[int64]string
@@ -430,7 +431,7 @@ func (tb *toolbox) setMyVehicle(ctx context.Context, run *runState, input json.R
 
 // --- catalogue tools ---------------------------------------------------------
 
-func (tb *toolbox) searchParts(ctx context.Context, _ *runState, input json.RawMessage) (any, error) {
+func (tb *toolbox) searchParts(ctx context.Context, run *runState, input json.RawMessage) (any, error) {
 	var in struct {
 		VehicleID   int64  `json:"vehicle_id"`
 		Category    string `json:"category"`
@@ -463,7 +464,7 @@ func (tb *toolbox) searchParts(ctx context.Context, _ *runState, input json.RawM
 	}
 	out := map[string]any{"relaxed": res.Relaxed, "products": views}
 	if in.VehicleID != 0 && tb.parts != nil {
-		if err := tb.addCatalogParts(ctx, out, service.SearchFilter{
+		if err := tb.addCatalogParts(ctx, run.userID, out, service.SearchFilter{
 			VehicleID: in.VehicleID, Category: in.Category, Query: in.Query, PartNumber: in.PartNumber,
 			Brand: in.Brand, Limit: maxShown,
 		}); err != nil {
@@ -484,19 +485,32 @@ type catalogPartView struct {
 // catalogNotes tell the model what a car's catalogue state means for the
 // answer.
 var catalogNotes = map[string]string{
-	"none":    "the catalogue of this car is being loaded and takes a few minutes; catalog_parts may be incomplete, the buyer can ask again shortly",
-	"queued":  "the catalogue of this car is being loaded and takes a few minutes; catalog_parts may be incomplete, the buyer can ask again shortly",
-	"running": "the catalogue of this car is being loaded and takes a few minutes; catalog_parts may be incomplete, the buyer can ask again shortly",
-	"failed":  "the catalogue of this car could not be loaded; catalog_parts may be incomplete",
+	"pending": "the catalogue of this car is being loaded and takes a few minutes; catalog_parts may be incomplete, the buyer can ask again shortly",
+	"loading": "the catalogue of this car is being loaded and takes a few minutes; catalog_parts may be incomplete. The bot will message the buyer by itself as soon as it is loaded, so tell them that, not to ask again later",
+	"failed":  "the catalogue of this car could not be loaded right now; catalog_parts may be incomplete",
 }
 
 // addCatalogParts adds what the shop can order for the car beyond its stock.
 // Price filters do not apply: these parts have no price until a manager
 // quotes one.
-func (tb *toolbox) addCatalogParts(ctx context.Context, out map[string]any, f service.SearchFilter) error {
+func (tb *toolbox) addCatalogParts(ctx context.Context, userID int64, out map[string]any, f service.SearchFilter) error {
 	state, err := tb.parts.CrawlState(ctx, f.VehicleID)
 	if err != nil || state == "" {
 		return err
+	}
+	switch {
+	case state == "done":
+	case tb.loader == nil:
+		if state != "failed" {
+			state = "pending"
+		}
+	default:
+		// Not loaded: never queued, still running, or failed. Queue it
+		// again if it must be, and have the buyer told when it is done.
+		if err := tb.loader.Watch(ctx, userID, f.VehicleID); err != nil {
+			return err
+		}
+		state = "loading"
 	}
 	parts, err := tb.parts.ForVehicle(ctx, f)
 	if err != nil {

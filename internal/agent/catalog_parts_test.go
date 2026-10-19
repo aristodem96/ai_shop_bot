@@ -164,3 +164,46 @@ func TestPickupOrderIsReadyToCollect(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, result(model, 1).Content, "ready to collect at the shop, at the address", "not «being prepared for shipping»")
 }
+
+type fakeLoader struct{ watched [][2]int64 }
+
+func (l *fakeLoader) Watch(_ context.Context, user, vehicle int64) error {
+	l.watched = append(l.watched, [2]int64{user, vehicle})
+	return nil
+}
+
+func TestSearchLoadsAnUnloadedCatalogue(t *testing.T) {
+	for _, state := range []string{"none", "queued", "running", "failed"} {
+		t.Run(state, func(t *testing.T) {
+			model := llm.NewFake(
+				llm.Call("c1", "search_parts", map[string]any{"vehicle_id": octavia.ID, "query": "рейк"}),
+				llm.Say("Каталог ще завантажується, я напишу, щойно він буде готовий."),
+			)
+			f := newAgent(t, model)
+			f.agent.UseOrderCatalog(&fakeOrderCatalog{state: state})
+			loader := &fakeLoader{}
+			f.agent.UseCatalogLoader(loader)
+
+			_, err := f.agent.Reply(context.Background(), 7, 7, "рульова рейка")
+			require.NoError(t, err)
+			assert.Equal(t, [][2]int64{{7, octavia.ID}}, loader.watched, "queued again if it must be, and the buyer waits")
+			assert.Contains(t, result(model, 1).Content, "The bot will message the buyer by itself",
+				"the model promises the message the bot will send")
+		})
+	}
+}
+
+func TestSearchDoesNotReloadALoadedCatalogue(t *testing.T) {
+	model := llm.NewFake(
+		llm.Call("c1", "search_parts", map[string]any{"vehicle_id": octavia.ID}),
+		llm.Say("Ось."),
+	)
+	f := newAgent(t, model)
+	f.agent.UseOrderCatalog(&fakeOrderCatalog{state: "done"})
+	loader := &fakeLoader{}
+	f.agent.UseCatalogLoader(loader)
+	_, err := f.agent.Reply(context.Background(), 7, 7, "колодки")
+	require.NoError(t, err)
+	assert.Empty(t, loader.watched)
+	assert.NotContains(t, result(model, 1).Content, "catalog_note")
+}

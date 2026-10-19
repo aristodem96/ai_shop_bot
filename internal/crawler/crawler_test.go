@@ -59,11 +59,32 @@ type memStore struct {
 	parts    map[int64][]Part // by section
 	progress [3]int
 	finished error
+	ended    bool
+	queue    []int64
+	waiters  map[int64][]Waiter // by modification
+	watched  []Waiter
 }
 
 func (s *memStore) Enqueue(context.Context, int64, time.Duration) error { return nil }
-func (s *memStore) Claim(context.Context) (int64, bool, error)          { return 0, false, nil }
-func (s *memStore) Requeue(context.Context) error                       { return nil }
+func (s *memStore) Claim(context.Context) (int64, bool, error) {
+	if len(s.queue) == 0 {
+		return 0, false, nil
+	}
+	m := s.queue[0]
+	s.queue = s.queue[1:]
+	return m, true, nil
+}
+func (s *memStore) Watch(_ context.Context, user, vehicle int64) error {
+	s.watched = append(s.watched, Waiter{UserID: user, VehicleID: vehicle})
+	return nil
+}
+func (s *memStore) Waiters(_ context.Context, mod int64) ([]Waiter, error) {
+	w := s.waiters[mod]
+	delete(s.waiters, mod)
+	return w, nil
+}
+func (s *memStore) RetryFailed(context.Context, time.Duration, time.Duration) error { return nil }
+func (s *memStore) Requeue(context.Context) error                                   { return nil }
 func (s *memStore) SaveParts(_ context.Context, _, sec int64, p []Part) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -77,7 +98,7 @@ func (s *memStore) Progress(_ context.Context, _ int64, total, done, parts int) 
 	return nil
 }
 func (s *memStore) Finish(_ context.Context, _ int64, err error) error {
-	s.finished = err
+	s.finished, s.ended = err, true
 	return nil
 }
 func (s *memStore) Status(context.Context, int64) (Status, error) { return Status{}, nil }
@@ -124,4 +145,53 @@ func TestRetryGivesUpOnARefusedAddress(t *testing.T) {
 	})
 	require.ErrorIs(t, err, autodb.ErrIPNotAllowed)
 	assert.Equal(t, 1, calls, "asking again will not change the dashboard")
+}
+
+func TestNextTellsThoseWaiting(t *testing.T) {
+	c, store := newCrawler(&fakeAPI{})
+	store.queue = []int64{18537}
+	store.waiters = map[int64][]Waiter{18537: {{UserID: 5, VehicleID: 40}, {UserID: 6, VehicleID: 41}}}
+	var told []Waiter
+	done := 0
+	c.OnReady(func(_ context.Context, w Waiter) { told = append(told, w) })
+	c.OnDone(func(int64) { done++ })
+
+	worked, err := c.Next(context.Background())
+	require.NoError(t, err)
+	assert.True(t, worked)
+	require.NoError(t, store.finished)
+	assert.Equal(t, []Waiter{{UserID: 5, VehicleID: 40}, {UserID: 6, VehicleID: 41}}, told)
+	assert.Equal(t, 1, done, "what follows a crawl, such as translating names, is woken")
+
+	worked, err = c.Next(context.Background())
+	require.NoError(t, err)
+	assert.False(t, worked, "the queue is empty")
+}
+
+func TestNextKeepsWaitersOfAFailedCrawl(t *testing.T) {
+	c, store := newCrawler(&fakeAPI{failsLeft: map[int64]int{11: 10, 121: 10}})
+	store.queue = []int64{18537}
+	store.waiters = map[int64][]Waiter{18537: {{UserID: 5, VehicleID: 40}}}
+	c.OnReady(func(context.Context, Waiter) { t.Fatal("a failed crawl is no news") })
+
+	_, err := c.Next(context.Background())
+	require.NoError(t, err)
+	require.Error(t, store.finished)
+	assert.Len(t, store.waiters[18537], 1, "still waiting: the crawl is tried again")
+}
+
+func TestNextLeavesAStoppedCrawlRunning(t *testing.T) {
+	c, store := newCrawler(&fakeAPI{})
+	store.queue = []int64{18537}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := c.Next(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.False(t, store.ended, "not failed: the next start queues it again")
+}
+
+func TestWatchQueuesAndWaits(t *testing.T) {
+	c, store := newCrawler(&fakeAPI{})
+	require.NoError(t, c.Watch(context.Background(), 5, 40))
+	assert.Equal(t, []Waiter{{UserID: 5, VehicleID: 40}}, store.watched)
 }

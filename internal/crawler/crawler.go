@@ -50,6 +50,13 @@ type Status struct {
 // Done reports whether the vehicle's fitments are complete.
 func (s Status) Done() bool { return s.State == "done" }
 
+// Waiter is a buyer waiting for a vehicle's catalogue, to be told when it is
+// loaded.
+type Waiter struct {
+	UserID    int64
+	VehicleID int64
+}
+
 // Store is the queue and the cache.
 type Store interface {
 	// Enqueue queues the vehicle's modification, unless it is queued,
@@ -65,6 +72,14 @@ type Store interface {
 	Progress(ctx context.Context, modID int64, total, done, parts int) error
 	Finish(ctx context.Context, modID int64, failure error) error
 	Status(ctx context.Context, vehicleID int64) (Status, error)
+	// Watch records that a buyer waits for the vehicle's crawl, unless it
+	// is done or the vehicle is not from Auto-DB.
+	Watch(ctx context.Context, userID, vehicleID int64) error
+	// Waiters takes the buyers waiting for a modification's crawl.
+	Waiters(ctx context.Context, modID int64) ([]Waiter, error)
+	// RetryFailed queues again the failed crawls someone waits for that
+	// failed more than after ago, and forgets waits older than keep.
+	RetryFailed(ctx context.Context, after, keep time.Duration) error
 }
 
 // Config tunes a Crawler.
@@ -86,6 +101,8 @@ type Crawler struct {
 	log   *slog.Logger
 	// onDone runs after a crawl stored its parts.
 	onDone func(modID int64)
+	// onReady tells a waiting buyer their car's catalogue is loaded.
+	onReady func(ctx context.Context, w Waiter)
 }
 
 // New returns a Crawler.
@@ -106,9 +123,23 @@ func New(api API, store Store, cfg Config, log *slog.Logger) *Crawler {
 // the names it brought.
 func (c *Crawler) OnDone(f func(modID int64)) { c.onDone = f }
 
-// Enqueue queues the crawl of a vehicle the buyer chose.
+// OnReady sets how a buyer waiting for their car's catalogue is told it is
+// loaded.
+func (c *Crawler) OnReady(f func(ctx context.Context, w Waiter)) { c.onReady = f }
+
+// Enqueue queues the crawl of a vehicle.
 func (c *Crawler) Enqueue(ctx context.Context, vehicleID int64) error {
 	return c.store.Enqueue(ctx, vehicleID, c.cfg.MaxAge)
+}
+
+// Watch queues the crawl of a vehicle a buyer chose or asked about, and
+// unless it is done, has the buyer told when it is. A crawl that failed is
+// queued again.
+func (c *Crawler) Watch(ctx context.Context, userID, vehicleID int64) error {
+	if err := c.store.Enqueue(ctx, vehicleID, c.cfg.MaxAge); err != nil {
+		return err
+	}
+	return c.store.Watch(ctx, userID, vehicleID)
 }
 
 // Status says how far the vehicle's crawl is.
@@ -123,27 +154,80 @@ func (c *Crawler) Run(ctx context.Context) error {
 	if err := c.store.Requeue(ctx); err != nil {
 		c.log.WarnContext(ctx, "could not requeue crawls left running", slog.Any("error", err))
 	}
+	var retried time.Time
 	for ctx.Err() == nil {
-		modID, ok, err := c.store.Claim(ctx)
-		if err != nil {
-			c.log.WarnContext(ctx, "could not take a crawl", slog.Any("error", err))
+		// A buyer was promised a message when the catalogue is loaded, so a
+		// crawl that failed -- the API down, the server's address not yet
+		// allowed -- is tried again while someone waits for it.
+		if time.Since(retried) >= retryFailedEvery {
+			retried = time.Now()
+			if err := c.store.RetryFailed(ctx, retryFailedAfter, waitKeep); err != nil {
+				c.log.WarnContext(ctx, "could not requeue failed crawls", slog.Any("error", err))
+			}
 		}
-		if !ok || err != nil {
+		worked, err := c.Next(ctx)
+		if err != nil && ctx.Err() == nil {
+			c.log.WarnContext(ctx, "crawl queue failed", slog.Any("error", err))
+		}
+		if !worked {
 			select {
 			case <-ctx.Done():
 			case <-time.After(c.cfg.Idle):
 			}
-			continue
 		}
-		start := time.Now()
-		err = c.Crawl(ctx, modID)
-		if ferr := c.store.Finish(context.WithoutCancel(ctx), modID, err); ferr != nil {
-			c.log.WarnContext(ctx, "could not finish a crawl", slog.Int64("mod_id", modID), slog.Any("error", ferr))
-		}
-		c.log.InfoContext(ctx, "crawl finished", slog.Int64("mod_id", modID),
-			slog.Duration("took", time.Since(start).Round(time.Second)), slog.Any("error", err))
 	}
 	return nil
+}
+
+// Failed crawls someone waits for are looked at every retryFailedEvery and
+// queued again retryFailedAfter after they failed. A buyer who has waited
+// waitKeep is not told any more.
+const (
+	retryFailedEvery = time.Minute
+	retryFailedAfter = 10 * time.Minute
+	waitKeep         = 7 * 24 * time.Hour
+)
+
+// Next runs the oldest queued crawl, and tells those waiting for it when it
+// is done. It reports false when the queue is empty.
+func (c *Crawler) Next(ctx context.Context) (bool, error) {
+	modID, ok, err := c.store.Claim(ctx)
+	if err != nil || !ok {
+		return false, err
+	}
+	start := time.Now()
+	err = c.Crawl(ctx, modID)
+	if ctx.Err() != nil {
+		// Stopped, not failed: left running, the next start queues it again.
+		return true, ctx.Err()
+	}
+	if ferr := c.store.Finish(context.WithoutCancel(ctx), modID, err); ferr != nil {
+		return true, fmt.Errorf("crawler: finish crawl of %d: %w", modID, ferr)
+	}
+	c.log.InfoContext(ctx, "crawl finished", slog.Int64("mod_id", modID),
+		slog.Duration("took", time.Since(start).Round(time.Second)), slog.Any("error", err))
+	if err == nil {
+		c.ready(ctx, modID)
+	}
+	return true, nil
+}
+
+// ready runs what follows a crawl that stored its parts.
+func (c *Crawler) ready(ctx context.Context, modID int64) {
+	if c.onDone != nil {
+		c.onDone(modID)
+	}
+	if c.onReady == nil {
+		return
+	}
+	waiters, err := c.store.Waiters(ctx, modID)
+	if err != nil {
+		c.log.WarnContext(ctx, "could not read who waits for a crawl", slog.Int64("mod_id", modID), slog.Any("error", err))
+		return
+	}
+	for _, w := range waiters {
+		c.onReady(ctx, w)
+	}
 }
 
 // sectionRetries is how often one section is asked again before it counts
