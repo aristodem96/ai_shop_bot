@@ -334,12 +334,16 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 // callbackCtx is where a pressed button lives.
 type callbackCtx struct {
 	user, chat, msg int64
+	// photo: the pressed message is a photo with a caption, which has no
+	// text to edit.
+	photo bool
 }
 
 func (b *Bot) handleCallback(ctx context.Context, q *telegram.CallbackQuery) {
 	cc := callbackCtx{user: q.From.ID, chat: q.From.ID}
 	if q.Message != nil {
 		cc.chat, cc.msg = q.Message.Chat.ID, q.Message.MessageID
+		cc.photo = len(q.Message.Photo) > 0
 	}
 
 	var toast string

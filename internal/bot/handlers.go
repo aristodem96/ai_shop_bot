@@ -248,9 +248,17 @@ func (b *Bot) fail(ctx context.Context, chat int64, op string, err error) {
 }
 
 // editText edits the pressed message, or sends a new one when there is no
-// message to edit (Telegram omits it for very old messages).
+// message to edit (Telegram omits it for very old messages) or the message
+// is a photo: a photo has a caption, not a text, and editMessageText fails
+// on it. The photo then loses its buttons, so they are not pressed twice.
 func (b *Bot) editText(ctx context.Context, cc callbackCtx, html string, kb *telegram.InlineKeyboard) error {
 	if cc.msg == 0 {
+		return b.tg.SendMessage(ctx, cc.chat, html, kb)
+	}
+	if cc.photo {
+		if err := ignoreNotModified(b.tg.EditMessageReplyMarkup(ctx, cc.chat, cc.msg, nil)); err != nil {
+			b.log.WarnContext(ctx, "could not take the buttons off a photo", slog.Any("error", err))
+		}
 		return b.tg.SendMessage(ctx, cc.chat, html, kb)
 	}
 	return ignoreNotModified(b.tg.EditMessageText(ctx, cc.chat, cc.msg, html, kb))

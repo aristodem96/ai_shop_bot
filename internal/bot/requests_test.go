@@ -190,3 +190,26 @@ func TestParseQuote(t *testing.T) {
 		assert.False(t, ok, in)
 	}
 }
+
+// The part's card is sent as a photo when the catalogue has one, and a photo
+// has a caption, not a text: Telegram refuses to edit its text.
+func TestPartRequestFromAPhotoCard(t *testing.T) {
+	b, reqs := withRequests()
+	ctx := context.Background()
+	onPhoto := press(encode(actRequestQty, 31, 1))
+	onPhoto.CallbackQuery.Message.Photo = []telegram.PhotoSize{{FileID: "p"}}
+
+	b.Handle(ctx, onPhoto)
+	require.Len(t, reqs.byID, 1)
+	assert.NotContains(t, b.tg.methods(), "editMessageText", "a photo has no text to edit")
+	off := b.tg.last("editMessageReplyMarkup")
+	assert.Equal(t, int64(900), off.msg, "the photo loses its buttons, so the request is not sent twice")
+	assert.Nil(t, off.markup.(*telegram.InlineKeyboard))
+	var toBuyer sent
+	for _, c := range b.tg.calls {
+		if c.method == "sendMessage" && c.chat == chat {
+			toBuyer = c
+		}
+	}
+	assert.Contains(t, toBuyer.text, "Запит №1 прийнято", "the buyer is told in a new message")
+}
