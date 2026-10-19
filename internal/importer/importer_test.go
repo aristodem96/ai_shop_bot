@@ -120,6 +120,11 @@ type fakeStore struct {
 	models         []Model
 	cats           []Category
 	vehicleAliases map[string][]int64
+	groups         map[GroupKey]string
+}
+
+func (f *fakeStore) GroupCategories(context.Context, int64) (map[GroupKey]string, error) {
+	return f.groups, nil
 }
 
 func (f *fakeStore) VehicleAliases(context.Context, string) (map[string][]int64, error) {
@@ -386,4 +391,30 @@ func TestModelLabel(t *testing.T) {
 	assert.Equal(t, "Chery Tiggo (2005–2016)", Model{Make: "Chery", Model: "Tiggo", YearFrom: 2005, YearTo: 2016}.Label())
 	assert.Equal(t, "Chery Tiggo 7 (2016–н.ч.)", Model{Make: "Chery", Model: "Tiggo 7", YearFrom: 2016}.Label())
 	assert.Equal(t, "Chery Tiggo 4", Model{Make: "Chery", Model: "Tiggo 4"}.Label(), "no years, none shown")
+}
+
+func TestGroupsDecideOverWords(t *testing.T) {
+	sh := Sheet{Name: "s", Rows: [][]string{
+		{"Назва", "Ціна, грн", "Артикул", "Група"},
+		{"Трещітка 1/2\" амортизатор багажника", "100", "A1", "Трещітки"},
+		{"Колодки передні", "100", "A2", "Гальма"},
+		{"Колодки задні", "100", "A3", ""},
+		{"Щось незрозуміле", "100", "A4", ""},
+	}}
+	p := priceList()
+	p.ID = 7
+	p.Columns = Columns{Name: "Назва", Price: "Ціна, грн", PartNumber: "Артикул", Category: "Група"}
+	store := catalogue()
+	store.groups = map[GroupKey]string{{Kind: KindGroup, Key: "Трещітки"}: "other"}
+	parsed, err := Parse([]Sheet{sh}, p)
+	require.NoError(t, err)
+	b, err := Resolve(context.Background(), store, p, parsed)
+	require.NoError(t, err)
+
+	assert.Equal(t, "other", b.Products[0].Category, "the mapped group decides, whatever words the name has")
+	assert.Equal(t, "brakes", b.Products[1].Category, "an unmapped group: the words, meanwhile")
+	assert.Equal(t, []PendingGroup{
+		{GroupKey: GroupKey{Kind: KindGroup, Key: "Гальма"}, Products: 1, Examples: []string{"Колодки передні"}},
+		{GroupKey: GroupKey{Kind: KindName, Key: "Щось незрозуміле"}, Products: 1, Examples: []string{"Щось незрозуміле"}},
+	}, b.Report.Pending, "every unmapped group waits; a name only when no word knew it")
 }

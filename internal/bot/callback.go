@@ -49,6 +49,12 @@ const (
 	actSupplierMarkup action = "um"   // um:<supplier>:<percent, -1 to choose>
 	actSupplierLead   action = "ul"   // ul:<supplier>:<days, -1 to choose>
 	actSupplierDelete action = "ud"   // ud:<supplier>:<1 confirmed>
+	actGroupsNext     action = "gp"   // gp:<review> on to the file's report
+	actGroupsCreate   action = "gn"   // gn:<review> create the proposed categories
+	actGroupsDoubts   action = "gd"   // gd:<review>:<index> the doubtful group at index
+	actGroupAccept    action = "ga"   // ga:<review>:<group> file it as the model guessed
+	actGroupPick      action = "gk"   // gk:<review>:<group>:<category, 0 sections> pick its category
+	actGroupMixed     action = "gm"   // gm:<review>:<group> different kinds of products: sort by name
 	actCatOpen        action = "ko"   // ko:<category> a category's screen; 0 the sections
 	actCatNew         action = "kn"   // kn:<section or 0> a new subcategory, or section: asks its title
 	actCatRename      action = "kr"   // kr:<category> asks the new title
@@ -92,6 +98,7 @@ var arity = map[action]int{
 	actSupplierOpen: 1, actSupplierMarkup: 2, actSupplierLead: 2, actSupplierDelete: 2,
 	actCatOpen: 1, actCatNew: 1, actCatRename: 1, actCatAddWord: 1, actCatRemoveWord: 1, actCatDelete: 1,
 	actCatPick: 2, actCatApply: 1, actCatCancel: 1,
+	actGroupsNext: 1, actGroupsCreate: 1, actGroupsDoubts: 2, actGroupAccept: 2, actGroupPick: 3, actGroupMixed: 2,
 	actMatchStart: 1, actMatchPick: 3, actMatchMakes: 1, actMatchMake: 2, actMatchBack: 1,
 	actMatchSkip: 2, actMatchStop: 1, actCarDelete: 1, actMatchAdd: 2,
 	actCarAdd: 1, actCarToggle: 2, actCarText: 1, actCarBack: 1,

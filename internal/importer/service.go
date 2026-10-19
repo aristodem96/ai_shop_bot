@@ -19,6 +19,9 @@ type SupplierStore interface {
 	// ID. Its Source is never updated.
 	SaveSupplier(ctx context.Context, s *Supplier) error
 	DeleteSupplier(ctx context.Context, id int64) error
+	// SavePending records the supplier's groups waiting for a category,
+	// with their counts and examples from the latest file.
+	SavePending(ctx context.Context, supplierID int64, groups []PendingGroup) error
 }
 
 // Service runs imports for the managers' chat and the command line.
@@ -117,7 +120,15 @@ func (s *Service) Prices(ctx context.Context, supplierID int64, path string, opt
 	if err != nil {
 		return nil, Result{}, err
 	}
-	return Run(ctx, s.store, sup, path, opts)
+	rep, res, err := Run(ctx, s.store, sup, path, opts)
+	// Recorded even on a dry run, which rolls back its own transaction:
+	// the groups are there to be mapped before the file is applied.
+	if rep != nil && len(rep.Pending) > 0 {
+		if perr := s.suppliers.SavePending(ctx, sup.ID, rep.Pending); perr != nil && err == nil {
+			err = perr
+		}
+	}
+	return rep, res, err
 }
 
 // Vehicles loads a vehicle directory.

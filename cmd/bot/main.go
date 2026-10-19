@@ -32,10 +32,12 @@ import (
 	"github.com/aristodem96/ai_shop_bot/internal/autodb"
 	"github.com/aristodem96/ai_shop_bot/internal/bot"
 	"github.com/aristodem96/ai_shop_bot/internal/categories"
+	"github.com/aristodem96/ai_shop_bot/internal/catmatch"
 	"github.com/aristodem96/ai_shop_bot/internal/config"
 	"github.com/aristodem96/ai_shop_bot/internal/crawler"
 	"github.com/aristodem96/ai_shop_bot/internal/directory"
 	"github.com/aristodem96/ai_shop_bot/internal/enrich"
+	"github.com/aristodem96/ai_shop_bot/internal/grouping"
 	"github.com/aristodem96/ai_shop_bot/internal/importer"
 	"github.com/aristodem96/ai_shop_bot/internal/llm"
 	"github.com/aristodem96/ai_shop_bot/internal/llm/claude"
@@ -370,7 +372,15 @@ func (a *app) wireManagers() error {
 	if err := a.bot.UseImports(imports, a.tg, a.cfg.ImportDir, chat); err != nil {
 		return err
 	}
-	a.bot.UseCategories(categories.New(postgres.NewCategoryRepository(a.pool)))
+	cats := categories.New(postgres.NewCategoryRepository(a.pool))
+	a.bot.UseCategories(cats)
+	// Suppliers' groups are filed by the model where it is sure, by the
+	// owner where it is not; without a model, by the owner alone.
+	var matcher grouping.Matcher
+	if a.model != nil {
+		matcher = catmatch.New(a.model)
+	}
+	a.bot.UseGrouping(grouping.New(postgres.NewGroupRepository(a.pool), cats, matcher))
 	a.bot.UseVehicleMatching(imports)
 	if err := a.tg.SetChatCommands(a.startup, chat, bot.AdminMenu(chat)); err != nil {
 		a.log.Warn("could not register the managers' command menu", slog.Any("error", err))

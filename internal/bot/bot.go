@@ -101,6 +101,10 @@ type Bot struct {
 	matchJobs *jobs[matchJob, *matchJob]
 	carDrafts *jobs[carDraft, *carDraft]
 
+	// grouping and reviews are nil until UseGrouping is called.
+	grouping Grouping
+	reviews  *jobs[review, *review]
+
 	// cats is nil until UseCategories is called.
 	cats    Categories
 	catJobs *jobs[catJob, *catJob]
@@ -272,6 +276,9 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 		if b.matching != nil && b.handleCarText(ctx, m) {
 			return
 		}
+		if b.grouping != nil && b.cats != nil && b.imports != nil && b.handleGroupsMessage(ctx, m) {
+			return
+		}
 		if b.cats != nil && b.handleCategoriesMessage(ctx, m) {
 			return
 		}
@@ -404,6 +411,11 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 		return "", b.cancelCheckout(ctx, cc)
 	case actManage:
 		return b.manage(ctx, cc, a[0], a[1])
+	case actGroupsNext, actGroupsCreate, actGroupsDoubts, actGroupAccept, actGroupPick, actGroupMixed:
+		if b.grouping == nil || b.cats == nil || b.imports == nil {
+			return "", errBadCallback
+		}
+		return b.routeGroups(ctx, cc, cb)
 	case actCatOpen, actCatNew, actCatRename, actCatAddWord, actCatRemoveWord, actCatDelete, actCatPick, actCatApply, actCatCancel:
 		if b.cats == nil {
 			return "", errBadCallback

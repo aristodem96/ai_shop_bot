@@ -34,13 +34,14 @@ type importJobJSON struct {
 	Cars     bool             `json:"cars"`
 	Created  time.Time        `json:"created"`
 	Setup    *supplierSetup   `json:"setup,omitempty"`
+	Grouped  bool             `json:"grouped,omitempty"`
 	Report   *importer.Report `json:"report,omitempty"`
 }
 
 // MarshalJSON writes the importJob for Redis.
 func (j *importJob) MarshalJSON() ([]byte, error) {
 	return json.Marshal(importJobJSON{ID: j.id, Chat: j.chat, Dir: j.dir, Path: j.path, Supplier: j.supplier,
-		Name: j.name, Cars: j.cars, Created: j.created, Setup: j.setup, Report: j.report})
+		Name: j.name, Cars: j.cars, Created: j.created, Setup: j.setup, Grouped: j.grouped, Report: j.report})
 }
 
 // UnmarshalJSON reads the importJob back.
@@ -50,7 +51,7 @@ func (j *importJob) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	*j = importJob{id: x.ID, chat: x.Chat, dir: x.Dir, path: x.Path, supplier: x.Supplier, name: x.Name,
-		cars: x.Cars, created: x.Created, setup: x.Setup, report: x.Report}
+		cars: x.Cars, created: x.Created, setup: x.Setup, grouped: x.Grouped, report: x.Report}
 	return nil
 }
 

@@ -516,6 +516,20 @@ its export is picked from the list instead of named, so its products update
 rather than double: the key they are matched on is made from the first name
 and never changes. `/suppliers` lists them with their terms.
 
+**A 1C group is filed by a model, the owner deciding its doubts.** A 1C
+export puts every product in one of the shop's groups, and "Трещітки
+(храповики)" says what a product is better than "1/2\" 45 зубів" in its
+name does. So groups, not products, are filed: Claude gets the tree with
+ids and each new group with a few product names, and answers per group
+with a category of the tree, a new category the tree lacks, "mixed" for a
+group of different kinds of goods, and whether it is sure. Sure answers
+into the tree are applied; new categories are proposed in one message;
+mixed groups are sorted product by product by the words; the rest are put
+to the owner one by one with the model's guess. The model may only name
+ids it was given. On a trial 1C shop of 2 500 products in 412 groups, Other
+fell from 29% to 6.5% and misfiled products from about one in five to one
+in fourteen.
+
 **The category tree is the shop's, kept in the database.**
 [data/categories.csv](data/categories.csv) fills an empty database with 13
 sections, about 50 subcategories and some 530 word fragments, Ukrainian and
@@ -629,6 +643,8 @@ internal/
   seed/                the demo catalogue
   importer/            suppliers, reading their files, brand and vehicle matching
   categories/          the category tree and its words, changes planned before applied
+  grouping/            suppliers' groups filed into the tree, the model proposing
+  catmatch/            the model reading groups into categories
   vehiclematch/        the model proposing vehicles for supplier names
   autodb/              Auto-DB Pro client
   directory/           buyers' cars from the catalogue and the shop's list

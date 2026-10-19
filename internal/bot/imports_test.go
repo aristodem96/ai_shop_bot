@@ -33,6 +33,8 @@ type fakeImports struct {
 	err       error // returned by Prices
 	// unmatched replaces the report's unknown vehicle names when set.
 	unmatched []importer.Count
+	// pending are groups the first check of a file reports undecided.
+	pending []importer.PendingGroup
 }
 
 func (f *fakeImports) Suppliers(context.Context) ([]importer.Supplier, error) {
@@ -98,6 +100,7 @@ func (f *fakeImports) Prices(ctx context.Context, id int64, path string, opts im
 	if f.unmatched != nil {
 		rep.UnmatchedVehicles = f.unmatched
 	}
+	rep.Pending, f.pending = f.pending, nil
 	res := importer.Result{Inserted: 12, Updated: 80930, Fitments: 88341}
 	if !opts.DryRun {
 		res.RunID = 7

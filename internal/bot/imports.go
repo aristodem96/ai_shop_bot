@@ -49,6 +49,9 @@ type importJob struct {
 	created  time.Time
 	// setup is a new supplier being made from this file.
 	setup *supplierSetup
+	// grouped is set once the file's new groups were put to the model, so
+	// checking it again goes straight to the report.
+	grouped bool
 	// report is the last preview's, for mapping its unknown vehicles.
 	report *importer.Report
 }
@@ -149,6 +152,17 @@ func (b *Bot) saveUpload(ctx context.Context, job *importJob, doc *telegram.Docu
 // apply it.
 func (b *Bot) previewImport(ctx context.Context, job *importJob) {
 	b.typing(ctx, job.chat)
+	// A file with groups no category is decided for: they are filed first,
+	// with the owner where the model is unsure, and the report follows.
+	if b.grouping != nil && b.cats != nil && !job.cars && !job.grouped {
+		rep, _, err := b.imports.Prices(ctx, job.supplier, job.path, importer.Options{DryRun: true})
+		if err == nil && rep != nil && len(rep.Pending) > 0 {
+			job.grouped = true
+			b.importJobs.save(ctx, job)
+			b.sortGroups(ctx, job)
+			return
+		}
+	}
 	text, kb := b.runImport(ctx, job, importer.Options{DryRun: true})
 	if kb == nil {
 		// Nothing to apply: the file did not parse.

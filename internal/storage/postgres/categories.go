@@ -115,7 +115,12 @@ func (r *CategoryRepository) ProductsWith(ctx context.Context, word string) ([]c
 
 func (r *CategoryRepository) products(ctx context.Context, where string, arg any) ([]categories.Product, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT p.id, p.name, p.source_group, p.category_id FROM products p `+where+` ORDER BY p.name, p.id`, arg)
+		SELECT p.id, p.name, p.source_group, p.category_id, coalesce(g.category_id, n.category_id, 0)
+		FROM products p
+		LEFT JOIN suppliers s ON s.source = p.source
+		LEFT JOIN supplier_groups g ON g.supplier_id = s.id AND g.kind = 'group' AND g.key = p.source_group
+		LEFT JOIN supplier_groups n ON n.supplier_id = s.id AND n.kind = 'name' AND n.key = p.name
+		`+where+` ORDER BY p.name, p.id`, arg)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: products of the tree: %w", err)
 	}

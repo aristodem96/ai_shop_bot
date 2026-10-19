@@ -52,6 +52,9 @@ type Store interface {
 	VehicleAliases(ctx context.Context, source string) (map[string][]int64, error)
 	// Categories lists the category tree with its keywords, in file order.
 	Categories(ctx context.Context) ([]Category, error)
+	// GroupCategories maps the supplier's decided groups to the slugs of
+	// their categories.
+	GroupCategories(ctx context.Context, supplierID int64) (map[GroupKey]string, error)
 	// Apply writes the batch in one transaction, or only measures what it
 	// would write when dryRun is set.
 	Apply(ctx context.Context, b *Batch, dryRun bool) (Result, error)
@@ -169,6 +172,42 @@ type Report struct {
 	// shows the first few names: they are what a new keyword is made from.
 	Unsorted     int      `json:"unsorted"`
 	Unrecognised []string `json:"unrecognised,omitempty"`
+	// Pending are the supplier's groups no category is decided for yet:
+	// every group of a 1C export until it is mapped, and, for a file
+	// without groups, the product names no word recognised.
+	Pending []PendingGroup `json:"pending_groups,omitempty"`
+}
+
+// GroupKey names a supplier's group: its own group of products, or, in a
+// file without groups, a product's name.
+type GroupKey struct {
+	Kind string // KindGroup or KindName
+	Key  string
+}
+
+// Kinds of group keys.
+const (
+	KindGroup = "group"
+	KindName  = "name"
+)
+
+// PendingGroup is a group waiting for its category, with what tells it
+// apart: how many products, and a few of their names.
+type PendingGroup struct {
+	GroupKey
+	Products int      `json:"products"`
+	Examples []string `json:"examples,omitempty"`
+}
+
+// examplesPerGroup bounds the product names kept per pending group.
+const examplesPerGroup = 5
+
+// groupOf is the key a product is mapped by.
+func groupOf(o *Offer) GroupKey {
+	if g := clean(o.Category); g != "" {
+		return GroupKey{Kind: KindGroup, Key: g}
+	}
+	return GroupKey{Kind: KindName, Key: o.Name}
 }
 
 // Result is what Apply wrote.
@@ -219,6 +258,27 @@ func Resolve(ctx context.Context, store Store, p *Supplier, parsed *Parsed) (*Ba
 	if err != nil {
 		return nil, err
 	}
+	groups := map[GroupKey]string{}
+	if p.ID != 0 {
+		if groups, err = store.GroupCategories(ctx, p.ID); err != nil {
+			return nil, err
+		}
+	}
+	leaves := Leaves(cats)
+	pending := map[GroupKey]*PendingGroup{}
+	var pendingOrder []GroupKey
+	addPending := func(k GroupKey, name string) {
+		pg, ok := pending[k]
+		if !ok {
+			pg = &PendingGroup{GroupKey: k}
+			pending[k] = pg
+			pendingOrder = append(pendingOrder, k)
+		}
+		pg.Products++
+		if len(pg.Examples) < examplesPerGroup && !slices.Contains(pg.Examples, name) {
+			pg.Examples = append(pg.Examples, name)
+		}
+	}
 
 	rep := &Report{Rows: parsed.Rows, Offers: len(parsed.Offers), Skipped: len(parsed.Problems)}
 	rep.Problems = parsed.Problems[:min(len(parsed.Problems), maxProblems)]
@@ -253,14 +313,28 @@ func Resolve(ctx context.Context, store Store, p *Supplier, parsed *Parsed) (*Ba
 		if pn := domain.NormalizeOEM(o.PartNumber); pn != "" {
 			prod.OEM, prod.PartKey = []string{pn}, pn
 		}
-		// The tree's words decide, over the name and the supplier's group;
-		// the category gives the part type and universality.
-		if c := classifier.Classify(o.Name + " " + o.Category); c != nil {
-			prod.Category = c.Slug
-		} else {
-			rep.Unsorted++
-			if len(rep.Unrecognised) < maxProblems && !slices.Contains(rep.Unrecognised, o.Name) {
-				rep.Unrecognised = append(rep.Unrecognised, o.Name)
+		// A group mapped to a category decides; otherwise the tree's words
+		// do, over the name and the supplier's group. The category gives
+		// the part type and universality.
+		gk := groupOf(o)
+		slug, mapped := groups[gk]
+		switch {
+		case mapped && leaves[slug]:
+			prod.Category = slug
+		default:
+			c := classifier.Classify(o.Name + " " + o.Category)
+			if c != nil {
+				prod.Category = c.Slug
+			} else {
+				rep.Unsorted++
+				if len(rep.Unrecognised) < maxProblems && !slices.Contains(rep.Unrecognised, o.Name) {
+					rep.Unrecognised = append(rep.Unrecognised, o.Name)
+				}
+			}
+			// A group is mapped whatever its words say: it knows better. A
+			// name only when no word knew it.
+			if !mapped && (gk.Kind == KindGroup || c == nil) {
+				addPending(gk, o.Name)
 			}
 		}
 		if c := byID[prod.Category]; c != nil {
@@ -283,6 +357,9 @@ func Resolve(ctx context.Context, store Store, p *Supplier, parsed *Parsed) (*Ba
 			rep.WithoutFitment++
 		}
 		b.Products = append(b.Products, prod)
+	}
+	for _, k := range pendingOrder {
+		rep.Pending = append(rep.Pending, *pending[k])
 	}
 	rep.UnmatchedVehicles = sortedCounts(vehicles.unmatched)
 	rep.VehicleExamples = vehicles.examples

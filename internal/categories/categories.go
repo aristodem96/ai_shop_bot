@@ -55,6 +55,9 @@ type Product struct {
 	Name       string
 	Group      string // the supplier's own group, "" when none
 	CategoryID int64
+	// Pinned is the category the product's group is mapped to, zero when
+	// none: a mapped group decides over the words.
+	Pinned int64
 }
 
 // Move puts a product in a category. CategoryID zero means the category the
@@ -440,6 +443,9 @@ func newTree(cats []Category) *tree {
 
 // classify returns the category a product goes to, zero for none.
 func (t *tree) classify(p Product) int64 {
+	if _, ok := t.byID[p.Pinned]; ok && p.Pinned != 0 {
+		return p.Pinned
+	}
 	if c := t.classifier.Classify(p.Name + " " + p.Group); c != nil {
 		return t.bySlug[c.Slug]
 	}
