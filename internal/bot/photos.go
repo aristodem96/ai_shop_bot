@@ -22,6 +22,10 @@ type Enricher interface {
 	// Product matches a product to its catalogue article, if not done yet.
 	Product(ctx context.Context, productID int64) error
 	Article(ctx context.Context, supplierID int64, number string) (*enrich.Article, error)
+	// ProductFits and ArticleFits are the cars a part fits by the
+	// catalogue; nil when it is not in the catalogue.
+	ProductFits(ctx context.Context, productID int64) (*enrich.Fits, error)
+	ArticleFits(ctx context.Context, supplierID int64, number string) (*enrich.Fits, error)
 }
 
 // UsePhotos sends photos through p: converted and kept by Telegram's id.
@@ -48,20 +52,40 @@ func (b *Bot) enrich(ctx context.Context, productID int64) {
 	}
 }
 
-// catalogPhoto is the photo of a catalogue part, "" when there is none.
-func (b *Bot) catalogPhoto(ctx context.Context, p *domain.CatalogPart) string {
+// catalogPart is the photo of a catalogue part, "" when there is none, and
+// the cars it fits.
+func (b *Bot) catalogPart(ctx context.Context, p *domain.CatalogPart) (string, *enrich.Fits) {
 	if b.enricher == nil || p.SupplierID == 0 {
-		return ""
+		return "", nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, enrichWait)
 	defer cancel()
 	a, err := b.enricher.Article(ctx, p.SupplierID, p.Number)
 	if err != nil {
 		b.log.WarnContext(ctx, "could not read a catalogue part", slog.Int64("part_id", p.ID), slog.Any("error", err))
-		return ""
+		return "", nil
+	}
+	fits, err := b.enricher.ArticleFits(ctx, p.SupplierID, p.Number)
+	if err != nil {
+		b.log.WarnContext(ctx, "could not read what a catalogue part fits", slog.Any("error", err))
 	}
 	if len(a.Images) == 0 {
-		return ""
+		return "", fits
 	}
-	return a.Images[0]
+	return a.Images[0], fits
+}
+
+// productFits is what a stock product fits by the catalogue, nil when it is
+// not matched to it.
+func (b *Bot) productFits(ctx context.Context, productID int64) *enrich.Fits {
+	if b.enricher == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, enrichWait)
+	defer cancel()
+	f, err := b.enricher.ProductFits(ctx, productID)
+	if err != nil {
+		b.log.WarnContext(ctx, "could not read what a product fits", slog.Int64("product_id", productID), slog.Any("error", err))
+	}
+	return f
 }

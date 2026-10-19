@@ -182,6 +182,16 @@ type Cross struct {
 	Number string `json:"PartsDataSupplierArticleNumber"`
 }
 
+// ArticleVehicle is a vehicle an article fits. ModID is the modification id
+// getModifications and getSectionParts use.
+type ArticleVehicle struct {
+	ModID  int64
+	Make   string
+	Model  string
+	Years  string // "03.2005 - " or "01.2005 - 12.2006"
+	Engine string // "1.6", "2.0 D"
+}
+
 // Image is a photo of a part.
 type Image struct {
 	URL string `json:"url"`
@@ -306,7 +316,14 @@ type ArticleInfo struct {
 	Images []Image
 	OEM    []OEM
 	Cross  []Cross
+	// Vehicles are the cars it fits, the first MaxVehicles of them: the API
+	// cuts the list there and offers no next page.
+	Vehicles []ArticleVehicle
 }
+
+// MaxVehicles is where the API cuts a part's list of vehicles. A list this
+// long is not all of them.
+const MaxVehicles = 100
 
 // Info returns an article's card. A block the API failed to fetch comes
 // back empty, as the API reports it as null.
@@ -315,10 +332,17 @@ func (c *Client) Info(ctx context.Context, supplierID int64, number string) (*Ar
 		Status *struct {
 			Name string `json:"NormalizedDescription"`
 		} `json:"status"`
-		Specs  []Spec  `json:"specs"`
-		Images []Image `json:"images"`
-		OEM    []OEM   `json:"oem"`
-		Cross  []Cross `json:"cross"`
+		Specs    []Spec  `json:"specs"`
+		Images   []Image `json:"images"`
+		OEM      []OEM   `json:"oem"`
+		Cross    []Cross `json:"cross"`
+		Vehicles []struct {
+			ModID  flexInt `json:"car_id"`
+			Make   string  `json:"make"`
+			Model  string  `json:"model"`
+			Years  string  `json:"constructioninterval"`
+			Engine string  `json:"description"`
+		} `json:"vehicles"`
 	}
 	q := url.Values{"action": {"getArtInfo"}, "number": {number}, "brand": {strconv.FormatInt(supplierID, 10)}}
 	if err := c.get(ctx, q, &raw); err != nil {
@@ -327,6 +351,10 @@ func (c *Client) Info(ctx context.Context, supplierID int64, number string) (*Ar
 	info := &ArticleInfo{Specs: specs(raw.Specs), OEM: raw.OEM, Cross: raw.Cross}
 	for _, im := range raw.Images {
 		info.Images = append(info.Images, Image{URL: imageURL(im.URL)})
+	}
+	for _, v := range raw.Vehicles {
+		info.Vehicles = append(info.Vehicles, ArticleVehicle{ModID: int64(v.ModID), Make: v.Make, Model: v.Model,
+			Years: v.Years, Engine: v.Engine})
 	}
 	if raw.Status != nil {
 		info.Name = raw.Status.Name

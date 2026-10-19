@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
+	"github.com/aristodem96/ai_shop_bot/internal/enrich"
 	"github.com/aristodem96/ai_shop_bot/internal/telegram"
 )
 
@@ -33,13 +34,14 @@ func partLines(name, brand, number string) string {
 }
 
 // requestQtyView explains ordering and asks how many.
-func requestQtyView(p *domain.CatalogPart, car *domain.Vehicle) (string, *telegram.InlineKeyboard) {
+func requestQtyView(p *domain.CatalogPart, car *domain.Vehicle, fits *enrich.Fits) (string, *telegram.InlineKeyboard) {
 	var b strings.Builder
 	b.WriteString("🚚 <b>Під замовлення</b>\n")
 	b.WriteString(partLines(p.Name, p.Brand, p.Number))
 	if car != nil {
 		fmt.Fprintf(&b, "\nАвто: %s", esc(car.Label()))
 	}
+	b.WriteString(fitsBlock(fits))
 	b.WriteString("\n\nЦієї деталі немає на складі. Менеджер знайде її в постачальників і надішле ціну й термін, " +
 		"а ви вирішите, чи замовляти.\n\nСкільки штук потрібно?")
 	row := make([]telegram.InlineButton, 0, len(requestQtys))

@@ -87,7 +87,7 @@ func (b *Bot) sendProduct(ctx context.Context, cc callbackCtx, productID int64) 
 	if err != nil {
 		return err
 	}
-	caption, kb := productCaption(p, b.car(ctx, cc.user)), productKeyboard(p)
+	caption, kb := productCaption(p, b.car(ctx, cc.user))+fitsBlock(b.productFits(ctx, p.ID)), productKeyboard(p)
 	if p.ImageURL == "" {
 		return b.tg.SendMessage(ctx, cc.chat, caption, kb)
 	}

@@ -14,12 +14,14 @@ import (
 )
 
 type fakePhotos struct {
-	sent []string
-	err  error
+	sent     []string
+	captions []string
+	err      error
 }
 
-func (f *fakePhotos) Send(_ context.Context, _ int64, url, _ string, _ telegram.ReplyMarkup) error {
+func (f *fakePhotos) Send(_ context.Context, _ int64, url, caption string, _ telegram.ReplyMarkup) error {
 	f.sent = append(f.sent, url)
+	f.captions = append(f.captions, caption)
 	return f.err
 }
 
@@ -28,6 +30,18 @@ type fakeEnricher struct{ products []int64 }
 func (f *fakeEnricher) Product(_ context.Context, id int64) error {
 	f.products = append(f.products, id)
 	return nil
+}
+
+func (f *fakeEnricher) ProductFits(_ context.Context, id int64) (*enrich.Fits, error) {
+	if id != padsID {
+		return nil, nil
+	}
+	return &enrich.Fits{Lines: []string{"Skoda Octavia III (5E3) 1.4 TSI, 2.0 TDI (2012–)", "VW Golf VII (5G1) 1.6 TDI (2012–)",
+		"Seat Leon (5F1) 1.4 (2012–)", "Audi A3 (8V1) 1.4 (2012–)", "Skoda Superb III (3V3) 2.0 (2015–)"}, Complete: true}, nil
+}
+
+func (f *fakeEnricher) ArticleFits(context.Context, int64, string) (*enrich.Fits, error) {
+	return &enrich.Fits{Lines: []string{"Chevrolet Lacetti (J200) 1.4 16V, 1.6 (2005–)"}}, nil
 }
 
 func (f *fakeEnricher) Article(_ context.Context, supplierID int64, number string) (*enrich.Article, error) {
@@ -46,6 +60,8 @@ func TestCardIsEnrichedAndItsPhotoConverted(t *testing.T) {
 	b.Handle(context.Background(), press(encode(actProduct, padsID)))
 	assert.Equal(t, []int64{padsID}, en.products, "matched before the card is drawn")
 	assert.Equal(t, []string{"https://example.com/pads.png"}, ph.sent)
+	assert.Contains(t, ph.captions[0], "🚗 <b>За каталогом підходить до:</b>\n• Skoda Octavia III (5E3) 1.4 TSI, 2.0 TDI (2012–)")
+	assert.Contains(t, ph.captions[0], "• … і ще 1 модель", "four models, then a count")
 
 	ph.err = errors.New("HTTP 404")
 	b.Handle(context.Background(), press(encode(actProduct, padsID)))
@@ -63,6 +79,8 @@ func TestRequestShowsTheCatalogPhoto(t *testing.T) {
 
 	b.Handle(context.Background(), press(encode(actRequest, 31)))
 	require.Equal(t, []string{"https://image.auto-db.pro/images/p.webp"}, ph.sent)
+	assert.Contains(t, ph.captions[0], "• Chevrolet Lacetti (J200) 1.4 16V, 1.6 (2005–)\n• … та інші",
+		"a list the catalogue cut says «and others», not a count")
 }
 
 type fakeCatalogPartsOf struct{ p domain.CatalogPart }

@@ -324,6 +324,8 @@ func (a *app) wireConsultant() error {
 	if c == nil {
 		return nil
 	}
+	// get_part tells the model which cars the catalogue lists a part for.
+	consultant.UseCatalogFits(c.enricher)
 	// Catalogue parts carry Russian names; each is translated once, as
 	// crawls bring them.
 	catalogParts := postgres.NewCatalogPartRepository(a.pool)

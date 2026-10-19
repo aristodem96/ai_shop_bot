@@ -68,8 +68,9 @@ func (b *Bot) askRequestQty(ctx context.Context, cc callbackCtx, partID int64) e
 	if err != nil {
 		return err
 	}
-	text, kb := requestQtyView(p, b.car(ctx, cc.user))
-	if photo := b.catalogPhoto(ctx, p); photo != "" {
+	photo, fits := b.catalogPart(ctx, p)
+	text, kb := requestQtyView(p, b.car(ctx, cc.user), fits)
+	if photo != "" {
 		return b.sendPhoto(ctx, cc.chat, photo, text, kb)
 	}
 	return b.tg.SendMessage(ctx, cc.chat, text, kb)

@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
+	"github.com/aristodem96/ai_shop_bot/internal/enrich"
 	"github.com/aristodem96/ai_shop_bot/internal/llm"
 	"github.com/aristodem96/ai_shop_bot/internal/service"
 )
@@ -81,4 +82,27 @@ func TestSearchWithoutCatalogue(t *testing.T) {
 	_, err := f.agent.Reply(context.Background(), 1, 1, "колодки")
 	require.NoError(t, err)
 	assert.NotContains(t, result(model, 1).Content, "catalog_parts", "a car from the shop's own list has no catalogue")
+}
+
+type fakeFits struct{}
+
+func (fakeFits) ProductFits(_ context.Context, id int64) (*enrich.Fits, error) {
+	if id != frontPads.ID {
+		return nil, nil
+	}
+	return &enrich.Fits{Lines: []string{"Daewoo Nubira (J100) 1.6 (1997–1999)"}, Complete: false}, nil
+}
+
+func TestGetPartCarriesCatalogueFits(t *testing.T) {
+	model := llm.NewFake(
+		llm.Call("c1", "get_part", map[string]any{"product_id": frontPads.ID}),
+		llm.Say("Так, за каталогом підходить до Nubira."),
+	)
+	f := newAgent(t, model)
+	f.agent.UseCatalogFits(fakeFits{})
+	_, err := f.agent.Reply(context.Background(), 1, 1, "а на нубіру підійде?")
+	require.NoError(t, err)
+	res := result(model, 1).Content
+	assert.Contains(t, res, `"catalog_fits":["Daewoo Nubira (J100) 1.6 (1997–1999)"]`)
+	assert.Contains(t, res, `"catalog_fits_complete":false`, "the model is told the list may be cut")
 }

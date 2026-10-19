@@ -86,7 +86,8 @@ func TestPartSide(t *testing.T) {
 		"getArtInfo": `{"status":{"NormalizedDescription":"Фильтр"},"specs":[{"description":"для артикула №","displayvalue":"OC 90"},
 			{"description":"Высота [мм]","displayvalue":"142"},{"description":"Высота [мм]","displayvalue":"142"}],
 			"images":[{"url":"https://image.auto-db.pro/OC90.webp"},{"url":"https://image.auto-db.pro/images/B.webp"}],"oem":[{"description":"FORD","OENbr":"5009285"}],
-			"cross":[{"description":"MANN-FILTER","PartsDataSupplierArticleNumber":"W 712/22"}],"vehicles":null}`,
+			"cross":[{"description":"MANN-FILTER","PartsDataSupplierArticleNumber":"W 712/22"}],
+			"vehicles":[{"type":"PassengerCar","car_id":"18537","make":"CHEVROLET","model":"LACETTI (J200)","constructioninterval":"03.2005 - ","description":"1.6"}]}`,
 	})
 	ctx := context.Background()
 
@@ -98,10 +99,11 @@ func TestPartSide(t *testing.T) {
 	info, err := c.Info(ctx, 34, "OC 90")
 	require.NoError(t, err)
 	assert.Equal(t, &ArticleInfo{Name: "Фильтр",
-		Specs:  []Spec{{Name: "Высота [мм]", Value: "142"}},
-		Images: []Image{{URL: "https://image.auto-db.pro/images/OC90.webp"}, {URL: "https://image.auto-db.pro/images/B.webp"}},
-		OEM:    []OEM{{Make: "FORD", Number: "5009285"}},
-		Cross:  []Cross{{Brand: "MANN-FILTER", Number: "W 712/22"}},
+		Specs:    []Spec{{Name: "Высота [мм]", Value: "142"}},
+		Images:   []Image{{URL: "https://image.auto-db.pro/images/OC90.webp"}, {URL: "https://image.auto-db.pro/images/B.webp"}},
+		OEM:      []OEM{{Make: "FORD", Number: "5009285"}},
+		Cross:    []Cross{{Brand: "MANN-FILTER", Number: "W 712/22"}},
+		Vehicles: []ArticleVehicle{{ModID: 18537, Make: "CHEVROLET", Model: "LACETTI (J200)", Years: "03.2005 - ", Engine: "1.6"}},
 	}, info, "photos where they are, each characteristic once")
 	assert.Contains(t, (*asked)[1], "brand=34")
 }

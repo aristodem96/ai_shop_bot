@@ -19,6 +19,10 @@ import (
 // the conversation.
 const maxShown = 5
 
+// maxCatalogFits caps the catalogue's models get_part returns: enough to
+// answer "will it fit my Nubira?", not a page of tokens.
+const maxCatalogFits = 30
+
 // maxAddQty caps one add_to_cart call: a set of plugs or a few cans of oil,
 // not a trade order.
 const maxAddQty = 6
@@ -48,6 +52,7 @@ type toolbox struct {
 	kits     Maintenance
 	orders   Orders
 	parts    OrderCatalog // nil: stock only
+	fits     CatalogFits  // nil: no catalogue fits
 	now      func() time.Time
 	// catSlug maps category ids to the slugs the model knows them by.
 	catSlug map[int64]string
@@ -135,9 +140,10 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, ord
 			}),
 		},
 		{
-			Name:        "get_part",
-			Description: "Get the full details of one part: description, specs, OEM numbers, the cars it fits and whether it fits the buyer's saved car.",
-			Schema:      object(map[string]any{"product_id": integer("Product id from search results.")}, "product_id"),
+			Name: "get_part",
+			Description: "Get the full details of one part: description, specs, OEM numbers, the cars it fits and whether it fits the buyer's saved car. " +
+				"catalog_fits are the cars the manufacturers' catalogue lists the part for, one model per line.",
+			Schema: object(map[string]any{"product_id": integer("Product id from search results.")}, "product_id"),
 		},
 		{
 			Name: "service_kit",
@@ -288,6 +294,11 @@ type productView struct {
 	// FitNote is where and when the part fits the buyer's car ("front axle,
 	// with ABS"): the detail that tells two fitting parts apart.
 	FitNote string `json:"fit_note,omitempty"`
+	// CatalogFits are the cars the parts catalogue lists the part for, a
+	// model per line; CatalogFitsComplete is false when the catalogue cut
+	// the list, so a car missing from it may still fit.
+	CatalogFits         []string `json:"catalog_fits,omitempty"`
+	CatalogFitsComplete *bool    `json:"catalog_fits_complete,omitempty"`
 }
 
 func (tb *toolbox) view(p *domain.Product) productView {
@@ -508,6 +519,15 @@ func (tb *toolbox) getPart(ctx context.Context, run *runState, input json.RawMes
 		fits := p.FitsVehicle(car.ID)
 		v.FitsMyVehicle = &fits
 		v.FitNote = p.FitNotes[car.ID]
+	}
+	if tb.fits != nil {
+		f, err := tb.fits.ProductFits(ctx, p.ID)
+		if err != nil {
+			return nil, err
+		}
+		if f != nil && len(f.Lines) > 0 {
+			v.CatalogFits, v.CatalogFitsComplete = f.Lines[:min(len(f.Lines), maxCatalogFits)], &f.Complete
+		}
 	}
 	return v, nil
 }

@@ -34,6 +34,10 @@ var mannInfo = &autodb.ArticleInfo{
 	Specs:  []autodb.Spec{{Name: "Высота [мм]", Value: "79"}},
 	Images: []autodb.Image{{URL: "https://image.auto-db.pro/images/A.webp"}},
 	OEM:    []autodb.OEM{{Make: "VAG", Number: "04E 115 561 H"}, {Make: "VAG", Number: "04E115561H"}},
+	Vehicles: []autodb.ArticleVehicle{
+		{ModID: 1, Make: "VW", Model: "GOLF VII (5G1)", Years: "08.2012 - ", Engine: "1.4 TSI"},
+		{ModID: 2, Make: "VW", Model: "GOLF VII (5G1)", Years: "08.2012 - ", Engine: "1.6 TDI"},
+	},
 	Cross: []autodb.Cross{
 		{Brand: "MANN-FILTER", Number: "W 712/95"},
 		{Brand: "BOSCH", Number: "F 026 407 143"},
@@ -77,6 +81,13 @@ func (s *memStore) PendingProduct(_ context.Context, id int64) (*Product, bool, 
 		}
 	}
 	return nil, false, nil
+}
+
+func (s *memStore) ProductArticle(_ context.Context, id int64) (int64, string, bool, error) {
+	if a, ok := s.matched[id]; ok {
+		return a.SupplierID, a.Number, true, nil
+	}
+	return 0, "", false, nil
 }
 
 func (s *memStore) SupplierKeys(_ context.Context, ids []int64) (map[int64]string, error) {
@@ -183,4 +194,30 @@ func TestSeveralUnknownHitsAreAskedWhoseTheyAre(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, store.matched[1])
 	assert.Equal(t, int64(4), store.matched[1].SupplierID, "the card that names MANN-FILTER")
+}
+
+func TestFits(t *testing.T) {
+	api, store := mannAPI(), newMemStore(Product{ID: 1, PartKey: "W71295", BrandKeys: []string{"MANNFILTER"}})
+	store.suppliers[4] = "MANNFILTER"
+	e := newEnricher(api, store)
+	ctx := context.Background()
+
+	none, err := e.ProductFits(ctx, 1)
+	require.NoError(t, err)
+	assert.Nil(t, none, "a product not matched has no catalogue fits")
+
+	require.NoError(t, e.Product(ctx, 1))
+	f, err := e.ProductFits(ctx, 1)
+	require.NoError(t, err)
+	assert.Equal(t, &Fits{Lines: []string{"VW Golf VII (5G1) 1.4 TSI, 1.6 TDI (2012–)"}, Complete: true}, f)
+
+	// An article kept before its cars were: asked again once.
+	store.articles[4].VehiclesKnown, store.articles[4].Vehicles = false, nil
+	calls := len(api.calls)
+	_, err = e.ArticleFits(ctx, 4, "W 712/95")
+	require.NoError(t, err)
+	assert.Len(t, api.calls, calls+1)
+	_, err = e.ArticleFits(ctx, 4, "W 712/95")
+	require.NoError(t, err)
+	assert.Len(t, api.calls, calls+1)
 }

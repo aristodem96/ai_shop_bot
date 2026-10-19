@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
+	"github.com/aristodem96/ai_shop_bot/internal/enrich"
 	"github.com/aristodem96/ai_shop_bot/internal/llm"
 	"github.com/aristodem96/ai_shop_bot/internal/service"
 )
@@ -60,6 +61,12 @@ type OrderCatalog interface {
 	// CrawlState is "" for a car outside the catalogue, "none", "queued" or
 	// "running" while its parts are still loading, "done" or "failed".
 	CrawlState(ctx context.Context, vehicleID int64) (string, error)
+}
+
+// CatalogFits says what cars a stock product fits by the parts catalogue.
+// enrich.Enricher is the implementation.
+type CatalogFits interface {
+	ProductFits(ctx context.Context, productID int64) (*enrich.Fits, error)
 }
 
 // History stores conversations between turns.
@@ -125,6 +132,10 @@ func New(ctx context.Context, client llm.Client, catalog Catalog, cart Cart, gar
 // UseOrderCatalog lets searches offer parts the shop can order beyond its
 // stock. Without it the agent sells the stock alone.
 func (a *Agent) UseOrderCatalog(c OrderCatalog) { a.tools.parts = c }
+
+// UseCatalogFits adds to get_part the cars a product fits by the parts
+// catalogue.
+func (a *Agent) UseCatalogFits(f CatalogFits) { a.tools.fits = f }
 
 // Fixed answers for the turns that end without a usable model answer. They
 // are shop wording, not model output.

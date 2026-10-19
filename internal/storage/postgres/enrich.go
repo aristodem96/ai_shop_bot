@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/aristodem96/ai_shop_bot/internal/autodb"
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
 	"github.com/aristodem96/ai_shop_bot/internal/enrich"
 )
@@ -28,12 +29,12 @@ func NewEnrichRepository(pool *pgxpool.Pool) *EnrichRepository {
 // Article returns a cached article with its crosses.
 func (r *EnrichRepository) Article(ctx context.Context, supplierID int64, key string) (*enrich.Article, bool, error) {
 	a := enrich.Article{SupplierID: supplierID, Key: key}
-	var specs []byte
+	var specs, vehicles []byte
 	err := r.pool.QueryRow(ctx, `
-		SELECT a.number, coalesce(s.name, ''), a.name, a.specs, a.images, a.oem_keys
+		SELECT a.number, coalesce(s.name, ''), a.name, a.specs, a.images, a.oem_keys, a.vehicles
 		FROM autodb_articles a LEFT JOIN autodb_suppliers s ON s.id = a.supplier_id
 		WHERE a.supplier_id = $1 AND a.article_key = $2`, supplierID, key).
-		Scan(&a.Number, &a.Brand, &a.Name, &specs, &a.Images, &a.OEMKeys)
+		Scan(&a.Number, &a.Brand, &a.Name, &specs, &a.Images, &a.OEMKeys, &vehicles)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -42,6 +43,12 @@ func (r *EnrichRepository) Article(ctx context.Context, supplierID int64, key st
 	}
 	if err := json.Unmarshal(specs, &a.Specs); err != nil {
 		return nil, false, fmt.Errorf("postgres: specs of article %s: %w", key, err)
+	}
+	if vehicles != nil {
+		a.VehiclesKnown = true
+		if err := json.Unmarshal(vehicles, &a.Vehicles); err != nil {
+			return nil, false, fmt.Errorf("postgres: vehicles of article %s: %w", key, err)
+		}
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT brand_key, cross_key FROM autodb_crosses WHERE supplier_id = $1 AND article_key = $2`, supplierID, key)
@@ -61,17 +68,22 @@ func (r *EnrichRepository) SaveArticle(ctx context.Context, a *enrich.Article) e
 	if err != nil {
 		return fmt.Errorf("postgres: encode specs: %w", err)
 	}
+	vehicles, err := json.Marshal(nonNilVehicles(a.Vehicles))
+	if err != nil {
+		return fmt.Errorf("postgres: encode vehicles: %w", err)
+	}
 	brands, keys := make([]string, len(a.Cross)), make([]string, len(a.Cross))
 	for i, c := range a.Cross {
 		brands[i], keys[i] = c.BrandKey, c.Key
 	}
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO autodb_articles (supplier_id, article_key, number, name, specs, images, oem_keys)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			INSERT INTO autodb_articles (supplier_id, article_key, number, name, specs, images, oem_keys, vehicles)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 			ON CONFLICT (supplier_id, article_key) DO UPDATE SET number = excluded.number, name = excluded.name,
-				specs = excluded.specs, images = excluded.images, oem_keys = excluded.oem_keys, fetched_at = now()`,
-			a.SupplierID, a.Key, a.Number, a.Name, specs, nonNil(a.Images), nonNil(a.OEMKeys)); err != nil {
+				specs = excluded.specs, images = excluded.images, oem_keys = excluded.oem_keys,
+				vehicles = excluded.vehicles, fetched_at = now()`,
+			a.SupplierID, a.Key, a.Number, a.Name, specs, nonNil(a.Images), nonNil(a.OEMKeys), vehicles); err != nil {
 			return fmt.Errorf("postgres: save article %s: %w", a.Key, err)
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM autodb_crosses WHERE supplier_id = $1 AND article_key = $2`, a.SupplierID, a.Key); err != nil {
@@ -186,6 +198,33 @@ func (r *EnrichRepository) Unmatched(ctx context.Context, productID int64) error
 		return fmt.Errorf("postgres: mark product %d: %w", productID, err)
 	}
 	return nil
+}
+
+// ProductArticle names the article a product was matched to.
+func (r *EnrichRepository) ProductArticle(ctx context.Context, productID int64) (int64, string, bool, error) {
+	var (
+		supplierID int64
+		number     string
+	)
+	err := r.pool.QueryRow(ctx, `
+		SELECT a.supplier_id, a.number FROM products p
+		JOIN autodb_articles a ON a.supplier_id = p.autodb_supplier_id AND a.article_key = p.part_key
+		WHERE p.id = $1`, productID).Scan(&supplierID, &number)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, "", false, nil
+	}
+	if err != nil {
+		return 0, "", false, fmt.Errorf("postgres: article of product %d: %w", productID, err)
+	}
+	return supplierID, number, true, nil
+}
+
+// nonNilVehicles writes an empty list, not null: null means "not fetched".
+func nonNilVehicles(vs []autodb.ArticleVehicle) []autodb.ArticleVehicle {
+	if vs == nil {
+		return []autodb.ArticleVehicle{}
+	}
+	return vs
 }
 
 // nonNil writes an empty array, not NULL, for nothing.

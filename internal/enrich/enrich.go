@@ -24,6 +24,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/aristodem96/ai_shop_bot/internal/autodb"
+	"github.com/aristodem96/ai_shop_bot/internal/directory"
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
 )
 
@@ -47,6 +48,10 @@ type Article struct {
 	// OEMKeys are the carmakers' numbers the part replaces, normalised.
 	OEMKeys []string
 	Cross   []Cross
+	// Vehicles are the cars it fits, the first autodb.MaxVehicles of them.
+	// VehiclesKnown is false for an article cached before they were kept.
+	Vehicles      []autodb.ArticleVehicle
+	VehiclesKnown bool
 }
 
 // Cross is the same part from another brand.
@@ -74,6 +79,8 @@ type Store interface {
 	Pending(ctx context.Context, limit int) ([]Product, error)
 	// PendingProduct returns the product if it was not looked for yet.
 	PendingProduct(ctx context.Context, id int64) (*Product, bool, error)
+	// ProductArticle names the article a product was matched to.
+	ProductArticle(ctx context.Context, productID int64) (supplierID int64, number string, ok bool, err error)
 	// SupplierKeys returns the brand keys of the supplier ids it knows.
 	SupplierKeys(ctx context.Context, ids []int64) (map[int64]string, error)
 	// Matched records the product's article and fills what the product
@@ -113,14 +120,15 @@ func New(api API, store Store, cfg Config, log *slog.Logger) *Enricher {
 // first time, from the API.
 func (e *Enricher) Article(ctx context.Context, supplierID int64, number string) (*Article, error) {
 	key := domain.NormalizeOEM(number)
-	if a, ok, err := e.store.Article(ctx, supplierID, key); err != nil || ok {
+	a, ok, err := e.store.Article(ctx, supplierID, key)
+	if err != nil || (ok && a.VehiclesKnown) {
 		return a, err
 	}
 	info, err := e.api.Info(ctx, supplierID, number)
 	if err != nil {
 		return nil, err
 	}
-	a := fromInfo(supplierID, number, info)
+	a = fromInfo(supplierID, number, info)
 	if err := e.store.SaveArticle(ctx, a); err != nil {
 		return nil, err
 	}
@@ -129,7 +137,8 @@ func (e *Enricher) Article(ctx context.Context, supplierID int64, number string)
 
 // fromInfo keeps what the shop uses of an article card.
 func fromInfo(supplierID int64, number string, info *autodb.ArticleInfo) *Article {
-	a := &Article{SupplierID: supplierID, Key: domain.NormalizeOEM(number), Number: number, Name: info.Name}
+	a := &Article{SupplierID: supplierID, Key: domain.NormalizeOEM(number), Number: number, Name: info.Name,
+		Vehicles: info.Vehicles, VehiclesKnown: true}
 	for _, s := range info.Specs {
 		a.Specs = append(a.Specs, domain.Spec{Name: s.Name, Value: s.Value})
 	}
@@ -157,6 +166,33 @@ func fromInfo(supplierID int64, number string, info *autodb.ArticleInfo) *Articl
 		a.Cross = append(a.Cross, x)
 	}
 	return a
+}
+
+// Fits are the cars a product fits by the catalogue, a line per model.
+type Fits struct {
+	Lines []string
+	// Complete is false when the catalogue cut the list: then a car that
+	// is not on it may still fit.
+	Complete bool
+}
+
+// ProductFits returns the cars a product fits by its catalogue article,
+// nil for a product with no article.
+func (e *Enricher) ProductFits(ctx context.Context, productID int64) (*Fits, error) {
+	supplierID, number, ok, err := e.store.ProductArticle(ctx, productID)
+	if err != nil || !ok {
+		return nil, err
+	}
+	return e.ArticleFits(ctx, supplierID, number)
+}
+
+// ArticleFits returns the cars an article fits.
+func (e *Enricher) ArticleFits(ctx context.Context, supplierID int64, number string) (*Fits, error) {
+	a, err := e.Article(ctx, supplierID, number)
+	if err != nil {
+		return nil, err
+	}
+	return &Fits{Lines: directory.FitLines(a.Vehicles), Complete: len(a.Vehicles) < autodb.MaxVehicles}, nil
 }
 
 // Product matches one product now, if it was not looked for yet: a card a

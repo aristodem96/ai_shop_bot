@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
+	"github.com/aristodem96/ai_shop_bot/internal/enrich"
 	"github.com/aristodem96/ai_shop_bot/internal/service"
 	"github.com/aristodem96/ai_shop_bot/internal/telegram"
 )
@@ -185,10 +186,51 @@ func productCaption(p *domain.Product, car *domain.Vehicle) string {
 		b.WriteString(strings.Join(specs, "\n") + "\n")
 	}
 	if len(p.OEMNumbers) > 0 {
-		fmt.Fprintf(&b, "OEM: <code>%s</code>\n", esc(strings.Join(p.OEMNumbers, ", ")))
+		// The catalogue adds a dozen carmakers' numbers to some parts; a
+		// photo's caption holds 1024 characters in all.
+		oem := strings.Join(p.OEMNumbers[:min(len(p.OEMNumbers), oemShown)], ", ")
+		if extra := len(p.OEMNumbers) - oemShown; extra > 0 {
+			oem += fmt.Sprintf(" … +%d", extra)
+		}
+		fmt.Fprintf(&b, "OEM: <code>%s</code>\n", esc(oem))
 	}
 	b.WriteString("\n" + fitmentLine(p, car))
 	return b.String()
+}
+
+// oemShown bounds the OEM numbers a card lists.
+const oemShown = 6
+
+// fitsShown bounds the models a card lists from the catalogue.
+const fitsShown = 4
+
+// fitsBlock lists the cars a part fits by the parts catalogue: the models
+// first, and how many more there are. When the catalogue cut its list, "and
+// others" says so without a number.
+func fitsBlock(f *enrich.Fits) string {
+	if f == nil || len(f.Lines) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n🚗 <b>За каталогом підходить до:</b>\n")
+	for _, l := range f.Lines[:min(len(f.Lines), fitsShown)] {
+		fmt.Fprintf(&b, "• %s\n", esc(clip(l, 70)))
+	}
+	switch extra := len(f.Lines) - fitsShown; {
+	case !f.Complete:
+		b.WriteString("• … та інші\n")
+	case extra > 0:
+		fmt.Fprintf(&b, "• … і ще %s\n", plural(extra, "модель", "моделі", "моделей"))
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// clip shortens a line to n runes.
+func clip(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n-1]) + "…"
+	}
+	return s
 }
 
 func stockLabel(p *domain.Product) string {

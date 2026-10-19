@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/aristodem96/ai_shop_bot/internal/autodb"
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
 	"github.com/aristodem96/ai_shop_bot/internal/enrich"
 	"github.com/aristodem96/ai_shop_bot/internal/service"
@@ -58,7 +59,9 @@ func TestEnrichFillsCardsAndAnalogues(t *testing.T) {
 
 	a := &enrich.Article{SupplierID: 4, Key: "W71295", Number: "W 712/95", Brand: "MANN-FILTER", Name: "Фильтр",
 		Specs: []domain.Spec{{Name: "Высота [мм]", Value: "79"}}, Images: []string{"https://img/a.webp"},
-		OEMKeys: []string{"04E115561H", "W71295"}, Cross: []enrich.Cross{{BrandKey: "BOSCH", Key: "F026407143"}}}
+		OEMKeys: []string{"04E115561H", "W71295"}, Cross: []enrich.Cross{{BrandKey: "BOSCH", Key: "F026407143"}},
+		Vehicles:      []autodb.ArticleVehicle{{ModID: 18537, Make: "CHEVROLET", Model: "LACETTI (J200)", Years: "03.2005 - ", Engine: "1.6"}},
+		VehiclesKnown: true}
 	require.NoError(t, repo.SaveArticle(ctx, a))
 	back, ok, err := repo.Article(ctx, 4, "W71295")
 	require.NoError(t, err)
@@ -71,6 +74,12 @@ func TestEnrichFillsCardsAndAnalogues(t *testing.T) {
 	require.NoError(t, repo.Matched(ctx, mann, a))
 	require.NoError(t, repo.Matched(ctx, knecht, &enrich.Article{SupplierID: 7, Key: "OC9771", Images: []string{"https://img/k.webp"}}))
 	require.NoError(t, repo.Unmatched(ctx, bosch))
+	sup, number, ok, err := repo.ProductArticle(ctx, mann)
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, [2]any{int64(4), "W 712/95"}, [2]any{sup, number}, "the matched product names its article")
+	_, _, ok, _ = repo.ProductArticle(ctx, bosch)
+	assert.False(t, ok)
 	catalog := NewCatalogRepository(testPool)
 	p, err := catalog.Product(ctx, mann)
 	require.NoError(t, err)
