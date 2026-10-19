@@ -87,7 +87,7 @@ cp .env.prod.example .env
 nano .env
 ```
 
-Fill in every empty value. Generate the passwords with `openssl rand -base64 32`.
+Fill in every empty value. Generate the passwords with `openssl rand -hex 32`: the Postgres password goes inside a URL, where the `/` and `+` that base64 produces would break it.
 `COMPOSE_FILE` in that file makes every `docker compose` command use both
 compose files, so the commands below need no `-f` flags.
 
