@@ -7,8 +7,10 @@ A Telegram shop for car parts with an AI consultant, written in Go.
 A buyer writes the way they would to a person at the counter — *"front brake
 pads for a 2015 Octavia 1.4"*, a part number, or a photo of the worn part — and
 the consultant finds what fits their car, shows it as cards, and puts it in the
-cart. Checkout, payment through Monobank, and order handling in a managers'
-chat follow, all inside Telegram.
+cart. What the shop does not stock it offers on order, from the parts
+catalogue of every car, at a price a manager finds. Checkout, payment through
+Monobank, pickup or Nova Poshta, and order handling in a managers' chat
+follow, all inside Telegram.
 
 ```
 buyer:       Потрібні передні гальмівні колодки на шкоду октавію 2015 року, мотор 1.4
@@ -51,22 +53,36 @@ the buttons. Most of this README is about that boundary.
   a service, or an order. It asks for the car when the answer depends on it.
 - **Send a photo** of the old part; the consultant works out what it is, reads a
   stamped number if there is one, and finds a new one for the buyer's car.
-- **"My car"** — the car is remembered once named, and the catalogue shows only
-  parts that fit it. Every card says plainly whether the part fits.
-- **Analogues** — the same part from other brands (same OEM number), or an
-  equivalent for the same car.
+- **"My car"** — any car sold in Europe, from the Auto-DB parts catalogue, or
+  the shop's own list for makes it lacks (Chery, BYD). Remembered once named;
+  the catalogue then shows only parts that fit. Every card says plainly
+  whether the part fits.
+- **Parts on order** — what the catalogue lists for the car and the shop does
+  not stock is offered with a button: the buyer picks a quantity, a manager
+  finds a supplier and names the price and the lead time, and the buyer pays
+  for it like any other part. A quote holds for 24 hours.
+- **Analogues** — the same part from other brands (a shared OEM number, or the
+  catalogue's cross list), or an equivalent for the same car.
+- **Photos** — from the price list, or the catalogue's when it has the part.
 - **Service kit** — oil of the right grade and amount, oil, air and cabin
   filters, and plugs for a petrol engine, added to the cart in one tap.
 - **VIN** — the make and model year are read from it.
-- **Checkout and payment** — name, phone, Nova Poshta branch, then a Monobank
-  payment page. The stock is held for 15 minutes while the buyer pays.
+- **Checkout and payment** — name, phone, pickup at the shop or a Nova Poshta
+  branch, then a Monobank payment page. The stock is held for 15 minutes while
+  the buyer pays.
 - **Orders** — status of every order; a notice at every change.
 - **Abandoned cart** — one reminder after a day of silence, never at night.
 
 **For the shop**
 
 - **Admin chat** — every paid order arrives with *Confirm / Shipped / Cancel*
-  buttons; the buyer hears about each move.
+  buttons (*Handed over* for pickup); the buyer hears about each move.
+- **Part requests** — a buyer's request for a part on order arrives with
+  *Found / Not found*; the manager answers with the price and the days, and
+  the bot does the rest.
+- **Price lists from the chat** — send the supplier's Excel or CSV, read the
+  report of the dry run, press *Apply*. Unknown vehicle names are mapped and
+  unrecognised products filed in the same chat.
 
 ---
 
@@ -120,6 +136,18 @@ No public URL is needed locally: unpaid invoices are polled every 30 seconds.
   │                                                                              │
   │ internal/payment/monobank   invoices · status · signed webhook ◄── HTTPS ──── Monobank
   └──────────────────────────────────────────────────────────────────────────────
+```
+
+The parts catalogue sits beside the shop, read through a cache:
+
+```
+  internal/autodb      Auto-DB Pro client: makes, models, engines, parts trees,
+                       article cards; one rate for all callers
+  internal/directory   buyers' cars from the catalogue, the shop's list for the rest
+  internal/crawler     a chosen car's parts tree, crawled in the background
+  internal/enrich      stock matched to the catalogue: photos, OEM numbers, analogues
+  internal/partnames   the catalogue's Russian part names, translated once each
+  internal/photos      photos to Telegram as JPEG, then by Telegram's file id
 ```
 
 The layering is the one from [shortlink](https://github.com/aristodem96/shortlink):
@@ -209,10 +237,41 @@ would only add cost and a way to get them wrong.
 
 Real catalogues cover tens of thousands of vehicle types; a make → model →
 engine menu stops working past a demo. The buyer names the car in a message,
-`find_vehicle` matches it in SQL (with a limit, and with `%`/`_` escaped so a
-buyer cannot ask for "everything"), and the consultant asks for the engine when
-more than one matches. Saved in Postgres, the car outlives the 24-hour
-conversation and filters the catalogue for buttons too.
+`find_vehicle` matches it — in the Auto-DB catalogue, with synonyms ("шевроле",
+"Volkswagen" for VW) and the shop's own list for the makes it lacks — and the
+consultant asks for the engine when more than one matches. Saved in Postgres,
+the car outlives the 24-hour conversation and filters the catalogue for
+buttons too.
+
+### The parts catalogue is read from a cache
+
+Auto-DB answers a section of a car's parts tree in seconds, and a car has
+hundreds of sections; asking it while a buyer waits would make every answer
+take minutes. So choosing a car queues a crawl (a Postgres queue, `SKIP
+LOCKED`), a worker walks the tree in the background with retries, and the bot
+only ever reads what was stored. A car one buyer chose is there for the next.
+Every call to the API waits on one rate, with background work kept to a
+share of it, so a buyer's lookup never queues behind a crawl and the account
+never sees a burst.
+
+### Two sources of cars, one list of fitments
+
+A price list fits parts to the shop's model, "Chevrolet Lacetti"; the
+catalogue calls the car "Lacetti (J200)" and knows its engines. An Auto-DB car
+is linked to the shop's model it is, so the price list's fitments reach it,
+and the catalogue's own fitments are added by article and brand. Both meet in
+one view, `vehicle_fitments`, which every query reads: the menu, search,
+analogues and the service kit see one answer. Measured with 40 crawled cars
+(310 000 catalogue rows), a search for one car takes 34 ms.
+
+### A part on order is priced by a person
+
+A supplier's price and stock change by the hour, and no catalogue knows them,
+so a part on order is not given a price by the bot or the model. The buyer's
+request goes to the managers' chat; the price a manager replies with becomes a
+product of its own, kept out of the catalogue and sold only to that buyer
+through the usual cart, checkout and payment. Nothing about orders had to
+change, and a quote not paid in 24 hours goes off sale.
 
 ### A unit is sold once
 
@@ -403,6 +462,8 @@ every variable with its default and why it exists. The ones you set:
 | `MONOBANK_TOKEN` | turns checkout on |
 | `ADMIN_CHAT_ID` | where managers get paid orders — `/id` tells you |
 | `PUBLIC_URL` | https address for webhooks; optional |
+| `SHOP_PICKUP_ADDRESS` | the shop's address and hours; offers pickup |
+| `AUTODB_USER`, `AUTODB_PASSWORD` | the Auto-DB Pro account; turns the parts catalogue on |
 
 Configuration is validated at start, and every problem is reported at once
 rather than one per restart.
@@ -419,6 +480,10 @@ start without the secrets. The image is 31 MB on distroless.
 ---
 
 ## Loading a real catalogue
+
+A step-by-step guide for whoever connects a shop or a supplier, in Ukrainian,
+is in [docs/import/README.md](docs/import/README.md): what a profile holds,
+field by field, and how to read the report.
 
 The demo catalogue is code; a shop's is a file. The catalogue was shaped
 against a real Ukrainian price list of 81 654 rows, which is what a supplier
@@ -543,9 +608,15 @@ docker compose run --rm -v $PWD/imports:/imports --entrypoint /import bot \
 - **The demo catalogue is invented.** The cars are real models; the brands,
   part numbers and fitments are made up and are not a compatibility reference.
   A real shop loads its own with the importer.
-- **The vehicle directory is a starter.** About 200 cars common in Ukraine,
-  with years and engines from general knowledge; a shop that needs every car
-  sold in Europe licenses TecDoc and loads it the same way.
+- **The shop's own vehicle list is a starter.** About 200 cars common in
+  Ukraine, with years and engines from general knowledge. With an Auto-DB
+  account it only answers for the makes the catalogue lacks.
+- **Auto-DB has no Chery, BYD or JAC**, and its search finds brands' article
+  numbers only, not carmakers' OEM numbers. Stock listed by OEM number is not
+  matched to the catalogue, so it gets no photos or catalogue analogues from
+  it; stock listed by brand article numbers is.
+- **One IP address per Auto-DB account.** The server's address goes into the
+  account's dashboard.
 - **Brand aliases are added in SQL.** A spelling that differs by more than
   punctuation ("Kayaba" for KYB) is one `INSERT` into `brand_aliases`; there
   is no command for it yet.
@@ -581,9 +652,16 @@ internal/
   storage/redis/       conversations, sessions, rate limiter
   seed/                the demo catalogue
   importer/            price list profiles, parsing, brand and vehicle matching
+  vehiclematch/        the model proposing vehicles for supplier names
+  autodb/              Auto-DB Pro client
+  directory/           buyers' cars from the catalogue and the shop's list
+  crawler/             background crawl of a car's parts tree
+  enrich/              stock matched to catalogue articles
+  partnames/           catalogue part names translated
+  photos/              photos converted and sent by file id
   config/              environment configuration
 migrations/            goose migrations, embedded in the binary
 data/                  the category tree and the vehicle directory
 profiles/              supplier profiles the managers' chat imports with
-docs/import/           an example price list
+docs/import/           how to connect a supplier; example price lists
 ```

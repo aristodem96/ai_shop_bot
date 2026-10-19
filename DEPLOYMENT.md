@@ -95,6 +95,13 @@ compose files, so the commands below need no `-f` flags.
 once, send `/id` to the bot from that chat (a private chat or a managers'
 group), put the number in `.env`, and run `docker compose up -d` again.
 
+`AUTODB_USER` and `AUTODB_PASSWORD` turn on the Auto-DB parts catalogue. The
+account lets requests in from one IP address only: put the server's address
+in the Auto-DB dashboard first, or every call is refused (the log says
+`this IP address is not allowed`). Find the address with
+`curl -4 ifconfig.me` on the server. `SHOP_PICKUP_ADDRESS` — the shop's
+address and hours — offers pickup at checkout; empty, it is Nova Poshta only.
+
 ### 4. Start it
 
 ```bash
@@ -103,6 +110,13 @@ docker compose run --rm --entrypoint /seed bot     # demo catalogue, once
 docker compose ps
 curl https://shop-bot.example.com/healthz          # {"status":"ok"}
 ```
+
+For a real shop, skip the demo catalogue and load the stock instead: put the
+supplier's profile in `profiles/` on the server (real profiles are the shop's
+business data and stay out of git) and send the price list to the managers'
+chat — [docs/import/README.md](docs/import/README.md) walks through it. Then
+the vehicle directory for the makes Auto-DB lacks, once:
+`docker compose run --rm --entrypoint /import bot -vehicles /data/vehicles.csv`.
 
 There is nothing to configure in the Monobank cabinet: the webhook address is
 sent with every invoice, built from `BOT_DOMAIN`.
@@ -118,7 +132,9 @@ git pull
 docker compose up -d --build
 ```
 
-Migrations run on start. The bot finishes in-flight updates on `SIGTERM`
+Migrations run on start. Uploaded price lists waiting for *Apply* live in
+the `imports` volume and the managers' dialogs in Redis, so a deploy midway
+through an import or a vehicle matching session loses neither. The bot finishes in-flight updates on `SIGTERM`
 (`stop_grace_period: 70s`), so a deploy does not cut a buyer off mid-checkout.
 
 ### Logs
