@@ -47,8 +47,10 @@ func (b *Bot) progressToast(ctx context.Context, user int64) string {
 		return "✅ Каталог готовий"
 	case p.State == "running" && p.SectionsTotal > 0:
 		return fmt.Sprintf("⏳ Ще завантажується: %d%%. Я напишу, коли буде готово.", p.SectionsDone*100/p.SectionsTotal)
+	case p.State == "running" && p.Parts > 0:
+		return fmt.Sprintf("⏳ Ще завантажується: уже %s деталей. Я напишу, коли буде готово.", num(p.Parts))
 	case p.State == "running":
-		return "⏳ Ще завантажується: збираю розділи каталогу. Я напишу, коли буде готово."
+		return "⏳ Ще завантажується. Я напишу, коли буде готово."
 	case p.State == "failed":
 		return "⚠️ Не вдалося завантажити, пробую ще раз"
 	}

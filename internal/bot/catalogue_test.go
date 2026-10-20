@@ -36,11 +36,17 @@ func TestRefreshSaysWhereTheCatalogueIs(t *testing.T) {
 	b.UseCatalogueProgress(fakeProgress{&domain.CatalogProgress{State: "running"}})
 	b.Handle(ctx, text(btnCatalog))
 	menu := tg.last("sendMessage")
-	assert.Contains(t, menu.text, "збираю розділи")
+	assert.Contains(t, menu.text, "Каталог деталей завантажується…")
 	require.Contains(t, callbacks(menu.markup), encode(actMenuRefresh))
 
 	b.Handle(ctx, press(encode(actMenuRefresh)))
-	assert.Contains(t, tg.last("answerCallbackQuery").text, "збираю розділи", "a tap that changes nothing on screen still answers")
+	assert.Contains(t, tg.last("answerCallbackQuery").text, "Ще завантажується", "a tap that changes nothing on screen still answers")
+
+	// The tree still being walked, the wanted parts already in.
+	b.UseCatalogueProgress(fakeProgress{&domain.CatalogProgress{State: "running", Parts: 1500}})
+	b.Handle(ctx, press(encode(actMenuRefresh)))
+	assert.Contains(t, tg.last("answerCallbackQuery").text, "уже 1 500 деталей")
+	assert.Contains(t, tg.last("editMessageText").text, "уже 1 500 деталей, найпотрібніші — першими")
 
 	b.UseCatalogueProgress(fakeProgress{&domain.CatalogProgress{State: "running", SectionsDone: 90, SectionsTotal: 363, Parts: 2000}})
 	b.Handle(ctx, press(encode(actMenuRefresh)))

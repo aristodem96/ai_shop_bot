@@ -84,8 +84,12 @@ func progressLine(p *domain.CatalogProgress) string {
 		}
 		return line
 	case "running":
-		if p.SectionsTotal == 0 {
-			return "⏳ Каталог деталей завантажується: збираю розділи…"
+		switch {
+		case p.SectionsTotal == 0 && p.Parts > 0:
+			// The tree is still being walked, the wanted parts already in.
+			return fmt.Sprintf("⏳ Каталог деталей завантажується: уже %s деталей, найпотрібніші — першими", num(p.Parts))
+		case p.SectionsTotal == 0:
+			return "⏳ Каталог деталей завантажується…"
 		}
 		return fmt.Sprintf("⏳ Каталог деталей завантажується: %d%% (%s деталей)",
 			p.SectionsDone*100/p.SectionsTotal, num(p.Parts))

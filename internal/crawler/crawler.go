@@ -9,11 +9,11 @@
 package crawler
 
 import (
+	"container/heap"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -262,124 +262,255 @@ const sectionRetries = 2
 
 var retryDelay = 2 * time.Second
 
-// Crawl reads a modification's parts tree and stores every part. Sections
-// are asked in parallel, a few at a time. A section that keeps failing is
-// skipped and counted; a crawl that loses more than a quarter of its
-// sections fails as a whole, to be queued again.
+// Crawl reads a modification's parts tree and stores every part.
+//
+// Walking the tree and loading its sections are one queue, not two steps:
+// a section with parts is loaded as soon as it is found, and the most
+// wanted branches -- brakes, filters, the chassis -- are walked and loaded
+// first. A tree walked level by level before anything is loaded keeps the
+// buyer at "collecting sections" while each level waits on its slowest
+// call; this way a car's brakes are in within seconds. A section that keeps
+// failing is skipped and counted; a crawl that loses more than a quarter of
+// its sections fails as a whole, to be queued again.
 func (c *Crawler) Crawl(ctx context.Context, modID int64) error {
-	leaves, err := c.leaves(ctx, modID)
-	if err != nil {
-		return err
-	}
-	if err := c.store.SaveSections(ctx, leaves); err != nil {
-		c.log.WarnContext(ctx, "could not save section paths", slog.Any("error", err))
-	}
-	// What buyers ask for most comes first, so a car is of use in its first
-	// minute rather than its last.
-	slices.SortStableFunc(leaves, func(a, b Section) int { return priority(a.Path) - priority(b.Path) })
 	// A buyer's search may have stored some already.
 	fetched, err := c.store.Fetched(ctx, modID, time.Now().Add(-c.cfg.MaxAge))
 	if err != nil {
 		return err
 	}
-	// The tree is walked: from here on the buyer can see a percentage.
-	if err := c.store.Progress(ctx, modID, len(leaves), 0, 0); err != nil {
-		c.log.WarnContext(ctx, "could not save crawl progress", slog.Any("error", err))
+	w := &walk{c: c, modID: modID, fetched: fetched}
+	w.cond = sync.NewCond(&w.mu)
+	heap.Push(&w.queue, &crawlTask{rank: 0})
+
+	// Waiting workers wake when the crawl is stopped, not only when work
+	// comes.
+	stop := context.AfterFunc(ctx, func() {
+		w.mu.Lock()
+		w.cond.Broadcast()
+		w.mu.Unlock()
+	})
+	defer stop()
+
+	var wg sync.WaitGroup
+	for range max(c.cfg.Parallel, 1) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w.work(ctx)
+		}()
 	}
-	var (
-		mu            sync.Mutex
-		done, failed  int
-		parts         int
-		lastProgressN int
-	)
-	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(c.cfg.Parallel)
-	for _, leaf := range leaves {
-		sec := leaf.ID
-		g.Go(func() error {
-			var (
-				got []autodb.Part
-				err error
-			)
-			if !fetched[sec] {
-				got, err = retry(gctx, func() ([]autodb.Part, error) {
-					return c.api.SectionParts(gctx, autodb.Passenger, modID, sec)
-				})
-				if err == nil {
-					err = c.store.SaveParts(gctx, modID, sec, keyed(got))
-				}
-			}
-			mu.Lock()
-			defer mu.Unlock()
-			done++
-			if err != nil {
-				failed++
-				c.log.WarnContext(gctx, "could not crawl a section", slog.Int64("mod_id", modID), slog.Int64("section", sec), slog.Any("error", err))
-			} else {
-				parts += len(got)
-			}
-			if done-lastProgressN >= 10 || done == len(leaves) {
-				lastProgressN = done
-				if perr := c.store.Progress(gctx, modID, len(leaves), done, parts); perr != nil {
-					c.log.WarnContext(gctx, "could not save crawl progress", slog.Any("error", perr))
-				}
-			}
-			return nil
-		})
-	}
-	_ = g.Wait()
+	wg.Wait()
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	if failed*4 > len(leaves) {
-		return fmt.Errorf("crawler: %d of %d sections failed", failed, len(leaves))
+	if w.rootErr != nil {
+		return w.rootErr
+	}
+	if err := c.store.Progress(ctx, modID, len(w.leaves), w.done, w.parts); err != nil {
+		c.log.WarnContext(ctx, "could not save crawl progress", slog.Any("error", err))
+	}
+	if w.failed*4 > max(len(w.leaves), 1) {
+		return fmt.Errorf("crawler: %d of %d sections failed", w.failed, len(w.leaves))
 	}
 	return nil
 }
 
-// leaves walks the sections tree breadth first, a level at a time, and
-// returns the sections with no children, the ones parts are listed in,
-// with their paths.
-func (c *Crawler) leaves(ctx context.Context, modID int64) ([]Section, error) {
-	var leaves []Section
-	level := []Section{{}}
-	for len(level) > 0 {
-		var (
-			mu   sync.Mutex
-			next []Section
-		)
-		g, gctx := errgroup.WithContext(ctx)
-		g.SetLimit(c.cfg.Parallel)
-		for _, parent := range level {
-			g.Go(func() error {
-				secs, err := retry(gctx, func() ([]autodb.Section, error) {
-					return c.api.Sections(gctx, autodb.Passenger, modID, parent.ID)
-				})
-				if err != nil {
-					return fmt.Errorf("crawler: sections of %d under %d: %w", modID, parent.ID, err)
-				}
-				mu.Lock()
-				defer mu.Unlock()
-				for _, s := range secs {
-					path := s.Name
-					if parent.Path != "" {
-						path = parent.Path + " › " + s.Name
-					}
-					if s.HasChildren {
-						next = append(next, Section{ID: s.ID, Path: path})
-					} else {
-						leaves = append(leaves, Section{ID: s.ID, Path: path})
-					}
-				}
-				return nil
-			})
-		}
-		if err := g.Wait(); err != nil {
-			return nil, err
-		}
-		level = next
+// crawlTask is a section to ask about: its subsections, or, for a leaf,
+// its parts. The root is the zero task.
+type crawlTask struct {
+	section Section
+	leaf    bool
+	rank    int // priority of the path: lower first
+	seq     int // order found, among equal ranks
+}
+
+// taskQueue orders tasks by rank, then by the order they were found.
+type taskQueue []*crawlTask
+
+// Len, Less, Swap, Push and Pop make taskQueue a container/heap.
+func (q taskQueue) Len() int { return len(q) }
+
+// Less puts the more wanted first, then the earlier found.
+func (q taskQueue) Less(i, j int) bool {
+	if q[i].rank != q[j].rank {
+		return q[i].rank < q[j].rank
 	}
-	return leaves, nil
+	return q[i].seq < q[j].seq
+}
+
+// Swap swaps two tasks.
+func (q taskQueue) Swap(i, j int) { q[i], q[j] = q[j], q[i] }
+
+// Push adds a task; only *crawlTask is ever pushed.
+func (q *taskQueue) Push(x any) {
+	if t, ok := x.(*crawlTask); ok {
+		*q = append(*q, t)
+	}
+}
+
+// Pop takes the last task.
+func (q *taskQueue) Pop() any {
+	old := *q
+	t := old[len(old)-1]
+	*q = old[:len(old)-1]
+	return t
+}
+
+// next takes the most wanted task.
+func (q *taskQueue) next() *crawlTask {
+	t, _ := heap.Pop(q).(*crawlTask)
+	return t
+}
+
+// walk is one crawl in progress, shared by its workers.
+type walk struct {
+	c       *Crawler
+	modID   int64
+	fetched map[int64]bool
+
+	mu       sync.Mutex
+	cond     *sync.Cond
+	queue    taskQueue
+	inflight int
+	seq      int
+	// pending counts branches being walked; with none running and none
+	// queued, every leaf is known.
+	pending      int
+	leaves       []Section
+	done, failed int
+	parts        int
+	lastProgress int
+	rootErr      error
+}
+
+// work takes the next task until the tree is done or the crawl stopped.
+func (w *walk) work(ctx context.Context) {
+	for {
+		w.mu.Lock()
+		for w.queue.Len() == 0 && w.inflight > 0 && ctx.Err() == nil {
+			w.cond.Wait()
+		}
+		if ctx.Err() != nil || w.queue.Len() == 0 {
+			w.cond.Broadcast()
+			w.mu.Unlock()
+			return
+		}
+		t := w.queue.next()
+		w.inflight++
+		if !t.leaf {
+			w.pending++ // a branch being walked: more leaves may come
+		}
+		w.mu.Unlock()
+
+		if t.leaf {
+			w.load(ctx, t)
+		} else {
+			w.expand(ctx, t)
+		}
+
+		w.mu.Lock()
+		w.inflight--
+		if !t.leaf {
+			w.pending--
+		}
+		w.cond.Broadcast()
+		w.mu.Unlock()
+	}
+}
+
+// expand asks for a section's subsections and queues them: a branch to walk
+// further, or a leaf to load. Leaves' paths are saved as they are found, for
+// a buyer's search to find them before the crawl ends.
+func (w *walk) expand(ctx context.Context, t *crawlTask) {
+	secs, err := retry(ctx, func() ([]autodb.Section, error) {
+		return w.c.api.Sections(ctx, autodb.Passenger, w.modID, t.section.ID)
+	})
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		if t.section.ID == 0 {
+			w.rootErr = fmt.Errorf("crawler: sections of %d: %w", w.modID, err)
+			return
+		}
+		w.failed++
+		w.c.log.WarnContext(ctx, "could not walk a section", slog.Int64("mod_id", w.modID), slog.Int64("section", t.section.ID), slog.Any("error", err))
+		return
+	}
+	var found []Section
+	w.mu.Lock()
+	for _, s := range secs {
+		path := s.Name
+		if t.section.Path != "" {
+			path = t.section.Path + " › " + s.Name
+		}
+		sec := Section{ID: s.ID, Path: path}
+		w.seq++
+		next := &crawlTask{section: sec, leaf: !s.HasChildren, rank: priority(path), seq: w.seq}
+		if next.leaf {
+			w.leaves = append(w.leaves, sec)
+			found = append(found, sec)
+			if w.fetched[sec.ID] {
+				w.done++ // a buyer's search stored it already
+				continue
+			}
+		}
+		heap.Push(&w.queue, next)
+	}
+	w.mu.Unlock()
+	if len(found) > 0 {
+		if err := w.c.store.SaveSections(ctx, found); err != nil {
+			w.c.log.WarnContext(ctx, "could not save section paths", slog.Any("error", err))
+		}
+	}
+}
+
+// load stores a leaf's parts and records the progress.
+func (w *walk) load(ctx context.Context, t *crawlTask) {
+	sec := t.section.ID
+	got, err := retry(ctx, func() ([]autodb.Part, error) {
+		return w.c.api.SectionParts(ctx, autodb.Passenger, w.modID, sec)
+	})
+	if err == nil {
+		err = w.c.store.SaveParts(ctx, w.modID, sec, keyed(got))
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.done++
+	if err != nil {
+		w.failed++
+		w.c.log.WarnContext(ctx, "could not crawl a section", slog.Int64("mod_id", w.modID), slog.Int64("section", sec), slog.Any("error", err))
+	} else {
+		w.parts += len(got)
+	}
+	if w.done-w.lastProgress >= 10 {
+		w.lastProgress = w.done
+		// The total is known only once no branch is left to walk; until
+		// then the buyer sees the parts so far.
+		total := 0
+		if w.pending == 0 && w.queueHasNoBranches() {
+			total = len(w.leaves)
+		}
+		if perr := w.c.store.Progress(ctx, w.modID, total, w.done, w.parts); perr != nil {
+			w.c.log.WarnContext(ctx, "could not save crawl progress", slog.Any("error", perr))
+		}
+	}
+}
+
+// queueHasNoBranches reports whether every queued task is a leaf. Called
+// with mu held.
+func (w *walk) queueHasNoBranches() bool {
+	for _, t := range w.queue {
+		if !t.leaf {
+			return false
+		}
+	}
+	return true
 }
 
 // priorities are the parts buyers ask for most, by words of the catalogue's

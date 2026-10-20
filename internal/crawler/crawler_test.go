@@ -3,6 +3,7 @@ package crawler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"sort"
@@ -72,6 +73,8 @@ type memStore struct {
 
 func (s *memStore) FileSections(context.Context) error { return nil }
 func (s *memStore) SaveSections(_ context.Context, secs []Section) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.sections = append(s.sections, secs...)
 	return nil
 }
@@ -252,4 +255,51 @@ func TestFetchNowLoadsTheSearchsSections(t *testing.T) {
 	names, err = c.FetchNow(context.Background(), 41, "brake-pads", nil)
 	require.NoError(t, err)
 	assert.Empty(t, names, "a car outside the catalogue has nothing to load")
+}
+
+// orderedAPI is a tree listed least wanted first, which records the order
+// of every call.
+type orderedAPI struct {
+	mu    sync.Mutex
+	calls []string
+	tree  map[int64][]autodb.Section
+	fail  map[int64]bool
+}
+
+func (o *orderedAPI) Sections(_ context.Context, _ autodb.Group, _ int64, parent int64) ([]autodb.Section, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.calls = append(o.calls, fmt.Sprintf("tree %d", parent))
+	if o.fail[parent] {
+		return nil, autodb.ErrIPNotAllowed // not retried
+	}
+	return o.tree[parent], nil
+}
+
+func (o *orderedAPI) SectionParts(_ context.Context, _ autodb.Group, _ int64, sec int64) ([]autodb.Part, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.calls = append(o.calls, fmt.Sprintf("parts %d", sec))
+	return []autodb.Part{{SupplierID: 1, Number: fmt.Sprintf("N%d", sec), Brand: "B"}}, nil
+}
+
+func TestCrawlLoadsTheWantedBranchFirst(t *testing.T) {
+	api := &orderedAPI{tree: map[int64][]autodb.Section{
+		0: {{ID: 1, Name: "Внутренняя отделка", HasChildren: true}, {ID: 2, Name: "тормозная система", HasChildren: true}},
+		1: {{ID: 11, Name: "Ручка двери"}},
+		2: {{ID: 21, Name: "Тормозные колодки"}, {ID: 22, Name: "Тормозной диск"}},
+	}}
+	store := &memStore{parts: map[int64][]Part{}}
+	c := New(api, store, Config{Parallel: 1}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	require.NoError(t, c.Crawl(context.Background(), 18537))
+	assert.Equal(t, []string{"tree 0", "tree 2", "parts 21", "parts 22", "tree 1", "parts 11"}, api.calls,
+		"the brakes are walked and loaded before the door handles are even looked for")
+	assert.Equal(t, [3]int{3, 3, 3}, store.progress, "every section counted at the end")
+}
+
+func TestCrawlFailsWithoutTheRoot(t *testing.T) {
+	api := &orderedAPI{fail: map[int64]bool{0: true}}
+	c := New(api, &memStore{parts: map[int64][]Part{}}, Config{Parallel: 2}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	require.ErrorIs(t, c.Crawl(context.Background(), 18537), autodb.ErrIPNotAllowed, "no tree, no crawl")
 }
