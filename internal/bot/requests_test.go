@@ -213,3 +213,22 @@ func TestPartRequestFromAPhotoCard(t *testing.T) {
 	}
 	assert.Contains(t, toBuyer.text, "Запит №1 прийнято", "the buyer is told in a new message")
 }
+
+// A private chat does not always open the reply by itself: "1450 3" sent
+// as a plain message still prices the request asked about last.
+func TestQuoteWithoutReplying(t *testing.T) {
+	b, reqs := withRequests()
+	ctx := context.Background()
+	b.Handle(ctx, press(encode(actRequestQty, 31, 1)))
+	b.Handle(ctx, pressIn(adminChat, encode(actRequestFound, 1)))
+
+	b.Handle(ctx, say(adminChat, "привіт"))
+	assert.Equal(t, domain.RequestNew, reqs.byID[1].Status, "text that is no price is not taken for one")
+
+	b.Handle(ctx, say(adminChat, "1450 3"))
+	assert.Equal(t, domain.RequestQuoted, reqs.byID[1].Status, "priced without a reply")
+	assert.Contains(t, b.tg.last("sendMessage").text, "надіслано покупцю")
+
+	b.Handle(ctx, say(adminChat, "1300 2"))
+	assert.Equal(t, domain.UAH(1450), reqs.byID[1].Price, "the wait ends with the price: a later number is not a second quote")
+}

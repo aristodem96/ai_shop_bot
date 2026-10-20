@@ -120,8 +120,9 @@ type Bot struct {
 	catalogue CatalogueProgress // nil: no progress shown
 
 	// requests and parts are nil until UseRequests is called.
-	requests PartRequests
-	parts    CatalogParts
+	requests  PartRequests
+	quoteWait *awaitedQuotes
+	parts     CatalogParts
 
 	// dialogStore keeps the managers' dialogs across restarts; nil keeps
 	// them in memory. Set by KeepDialogs, before the Use calls.

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
@@ -33,6 +34,50 @@ type CatalogParts interface {
 // paid through the usual checkout.
 func (b *Bot) UseRequests(r PartRequests, parts CatalogParts) {
 	b.requests, b.parts = r, parts
+	b.quoteWait = &awaitedQuotes{store: b.dialogs("dialog:quote:", quoteWaitTTL), mem: map[int64]int64{}}
+}
+
+// quoteWaitTTL is how long the managers' chat waits for a price asked for.
+const quoteWaitTTL = 24 * time.Hour
+
+// awaitedQuotes remembers, per chat, the request whose price a manager was
+// asked for, so a plain "1450 3" -- not sent as a reply, which a private
+// chat does not always open by itself -- still finds its request.
+type awaitedQuotes struct {
+	store Sessions // nil keeps them in memory only
+	mu    sync.Mutex
+	mem   map[int64]int64
+}
+
+func (a *awaitedQuotes) set(ctx context.Context, chat, id int64) {
+	a.mu.Lock()
+	a.mem[chat] = id
+	a.mu.Unlock()
+	if a.store != nil {
+		_ = a.store.Save(ctx, chat, id)
+	}
+}
+
+func (a *awaitedQuotes) get(ctx context.Context, chat int64) (int64, bool) {
+	if a.store != nil {
+		var id int64
+		if ok, err := a.store.Load(ctx, chat, &id); err == nil && ok {
+			return id, true
+		}
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	id, ok := a.mem[chat]
+	return id, ok
+}
+
+func (a *awaitedQuotes) clear(ctx context.Context, chat int64) {
+	a.mu.Lock()
+	delete(a.mem, chat)
+	a.mu.Unlock()
+	if a.store != nil {
+		_ = a.store.Delete(ctx, chat)
+	}
 }
 
 // requestQtys are the quantities a buyer picks from: one part, a pair for
@@ -115,6 +160,7 @@ func (b *Bot) askQuote(ctx context.Context, cc callbackCtx, id int64) error {
 	if err := b.requests.SetAdminMessage(ctx, id, cc.msg); err != nil {
 		return err
 	}
+	b.quoteWait.set(ctx, cc.chat, id)
 	return b.tg.SendMessage(ctx, cc.chat, fmt.Sprintf(msgAskQuote, id, req.Qty),
 		&telegram.ForceReply{ForceReply: true, Placeholder: "1450 3"})
 }
@@ -148,20 +194,29 @@ func parseQuote(s string) (domain.Money, int, bool) {
 // handleQuoteReply takes a manager's answer to askQuote. It reports whether
 // the message was one.
 func (b *Bot) handleQuoteReply(ctx context.Context, m *telegram.Message) bool {
-	if m.ReplyToMessage == nil {
-		return false
-	}
-	match := quoteFor.FindStringSubmatch(m.ReplyToMessage.Text)
-	if match == nil {
-		return false
-	}
-	id, _ := strconv.ParseInt(match[1], 10, 64)
 	chat := m.Chat.ID
+	var id int64
+	if m.ReplyToMessage != nil {
+		if match := quoteFor.FindStringSubmatch(m.ReplyToMessage.Text); match != nil {
+			id, _ = strconv.ParseInt(match[1], 10, 64)
+		}
+	}
 	price, days, ok := parseQuote(m.Text)
+	if id == 0 {
+		// Not a reply: the price asked for last, if this reads as one.
+		// Anything else is not for us -- in the owner's private chat it is
+		// most likely a question to the consultant.
+		waiting, found := b.quoteWait.get(ctx, chat)
+		if !found || !ok {
+			return false
+		}
+		id = waiting
+	}
 	if !ok {
 		b.send(ctx, chat, fmt.Sprintf(msgBadQuote, id), &telegram.ForceReply{ForceReply: true, Placeholder: "1450 3"})
 		return true
 	}
+	b.quoteWait.clear(ctx, chat)
 	req, err := b.requests.Quote(ctx, id, price, days, domain.QuoteTTL)
 	switch {
 	case errors.Is(err, domain.ErrBadTransition), errors.Is(err, domain.ErrNotFound):
