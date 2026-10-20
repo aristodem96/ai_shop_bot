@@ -46,8 +46,21 @@ Everything runs in Docker: the bot, PostgreSQL, Redis, and Caddy as the
 TLS-terminating reverse proxy. Caddy obtains and renews the certificate on its
 own. The only things installed on the host are Docker and a firewall rule.
 
-**You need:** a server with a public IP (1 vCPU / 1 GB RAM is plenty), a domain
-you control, and SSH access as a non-root user with `sudo`.
+**You need:** a server with a public IP (1–2 vCPU, 2 GB RAM), a domain you
+control, and SSH access as a non-root user with `sudo`.
+
+**Check the disk before you pay for a month.** The database, a price list
+import and a car's catalogue all write a lot, and a cheap VPS whose storage
+is throttled makes the bot hang, not just slow down. A plain SSD writes
+100 MB/s and more:
+
+```bash
+dd if=/dev/zero of=/root/disktest bs=1M count=64 oflag=direct status=progress; rm -f /root/disktest
+```
+
+If this takes more than a second or two (a few MB/s), ask the host to move
+the server or pick another; `iostat -x 1` showing `w_await` in the tens or
+hundreds of milliseconds, or `hung_task` warnings in `dmesg`, say the same.
 
 ### 1. Point the domain at the server
 
@@ -101,6 +114,14 @@ managers' chat), start the stack, send `/id` to the bot from that chat (a
 private chat or a managers' group; in a group, add the bot first), put the
 number in `.env`, and run `docker compose up -d` again.
 
+**A managers' group needs the bot as an administrator.** In a group a bot
+sees only commands and replies to its own messages unless it is an admin,
+so price lists sent there and a price typed without "Reply" would never
+reach it. Make it an admin of the group (no rights beyond the default are
+needed), or turn its privacy mode off in @BotFather (`/setprivacy` →
+Disable). Everyone in that group can use the managers' commands, so add
+managers only.
+
 `AUTODB_USER` and `AUTODB_PASSWORD` turn on the Auto-DB parts catalogue. The
 account lets requests in from one IP address only: put the server's address
 in the Auto-DB dashboard first, or every call is refused (the log says
@@ -150,7 +171,9 @@ deploy does not cut a buyer off mid-checkout.
 Every `docker compose up --build` leaves the previous image and more build
 cache behind: gigabytes after a few weeks of updates. `docker system df`
 shows it, and `make prune` frees it without touching the database or the
-certificates.
+certificates. `make reset` frees it too, but also deletes the database:
+use it only to start the shop from scratch, never to fix a build, which it
+only makes slower by clearing the cache.
 
 Never run `docker compose down -v` or `docker volume prune` here: besides
 the database they delete Caddy's certificate, and Let's Encrypt issues one
