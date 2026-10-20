@@ -560,6 +560,8 @@ var catalogNotes = map[string]string{
 	"pending": "the catalogue of this car is being loaded and takes a few minutes; catalog_parts may be incomplete, the buyer can ask again shortly",
 	"loading": "the catalogue of this car is being loaded and takes a few minutes; catalog_parts may be incomplete. Show the catalog_parts that match. If none do, do not say the part is unavailable or that there is none: say it is not found yet because the catalogue is still loading. The bot will message the buyer by itself as soon as it is loaded, so tell them that, not to ask again later",
 	"failed":  "the catalogue of this car could not be loaded right now; catalog_parts may be incomplete",
+	"empty": "the manufacturers' catalogue has no parts for this exact modification of the car -- its data is incomplete for some newer ones. " +
+		"Say so plainly, do not say it is loading or to ask again later, and offer to call a manager (call_manager), who will pick the part by hand",
 }
 
 // maxCatalogShown and maxCatalogKinds bound the catalogue's answer to one
@@ -743,7 +745,7 @@ func (tb *toolbox) addCatalogParts(ctx context.Context, userID int64, out map[st
 		return err
 	}
 	switch {
-	case state == "done":
+	case state == "done", state == "empty":
 	case tb.loader == nil:
 		if state != "failed" {
 			state = "pending"

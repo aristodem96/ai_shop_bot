@@ -167,13 +167,12 @@ func LoadBot() (*Bot, error) {
 			URL:      envString("AUTODB_API_URL", "https://auto-db.pro/api/v1/"),
 			User:     envString("AUTODB_USER", ""),
 			Password: envString("AUTODB_PASSWORD", ""),
-			// The plan's limits are not published, and an overloaded API
-			// answers with empty lists rather than errors: ten calls in
-			// flight once brought a car back with no parts. These are what
-			// it was seen to bear; raise them with care.
-			RPS:           envInt("AUTODB_RPS", 6, collect),
-			BackgroundRPS: envInt("AUTODB_BACKGROUND_RPS", 4, collect),
-			CrawlParallel: envInt("AUTODB_CRAWL_PARALLEL", 4, collect),
+			// The plan's limits are not published; twelve calls at once were
+			// answered in full. Should the API answer 429 or 5xx, every call
+			// backs off and retries, and these can be lowered here.
+			RPS:           envInt("AUTODB_RPS", 10, collect),
+			BackgroundRPS: envInt("AUTODB_BACKGROUND_RPS", 6, collect),
+			CrawlParallel: envInt("AUTODB_CRAWL_PARALLEL", 10, collect),
 		},
 		ImportDir: envString("IMPORT_DIR", filepath.Join(os.TempDir(), "ai_shop_bot-imports")),
 		Redis: Redis{

@@ -229,6 +229,25 @@ func TestSearchDoesNotReloadALoadedCatalogue(t *testing.T) {
 	assert.NotContains(t, result(model, 1).Content, "catalog_note")
 }
 
+func TestSearchSaysAnEmptyCatalogueIsEmpty(t *testing.T) {
+	model := llm.NewFake(
+		llm.Call("c1", "search_parts", map[string]any{"vehicle_id": octavia.ID, "query": "диск"}),
+		llm.Say("Для вашої модифікації в каталозі немає деталей."),
+	)
+	f := newAgent(t, model)
+	f.agent.UseOrderCatalog(&fakeOrderCatalog{state: "empty"})
+	loader := &fakeLoader{}
+	f.agent.UseCatalogLoader(loader)
+	_, err := f.agent.Reply(context.Background(), 7, 7, "гальмівні диски")
+	require.NoError(t, err)
+	assert.Empty(t, loader.watched, "nothing to wait for: the buyer is not promised a message")
+	assert.Empty(t, loader.fetched, "asking again brings the same nothing")
+	res := result(model, 1).Content
+	assert.Contains(t, res, "has no parts for this exact modification")
+	assert.Contains(t, res, "call_manager")
+	assert.NotContains(t, res, "The bot will message the buyer")
+}
+
 func TestSearchWithoutACarOffersTheSavedCarsParts(t *testing.T) {
 	model := llm.NewFake(
 		llm.Call("c1", "search_parts", map[string]any{"category": "brake-discs"}),

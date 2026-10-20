@@ -270,6 +270,10 @@ func (a *app) wireShop() {
 					slog.Int64("vehicle_id", w.VehicleID), slog.Any("error", err))
 				return
 			}
+			if w.Empty {
+				a.bot.CatalogueEmpty(ctx, w.UserID, v)
+				return
+			}
 			a.bot.CatalogueReady(ctx, w.UserID, v)
 		})
 		// Photos, carmakers' numbers and analogues: for a card as it is

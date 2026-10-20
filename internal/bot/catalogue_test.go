@@ -22,6 +22,29 @@ func TestCatalogueReady(t *testing.T) {
 	assert.Contains(t, m.text, "завантажено")
 }
 
+func TestCatalogueEmpty(t *testing.T) {
+	b := newTestBot()
+	b.CatalogueEmpty(context.Background(), chat, &octavia)
+	m := b.tg.last("sendMessage")
+	assert.Equal(t, chat, m.chat)
+	assert.Contains(t, m.text, "немає деталей")
+	assert.Contains(t, m.text, "менеджеру", "the buyer is shown a way on")
+	assert.NotContains(t, m.text, "завантажено")
+}
+
+func TestEmptyCatalogueIsSaidPlainly(t *testing.T) {
+	empty := &domain.CatalogProgress{State: "empty"}
+	text, kb := categoriesView(nil, &octavia, empty)
+	assert.Contains(t, text, msgCatalogueEmpty)
+	assert.NotContains(t, text, "я напишу вам", "nothing is coming")
+	assert.NotContains(t, callbacks(kb), encode(actMenuRefresh), "nothing to refresh")
+
+	text, kb = carView(&octavia, empty)
+	assert.Contains(t, text, msgCatalogueEmpty)
+	assert.NotContains(t, text, "завантажується")
+	assert.NotContains(t, callbacks(kb), encode(actCarScreen))
+}
+
 type fakeProgress struct{ p *domain.CatalogProgress }
 
 func (f fakeProgress) Progress(context.Context, int64) (*domain.CatalogProgress, error) {

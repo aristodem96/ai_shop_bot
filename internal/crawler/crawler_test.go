@@ -309,8 +309,8 @@ func TestCrawlFailsWithoutTheRoot(t *testing.T) {
 	require.ErrorIs(t, c.Crawl(context.Background(), 18537), autodb.ErrIPNotAllowed, "no tree, no crawl")
 }
 
-// emptyAPI has a wide tree whose every section comes back empty, as an
-// overloaded catalogue answers.
+// emptyAPI has a wide tree whose every section comes back empty, as the
+// catalogue answers for newer modifications.
 type emptyAPI struct{}
 
 func (emptyAPI) Sections(_ context.Context, _ autodb.Group, _ int64, parent int64) ([]autodb.Section, error) {
@@ -331,5 +331,20 @@ func (emptyAPI) SectionParts(context.Context, autodb.Group, int64, int64) ([]aut
 func TestCrawlWithNoPartsAtAllFails(t *testing.T) {
 	c := New(emptyAPI{}, &memStore{parts: map[int64][]Part{}}, Config{Parallel: 4}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	err := c.Crawl(context.Background(), 18537)
-	require.ErrorIs(t, err, ErrNoParts, "twenty sections and not one part is the catalogue failing, not an empty car")
+	require.ErrorIs(t, err, ErrNoParts, "twenty sections and not one part: the catalogue has nothing for the car")
+}
+
+func TestNextTellsThoseWaitingThatTheCatalogueIsEmpty(t *testing.T) {
+	store := &memStore{parts: map[int64][]Part{}}
+	c := New(emptyAPI{}, store, Config{Parallel: 4}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	store.queue = []int64{18537}
+	store.waiters = map[int64][]Waiter{18537: {{UserID: 5, VehicleID: 40}}}
+	var told []Waiter
+	c.OnReady(func(_ context.Context, w Waiter) { told = append(told, w) })
+	c.OnDone(func(int64) { t.Fatal("nothing loaded: nothing follows") })
+
+	_, err := c.Next(context.Background())
+	require.NoError(t, err)
+	require.ErrorIs(t, store.finished, ErrNoParts, "ended as empty, not done")
+	assert.Equal(t, []Waiter{{UserID: 5, VehicleID: 40, Empty: true}}, told, "told there is nothing, not left waiting")
 }

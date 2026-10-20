@@ -185,3 +185,9 @@ type CatalogProgress struct {
 
 // Loaded reports whether the whole catalogue is in.
 func (p CatalogProgress) Loaded() bool { return p.State == "done" }
+
+// Empty reports whether the catalogue has no parts for the car at all.
+func (p CatalogProgress) Empty() bool { return p.State == "empty" }
+
+// Loading reports whether the catalogue is still on its way.
+func (p CatalogProgress) Loading() bool { return !p.Loaded() && !p.Empty() }

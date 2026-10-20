@@ -26,14 +26,14 @@ func NewCrawlRepository(pool *pgxpool.Pool) *CrawlRepository {
 }
 
 // Enqueue queues a vehicle's modification unless it is queued, running, or
-// done within maxAge. A failed crawl is queued again.
+// done or found empty within maxAge. A failed crawl is queued again.
 func (r *CrawlRepository) Enqueue(ctx context.Context, vehicleID int64, maxAge time.Duration) error {
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO autodb_crawls (mod_id, status)
 		SELECT autodb_mod_id, 'queued' FROM vehicles WHERE id = $1 AND autodb_mod_id IS NOT NULL
 		ON CONFLICT (mod_id) DO UPDATE SET status = 'queued', queued_at = now(), error = ''
 		WHERE autodb_crawls.status = 'failed'
-		   OR (autodb_crawls.status = 'done' AND autodb_crawls.finished_at < now() - make_interval(secs => $2))`,
+		   OR (autodb_crawls.status IN ('done', 'empty') AND autodb_crawls.finished_at < now() - make_interval(secs => $2))`,
 		vehicleID, maxAge.Seconds())
 	if err != nil {
 		return fmt.Errorf("postgres: enqueue crawl of vehicle %d: %w", vehicleID, err)
@@ -87,9 +87,8 @@ func (r *CrawlRepository) SaveParts(ctx context.Context, modID, sectionID int64,
 			ON CONFLICT DO NOTHING`, modID, sectionID, sup, art, num, brand, bkey, name); err != nil {
 			return fmt.Errorf("postgres: save section %d of %d: %w", sectionID, modID, err)
 		}
-		// An empty section is not marked stored: the catalogue answers an
-		// overloaded caller with empty lists, and a section marked stored
-		// would not be asked again on the next crawl.
+		// An empty section is not marked stored, so the next crawl asks it
+		// again: the catalogue may have filled it since.
 		if len(parts) > 0 {
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO autodb_mod_sections (mod_id, section_id) VALUES ($1, $2)
@@ -233,7 +232,7 @@ func (r *CrawlRepository) Watch(ctx context.Context, userID, vehicleID int64) er
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO autodb_crawl_waiters (mod_id, user_id, vehicle_id)
 		SELECT c.mod_id, $1, v.id FROM vehicles v JOIN autodb_crawls c ON c.mod_id = v.autodb_mod_id
-		WHERE v.id = $2 AND c.status <> 'done'
+		WHERE v.id = $2 AND c.status NOT IN ('done', 'empty')
 		FOR SHARE OF c
 		ON CONFLICT (mod_id, user_id) DO UPDATE SET vehicle_id = excluded.vehicle_id`, userID, vehicleID)
 	if err != nil {
@@ -249,7 +248,11 @@ func (r *CrawlRepository) Waiters(ctx context.Context, modID int64) ([]crawler.W
 	if err != nil {
 		return nil, fmt.Errorf("postgres: waiters of crawl %d: %w", modID, err)
 	}
-	ws, err := pgx.CollectRows(rows, pgx.RowToStructByPos[crawler.Waiter])
+	// Whether the catalogue came back empty is the crawler's to say.
+	ws, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (crawler.Waiter, error) {
+		var w crawler.Waiter
+		return w, row.Scan(&w.UserID, &w.VehicleID)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("postgres: waiters of crawl %d: %w", modID, err)
 	}
@@ -272,11 +275,16 @@ func (r *CrawlRepository) RetryFailed(ctx context.Context, after, keep time.Dura
 	return nil
 }
 
-// Finish ends a crawl, done or failed.
+// Finish ends a crawl: done, failed, or empty when the catalogue has no
+// parts for the car.
 func (r *CrawlRepository) Finish(ctx context.Context, modID int64, failure error) error {
 	status, msg := "done", ""
 	if failure != nil {
 		status, msg = "failed", failure.Error()
+		if errors.Is(failure, crawler.ErrNoParts) {
+			// The catalogue has no parts for this car: an answer, kept.
+			status = "empty"
+		}
 	}
 	if _, err := r.pool.Exec(ctx, `
 		UPDATE autodb_crawls SET status = $2, error = $3, finished_at = now() WHERE mod_id = $1`,

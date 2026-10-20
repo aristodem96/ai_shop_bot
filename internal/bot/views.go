@@ -41,12 +41,14 @@ func categoriesView(menu []service.CategoryEntry, car *domain.Vehicle, prog *dom
 	text := "<b>Каталог</b>\n"
 	if car != nil {
 		text += "🚗 Для: " + esc(car.Label()) + "\n"
-		if line := progressLine(prog); line != "" && (!prog.Loaded() || prog.Filed < prog.Parts) {
+		if line := progressLine(prog); line != "" && (!prog.Loaded() || prog.Filed < prog.Parts) && !prog.Empty() {
 			text += line + "\n"
 		}
 	}
 	switch {
-	case len(menu) == 0 && prog != nil && !prog.Loaded():
+	case len(menu) == 0 && prog != nil && prog.Empty():
+		text += "\n" + msgCatalogueEmpty
+	case len(menu) == 0 && prog != nil && prog.Loading():
 		text += "\nКаталог деталей для цього авто завантажується — зазвичай кілька хвилин. Деталі з'являться тут, а я напишу вам, щойно все буде готово."
 	case len(menu) == 0:
 		text += "\nДля цього авто в каталозі поки нічого немає. Напишіть, яку деталь шукаєте, — консультант пошукає."
@@ -60,7 +62,7 @@ func categoriesView(menu []service.CategoryEntry, car *domain.Vehicle, prog *dom
 	for _, e := range menu {
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(entryLabel(e), actCategory, e.Category.ID, 0)})
 	}
-	if prog != nil && (!prog.Loaded() || prog.Filed < prog.Parts) {
+	if prog != nil && (prog.Loading() || (prog.Loaded() && prog.Filed < prog.Parts)) {
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(btnRefresh, actMenuRefresh)})
 	}
 	kb.Rows = append(kb.Rows, []telegram.InlineButton{button(btnCart, actCart)})
@@ -95,6 +97,8 @@ func progressLine(p *domain.CatalogProgress) string {
 			p.SectionsDone*100/p.SectionsTotal, num(p.Parts))
 	case "failed":
 		return "⚠️ Каталог деталей поки не завантажився, пробую ще раз."
+	case "empty":
+		return "⚠️ " + msgCatalogueEmpty
 	}
 	return "⏳ Каталог деталей стоїть у черзі на завантаження."
 }
@@ -413,7 +417,7 @@ func carView(car *domain.Vehicle, prog *domain.CatalogProgress) (string, *telegr
 		{button("🛍 Каталог для цього авто", actCategories)},
 		{button("🔧 Комплект для ТО", actKit)},
 	}}
-	if prog != nil && (!prog.Loaded() || prog.Filed < prog.Parts) {
+	if prog != nil && (prog.Loading() || (prog.Loaded() && prog.Filed < prog.Parts)) {
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(btnRefresh, actCarScreen)})
 	}
 	kb.Rows = append(kb.Rows, []telegram.InlineButton{button("✖️ Забути авто", actForgetCar)})

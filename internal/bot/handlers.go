@@ -41,7 +41,7 @@ func (b *Bot) mainMenu() *telegram.ReplyKeyboard {
 // Not while the car's catalogue loads -- the consultant would find little
 // and say so -- and not without the consultant.
 func (b *Bot) typeHint(prog *domain.CatalogProgress) string {
-	if b.consultant == nil || (prog != nil && !prog.Loaded()) {
+	if b.consultant == nil || (prog != nil && prog.Loading()) {
 		return ""
 	}
 	return "\n\n" + msgTypeHint

@@ -42,7 +42,7 @@ type Part struct {
 
 // Status is where a vehicle's crawl is.
 type Status struct {
-	State          string // "", "queued", "running", "done" or "failed"
+	State          string // "", "queued", "running", "done", "failed" or "empty"
 	SectionsTotal  int
 	SectionsDone   int
 	Parts          int
@@ -57,6 +57,8 @@ func (s Status) Done() bool { return s.State == "done" }
 type Waiter struct {
 	UserID    int64
 	VehicleID int64
+	// Empty: the catalogue turned out to have no parts for the car.
+	Empty bool
 }
 
 // Store is the queue and the cache.
@@ -232,15 +234,20 @@ func (c *Crawler) Next(ctx context.Context) (bool, error) {
 	}
 	c.log.InfoContext(ctx, "crawl finished", slog.Int64("mod_id", modID),
 		slog.Duration("took", time.Since(start).Round(time.Second)), slog.Any("error", err))
-	if err == nil {
-		c.ready(ctx, modID)
+	switch {
+	case err == nil:
+		c.ready(ctx, modID, false)
+	case errors.Is(err, ErrNoParts):
+		// Those waiting are told there is nothing, not left to wait.
+		c.ready(ctx, modID, true)
 	}
 	return true, nil
 }
 
-// ready runs what follows a crawl that stored its parts.
-func (c *Crawler) ready(ctx context.Context, modID int64) {
-	if c.onDone != nil {
+// ready runs what follows a crawl that ended: one that stored its parts,
+// or one the catalogue had none for.
+func (c *Crawler) ready(ctx context.Context, modID int64, empty bool) {
+	if c.onDone != nil && !empty {
 		c.onDone(modID)
 	}
 	if c.onReady == nil {
@@ -252,6 +259,7 @@ func (c *Crawler) ready(ctx context.Context, modID int64) {
 		return
 	}
 	for _, w := range waiters {
+		w.Empty = empty
 		c.onReady(ctx, w)
 	}
 }
@@ -312,21 +320,22 @@ func (c *Crawler) Crawl(ctx context.Context, modID int64) error {
 	if w.failed*4 > max(len(w.leaves), 1) {
 		return fmt.Errorf("crawler: %d of %d sections failed", w.failed, len(w.leaves))
 	}
-	// A car whose every section came back empty has not been read: the
-	// catalogue answers an overloaded caller with empty lists, not errors.
-	// Called done, it would sit empty for a month; failed, it is tried again.
+	// A car whose every section came back empty: the catalogue has no parts
+	// for this modification. Said so, not called done with nothing in it.
 	if w.parts == 0 && len(w.leaves) >= minSectionsForParts {
 		return fmt.Errorf("%w: %d sections, no parts", ErrNoParts, len(w.leaves))
 	}
 	return nil
 }
 
-// ErrNoParts means a crawl found sections but not one part in them.
+// ErrNoParts means a crawl found sections but not one part in them: for
+// newer modifications the catalogue has the tree and no parts. It ends the
+// crawl as empty, not failed -- asking again soon brings the same nothing.
 var ErrNoParts = errors.New("crawler: the catalogue returned no parts")
 
 // minSectionsForParts is how many sections a car must have for none of
-// them holding a part to be taken as the catalogue failing: a real car has
-// hundreds, and parts in most.
+// them holding a part to be taken as the catalogue having nothing for it:
+// a car it covers has hundreds, and parts in most.
 const minSectionsForParts = 20
 
 // crawlTask is a section to ask about: its subsections, or, for a leaf,

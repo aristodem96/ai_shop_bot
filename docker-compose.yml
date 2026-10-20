@@ -82,9 +82,9 @@ services:
       AUTODB_API_URL: ${AUTODB_API_URL:-https://auto-db.pro/api/v1/}
       AUTODB_USER: ${AUTODB_USER:-}
       AUTODB_PASSWORD: ${AUTODB_PASSWORD:-}
-      AUTODB_RPS: ${AUTODB_RPS:-6}
-      AUTODB_BACKGROUND_RPS: ${AUTODB_BACKGROUND_RPS:-4}
-      AUTODB_CRAWL_PARALLEL: ${AUTODB_CRAWL_PARALLEL:-4}
+      AUTODB_RPS: ${AUTODB_RPS:-10}
+      AUTODB_BACKGROUND_RPS: ${AUTODB_BACKGROUND_RPS:-6}
+      AUTODB_CRAWL_PARALLEL: ${AUTODB_CRAWL_PARALLEL:-10}
       # Uploaded price lists wait here for "Apply", across restarts.
       IMPORT_DIR: /imports
       LOG_LEVEL: ${LOG_LEVEL:-info}

@@ -67,7 +67,8 @@ type OrderCatalog interface {
 	Brands(ctx context.Context, f service.SearchFilter, limit int) ([]domain.PartKind, error)
 	CatalogPart(ctx context.Context, id int64) (*domain.CatalogPart, error)
 	// CrawlState is "" for a car outside the catalogue, "none", "queued" or
-	// "running" while its parts are still loading, "done" or "failed".
+	// "running" while its parts are still loading, "done", "failed", or
+	// "empty" when the catalogue has no parts for the car.
 	CrawlState(ctx context.Context, vehicleID int64) (string, error)
 }
 

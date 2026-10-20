@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -171,6 +172,48 @@ func TestCrawlWaiters(t *testing.T) {
 	require.NoError(t, repo.RetryFailed(ctx, 0, 7*24*time.Hour))
 	_, ok, _ = repo.Claim(ctx)
 	assert.False(t, ok)
+}
+
+func TestEmptyCrawl(t *testing.T) {
+	skipShort(t)
+	ctx := context.Background()
+	repo := NewCrawlRepository(testPool)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(ctx, `DELETE FROM autodb_crawls`)
+		_, _ = testPool.Exec(ctx, `DELETE FROM vehicles WHERE autodb_mod_id IS NOT NULL`)
+	})
+	vehicleID, err := NewDirectoryRepository(testPool).UpsertVehicle(ctx,
+		directory.ToVehicle("AUDI", autodb.Model{Name: "A6 C7 (4G2, 4GC)"}, autodb.Modification{ID: 112279, Name: "AUDI A6 C7 2.0 TDI",
+			Attrs: map[string][]string{"ConstructionInterval": {"11.2014 - 09.2018"}}}), 112279, 0)
+	require.NoError(t, err)
+
+	require.NoError(t, repo.Enqueue(ctx, vehicleID, time.Hour))
+	require.NoError(t, repo.Watch(ctx, 5, vehicleID))
+	modID, ok, err := repo.Claim(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NoError(t, repo.Finish(ctx, modID, fmt.Errorf("%w: 300 sections, no parts", crawler.ErrNoParts)))
+
+	s, err := repo.Status(ctx, vehicleID)
+	require.NoError(t, err)
+	assert.Equal(t, "empty", s.State)
+
+	ws, err := repo.Waiters(ctx, modID)
+	require.NoError(t, err)
+	assert.Equal(t, []crawler.Waiter{{UserID: 5, VehicleID: vehicleID}}, ws, "those waiting are told")
+
+	require.NoError(t, repo.Watch(ctx, 6, vehicleID), "empty: nothing to wait for")
+	ws, _ = repo.Waiters(ctx, modID)
+	assert.Empty(t, ws)
+
+	require.NoError(t, repo.Enqueue(ctx, vehicleID, time.Hour))
+	require.NoError(t, repo.RetryFailed(ctx, 0, 24*time.Hour))
+	_, ok, _ = repo.Claim(ctx)
+	assert.False(t, ok, "an empty catalogue is an answer, not asked again soon")
+
+	require.NoError(t, repo.Enqueue(ctx, vehicleID, 0))
+	_, ok, _ = repo.Claim(ctx)
+	assert.True(t, ok, "asked again once it is old")
 }
 
 func TestSectionsForASearch(t *testing.T) {

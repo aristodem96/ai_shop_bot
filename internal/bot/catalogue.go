@@ -53,8 +53,17 @@ func (b *Bot) progressToast(ctx context.Context, user int64) string {
 		return "⏳ Ще завантажується. Я напишу, коли буде готово."
 	case p.State == "failed":
 		return "⚠️ Не вдалося завантажити, пробую ще раз"
+	case p.Empty():
+		return "У каталозі виробника для цієї модифікації немає деталей"
 	}
 	return "⏳ Каталог у черзі на завантаження. Я напишу, коли буде готово."
+}
+
+// CatalogueEmpty tells a buyer who waited that the catalogue has no parts
+// for their car, rather than leaving them to wait or find an empty menu.
+func (b *Bot) CatalogueEmpty(ctx context.Context, userID int64, v *domain.Vehicle) {
+	b.send(ctx, userID, "⚠️ Для <b>"+esc(v.Label())+"</b> у каталозі виробника поки немає деталей: дані для цієї модифікації неповні.\n\n"+
+		"Напишіть, яка деталь потрібна, — я передам менеджеру, і він підбере її вручну.", nil)
 }
 
 // CatalogueReady tells a buyer that the parts catalogue of a car they
