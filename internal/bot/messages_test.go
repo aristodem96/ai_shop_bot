@@ -25,3 +25,13 @@ func TestDescriptionsFitTelegram(t *testing.T) {
 	assert.LessOrEqual(t, len(utf16.Encode([]rune(ShortDescription))), 120)
 	assert.LessOrEqual(t, len(utf16.Encode([]rune(msgPlaceholder))), 64)
 }
+
+// The managers' help is one message: Telegram takes 4096 characters.
+func TestAdminHelpFitsOneMessage(t *testing.T) {
+	assert.LessOrEqual(t, len(utf16.Encode([]rune(msgAdminHelp))), 4096)
+	for _, c := range adminCommands {
+		if c.Command != "admin" {
+			assert.Contains(t, msgAdminHelp, "/"+c.Command, "every managers' command is explained")
+		}
+	}
+}
