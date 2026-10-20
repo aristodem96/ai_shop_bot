@@ -129,6 +129,15 @@ func TestBackgroundKeepsToItsShare(t *testing.T) {
 		_, err := c.Search(Background(ctx), "x")
 		require.NoError(t, err)
 	}
+	assert.Less(t, time.Since(start), 150*time.Millisecond, "no buyer asking: the background takes the whole rate")
+
+	_, err := c.Search(ctx, "x") // a buyer
+	require.NoError(t, err)
+	start = time.Now()
+	for range 5 {
+		_, err := c.Search(Background(ctx), "x")
+		require.NoError(t, err)
+	}
 	bg := time.Since(start)
 
 	start = time.Now()

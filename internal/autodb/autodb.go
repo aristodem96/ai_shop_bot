@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -61,10 +62,18 @@ type Client struct {
 	user     string
 	password string
 	http     *http.Client
-	// all paces every call; background paces background calls on top.
+	// all paces every call; background paces background calls on top
+	// while buyers are asking.
 	all        *rate.Limiter
 	background *rate.Limiter
+	// lastBuyer is when a call not marked Background last came, in Unix
+	// nanoseconds.
+	lastBuyer atomic.Int64
 }
+
+// buyerQuiet is how long after a buyer's call background work keeps to its
+// share. Past it nobody is waiting, and the whole rate is the background's.
+const buyerQuiet = 3 * time.Second
 
 // New returns a Client.
 func New(cfg Config) *Client {
@@ -89,18 +98,21 @@ func New(cfg Config) *Client {
 type backgroundKey struct{}
 
 // Background marks calls made under ctx as background work -- a crawl, an
-// enrichment pass -- which keeps to its smaller share of the rate.
+// enrichment pass -- which keeps to its smaller share of the rate while
+// buyers are asking, and takes the whole of it when they are not.
 func Background(ctx context.Context) context.Context {
 	return context.WithValue(ctx, backgroundKey{}, true)
 }
 
-// wait paces a call: a background one through its own limiter first, then
-// every call through the common one.
+// wait paces a call: a background one while buyers are asking through its
+// own limiter first, then every call through the common one.
 func (c *Client) wait(ctx context.Context) error {
 	if c.all == nil {
 		return nil
 	}
-	if bg, _ := ctx.Value(backgroundKey{}).(bool); bg {
+	if bg, _ := ctx.Value(backgroundKey{}).(bool); !bg {
+		c.lastBuyer.Store(time.Now().UnixNano())
+	} else if time.Since(time.Unix(0, c.lastBuyer.Load())) < buyerQuiet {
 		if err := c.background.Wait(ctx); err != nil {
 			return err
 		}
