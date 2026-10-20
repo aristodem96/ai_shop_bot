@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/aristodem96/ai_shop_bot/internal/agent"
+	"github.com/aristodem96/ai_shop_bot/internal/domain"
 	"github.com/aristodem96/ai_shop_bot/internal/llm"
 	"github.com/aristodem96/ai_shop_bot/internal/telegram"
 )
@@ -296,4 +297,34 @@ func TestNewcomersAreToldToWrite(t *testing.T) {
 	plain.Handle(ctx, text("/start"))
 	assert.Equal(t, msgWelcomeButtons, plain.tg.calls[0].text, "no consultant, no promise of one")
 	assert.Empty(t, plain.tg.calls[0].markup.(*telegram.ReplyKeyboard).Placeholder)
+}
+
+func TestAdviceButtonWhenThereIsAChoice(t *testing.T) {
+	pads := domain.Product{ID: 1, Name: "Колодки", Brand: "TRW", Price: domain.UAH(1650), Stock: 3}
+	other := domain.Product{ID: 2, Name: "Колодки", Brand: "Stal Pro", Price: domain.UAH(980), Stock: 2}
+	part := domain.CatalogPart{ID: 31, Name: "Колодки", Brand: "BREMBO", Number: "P 85 075"}
+
+	_, kb := consultantView("Ось.", []domain.Product{pads}, nil, false, false)
+	assert.NotContains(t, callbacks(kb), encode(actAdvise), "one brand: nothing to choose between")
+	_, kb = consultantView("Ось.", []domain.Product{pads, other}, nil, false, false)
+	assert.Contains(t, callbacks(kb), encode(actAdvise))
+	_, kb = consultantView("Ось.", []domain.Product{pads}, []domain.CatalogPart{part}, false, false)
+	assert.Contains(t, callbacks(kb), encode(actAdvise), "a part on order counts as a choice too")
+}
+
+func TestAdviceAsksTheConsultant(t *testing.T) {
+	c := &fakeConsultant{reply: &agent.Reply{Text: "TRW — середній клас, раджу їх."}}
+	b, tg := withConsultant(c, fakeLimiter{allow: true})
+
+	b.Handle(context.Background(), press(encode(actAdvise)))
+	assert.Equal(t, []string{msgAdviseRequest}, c.asked, "the buyer's question, asked for them")
+	assert.Contains(t, tg.last("sendMessage").text, "раджу")
+	answers := 0
+	for _, m := range tg.methods() {
+		if m == "answerCallbackQuery" {
+			answers++
+		}
+	}
+	assert.Equal(t, 1, answers, "the press is answered once")
+	assert.Equal(t, "answerCallbackQuery", tg.methods()[0], "and at once, before the model is asked")
 }

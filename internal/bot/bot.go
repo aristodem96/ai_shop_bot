@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
@@ -346,10 +347,35 @@ type callbackCtx struct {
 	// photo: the pressed message is a photo with a caption, which has no
 	// text to edit.
 	photo bool
+	// answer answers the press early, before slow work, at most once.
+	answer *callbackAnswer
+}
+
+// callbackAnswer answers a press once: early, from a handler about to wait
+// on the model, or at the end with the handler's toast.
+type callbackAnswer struct {
+	once sync.Once
+	send func(ctx context.Context, text string, alert bool)
+}
+
+// ack answers the press now with text: the spinner on the button stops and
+// the toast shows while the handler goes on.
+func (cc callbackCtx) ack(ctx context.Context, text string) {
+	if cc.answer != nil {
+		cc.answer.once.Do(func() { cc.answer.send(ctx, text, false) })
+	}
 }
 
 func (b *Bot) handleCallback(ctx context.Context, q *telegram.CallbackQuery) {
-	cc := callbackCtx{user: q.From.ID, chat: q.From.ID}
+	cc := callbackCtx{user: q.From.ID, chat: q.From.ID, answer: &callbackAnswer{
+		send: func(ctx context.Context, text string, alert bool) {
+			// Answered always, error or not: an unanswered callback leaves a
+			// spinner on the button until Telegram gives up on it.
+			if err := b.tg.AnswerCallbackQuery(ctx, q.ID, text, alert); err != nil {
+				b.log.WarnContext(ctx, "could not answer callback", slog.Any("error", err))
+			}
+		},
+	}}
 	if q.Message != nil {
 		cc.chat, cc.msg = q.Message.Chat.ID, q.Message.MessageID
 		cc.photo = len(q.Message.Photo) > 0
@@ -367,11 +393,8 @@ func (b *Bot) handleCallback(ctx context.Context, q *telegram.CallbackQuery) {
 		toast = b.explain(ctx, err, q.Data)
 	}
 
-	// Answered last and always, error or not: an unanswered callback leaves a
-	// spinner on the button for the user until Telegram gives up on it.
-	if err := b.tg.AnswerCallbackQuery(ctx, q.ID, toast, alert); err != nil {
-		b.log.WarnContext(ctx, "could not answer callback", slog.Any("error", err))
-	}
+	// Answered last unless a handler answered early.
+	cc.answer.once.Do(func() { cc.answer.send(ctx, toast, alert) })
 }
 
 // route runs a button's action and returns the toast to show.
@@ -485,6 +508,13 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 		return b.routeRequest(ctx, cc, cb)
 	case actForgetCar:
 		return "", b.forgetCar(ctx, cc)
+	case actAdvise:
+		if b.consultant == nil {
+			return "", errBadCallback
+		}
+		cc.ack(ctx, msgAdviseToast)
+		b.consult(ctx, cc.chat, cc.user, msgAdviseRequest)
+		return "", nil
 	case actCarScreen:
 		return b.progressToast(ctx, cc.user), b.editCar(ctx, cc)
 	case actMenuRefresh:

@@ -487,6 +487,9 @@ func consultantView(text string, products []domain.Product, parts []domain.Catal
 		html += "\n\n" + list
 	}
 	kb := &telegram.InlineKeyboard{Rows: rows}
+	if brands(products, parts) >= minBrandsToCompare {
+		kb.Rows = append(kb.Rows, []telegram.InlineButton{button(btnAdvise, actAdvise)})
+	}
 	if carSaved {
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{
 			button("🛍 Каталог для вашого авто", actCategories),
@@ -502,6 +505,26 @@ func consultantView(text string, products []domain.Product, parts []domain.Catal
 		return html, nil
 	}
 	return html, kb
+}
+
+// btnAdvise asks the consultant which of the brands it showed to take.
+const btnAdvise = "🤔 Порадити, що обрати"
+
+// minBrandsToCompare is how many brands a list needs for the advice button:
+// with one there is nothing to choose between.
+const minBrandsToCompare = 2
+
+// brands counts the different brands in a list.
+func brands(products []domain.Product, parts []domain.CatalogPart) int {
+	seen := map[string]bool{}
+	for _, p := range products {
+		seen[strings.ToUpper(p.Brand)] = true
+	}
+	for _, p := range parts {
+		seen[strings.ToUpper(p.Brand)] = true
+	}
+	delete(seen, "")
+	return len(seen)
 }
 
 func cartView(c *domain.Cart) (string, *telegram.InlineKeyboard) {

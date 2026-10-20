@@ -374,3 +374,17 @@ func TestDoesNotInventDeliveryTerms(t *testing.T) {
 
 	judge(t, "The reply does not state any specific delivery price or delivery time as a fact of this shop.", msg, reply.Text)
 }
+
+// "🤔 Порадити, що обрати" under a list asks the consultant this.
+const adviseRequest = "Порівняй варіанти, які ти щойно показав: чим відрізняються бренди, яка деталь краща, яка простіша, і що порадиш купити мені."
+
+func TestAdvisesBetweenBrands(t *testing.T) {
+	s := newShop(t)
+	s.setCar(t, "octavia-a7-14tsi")
+	first := s.say(t, "Покажи передні гальмівні колодки")
+	require.GreaterOrEqual(t, len(first.ProductIDs), 2, "a choice to advise on")
+
+	reply := s.say(t, adviseRequest)
+	judge(t, "The reply compares the brands of the brake pads shown, recommends one of them for a stated kind of buyer, "+
+		"and states no service life in kilometres, defect rate, test result or warranty term it could not know.", adviseRequest, reply.Text)
+}
