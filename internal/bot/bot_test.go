@@ -345,6 +345,26 @@ func TestGroupChatsAreRefused(t *testing.T) {
 	assert.Equal(t, msgPrivateOnly, b.tg.calls[0].text)
 }
 
+func TestGroupsAreAnsweredOnlyWhenAddressed(t *testing.T) {
+	b, _, _ := withOrders()
+	ctx := context.Background()
+	inGroup := func(chatID int64, text string) telegram.Update {
+		u := say(chatID, text)
+		u.Message.Chat.Type = "group"
+		return u
+	}
+
+	b.Handle(ctx, inGroup(-42, "")) // Telegram's notice that the bot was added
+	b.Handle(ctx, inGroup(-42, "хто сьогодні на касі?"))
+	assert.Empty(t, b.tg.calls, "no answer to what is not addressed to the bot")
+
+	b.Handle(ctx, inGroup(adminChat, "ок, беру"))
+	assert.Empty(t, b.tg.calls, "nor to the managers talking among themselves")
+
+	b.Handle(ctx, inGroup(adminChat, "/start"))
+	assert.Equal(t, msgPrivateOnlyManagers, b.tg.last("sendMessage").text, "a buyer's command in the managers' chat points to /admin")
+}
+
 func TestProductCardShowsFit(t *testing.T) {
 	b := newTestBot()
 	b.garage.car = &lanos

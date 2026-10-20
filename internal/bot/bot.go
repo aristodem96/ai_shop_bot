@@ -323,8 +323,17 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 	}
 	// A cart is personal. In a group every member would share the buttons of
 	// one message while each had a cart of their own, which cannot work.
+	// Only a command is addressed to the bot in a group: the notice that
+	// it was added, members coming and going, and the managers talking
+	// among themselves are not, and get no answer.
 	if m.Chat.Type != telegram.ChatPrivate {
-		b.send(ctx, m.Chat.ID, msgPrivateOnly, nil)
+		switch {
+		case !strings.HasPrefix(m.Text, "/"):
+		case b.isAdmin(m.Chat.ID):
+			b.send(ctx, m.Chat.ID, msgPrivateOnlyManagers, nil)
+		default:
+			b.send(ctx, m.Chat.ID, msgPrivateOnly, nil)
+		}
 		return
 	}
 	chat, user := m.Chat.ID, m.From.ID
