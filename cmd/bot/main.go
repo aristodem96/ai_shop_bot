@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -383,6 +384,7 @@ func (a *app) wireConsultant() error {
 // directory, category words and vehicle names.
 func (a *app) wireManagers() error {
 	chat := a.cfg.Payments.AdminChatID
+	a.retireAdminMenu(chat)
 	if chat == 0 {
 		a.log.Warn("ADMIN_CHAT_ID is not set: price lists cannot be uploaded in Telegram")
 		return nil
@@ -473,4 +475,31 @@ func (l catalogueLoader) FetchNow(ctx context.Context, vehicleID int64, category
 	}
 	l.log.InfoContext(ctx, "sections loaded for a search", slog.Int64("vehicle_id", vehicleID),
 		slog.String("category", category), slog.Int("names", len(got)), slog.Duration("took", time.Since(start).Round(time.Millisecond)))
+}
+
+// adminChatSetting is where the bot remembers which chat has the managers'
+// command menu.
+const adminChatSetting = "admin_chat"
+
+// retireAdminMenu takes the managers' command menu down from a chat that
+// had it and is no longer the managers' -- ADMIN_CHAT_ID moved from the
+// owner's private chat to a group, say. Telegram keeps a chat's menu until
+// it is deleted, so the commands would stay on show there.
+func (a *app) retireAdminMenu(chat int64) {
+	settings := postgres.NewSettingsRepository(a.pool)
+	prev, err := settings.Get(a.startup, adminChatSetting)
+	if err != nil {
+		a.log.Warn("could not read the previous managers' chat", slog.Any("error", err))
+		return
+	}
+	if old, _ := strconv.ParseInt(prev, 10, 64); old != 0 && old != chat {
+		if err := a.tg.DeleteChatCommands(a.startup, old); err != nil {
+			a.log.Warn("could not take the managers' menu down", slog.Int64("chat_id", old), slog.Any("error", err))
+			return
+		}
+		a.log.Info("managers' menu taken down from a former managers' chat", slog.Int64("chat_id", old))
+	}
+	if err := settings.Set(a.startup, adminChatSetting, strconv.FormatInt(chat, 10)); err != nil {
+		a.log.Warn("could not remember the managers' chat", slog.Any("error", err))
+	}
 }

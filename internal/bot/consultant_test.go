@@ -328,3 +328,20 @@ func TestAdviceAsksTheConsultant(t *testing.T) {
 	assert.Equal(t, 1, answers, "the press is answered once")
 	assert.Equal(t, "answerCallbackQuery", tg.methods()[0], "and at once, before the model is asked")
 }
+
+// A buyer who types a managers' command gets no sign it exists, and the
+// consultant is not asked what it means.
+func TestManagersCommandsAreNothingToABuyer(t *testing.T) {
+	c := &fakeConsultant{}
+	b, tg := withConsultant(c, fakeLimiter{allow: true})
+	ctx := context.Background()
+
+	for _, cmd := range []string{"/report", "/admin", "/suppliers", "/categories", "/groups", "/cars", "/word масл"} {
+		b.Handle(ctx, text(cmd))
+		assert.Equal(t, msgUnknownCommand, tg.last("sendMessage").text, cmd)
+	}
+	assert.Empty(t, c.asked, "nothing went to the consultant")
+
+	b.Handle(ctx, text("/help"))
+	assert.Equal(t, msgHelp, tg.last("sendMessage").text, "the buyer's own commands still work")
+}

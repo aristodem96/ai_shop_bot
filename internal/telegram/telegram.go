@@ -448,6 +448,14 @@ func (c *Client) SetCommands(ctx context.Context, commands []Command) error {
 	return c.call(ctx, "setMyCommands", map[string]any{"commands": commands}, nil)
 }
 
+// DeleteChatCommands takes down the command menu registered for one chat,
+// which then shows the default menu again.
+func (c *Client) DeleteChatCommands(ctx context.Context, chatID int64) error {
+	return c.call(ctx, "deleteMyCommands", map[string]any{
+		"scope": map[string]any{"type": "chat", "chat_id": chatID},
+	}, nil)
+}
+
 // SetDescription sets what the bot's empty chat shows before Start (up to
 // 512 characters) and the line on its profile (up to 120).
 func (c *Client) SetDescription(ctx context.Context, description, short string) error {

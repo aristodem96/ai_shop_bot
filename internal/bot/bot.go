@@ -371,6 +371,13 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 		// A sticker, a voice note, a file: nothing the consultant reads.
 		b.send(ctx, chat, msgTextOnly, nil)
 	default:
+		// A command the bot does not have -- a managers' one typed by a
+		// buyer, say -- is not a question for the consultant, whose guess
+		// at what it means would show that it exists.
+		if strings.HasPrefix(m.Text, "/") {
+			b.send(ctx, chat, msgUnknownCommand, b.mainMenu())
+			return
+		}
 		b.consult(ctx, chat, user, m.Text)
 	}
 }
