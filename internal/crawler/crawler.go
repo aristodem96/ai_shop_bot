@@ -83,8 +83,12 @@ type Store interface {
 	// failed more than after ago, and forgets waits older than keep.
 	RetryFailed(ctx context.Context, after, keep time.Duration) error
 	// SaveSections records the sections' paths, which are the same for
-	// every vehicle: a buyer's search finds its sections by them.
+	// every vehicle: a buyer's search finds its sections by them, and their
+	// parts are filed in the shop's categories by them.
 	SaveSections(ctx context.Context, sections []Section) error
+	// FileSections files every known section in the shop's categories
+	// again, for words changed since.
+	FileSections(ctx context.Context) error
 	// Fetched returns the sections of a modification stored since then.
 	Fetched(ctx context.Context, modID int64, since time.Time) (map[int64]bool, error)
 	// Matching returns a vehicle's modification and up to limit sections
@@ -172,6 +176,9 @@ func (c *Crawler) Run(ctx context.Context) error {
 	ctx = autodb.Background(ctx)
 	if err := c.store.Requeue(ctx); err != nil {
 		c.log.WarnContext(ctx, "could not requeue crawls left running", slog.Any("error", err))
+	}
+	if err := c.store.FileSections(ctx); err != nil {
+		c.log.WarnContext(ctx, "could not file catalogue sections", slog.Any("error", err))
 	}
 	var retried time.Time
 	for ctx.Err() == nil {

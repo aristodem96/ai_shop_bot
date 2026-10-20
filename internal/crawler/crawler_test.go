@@ -70,6 +70,7 @@ type memStore struct {
 	matching []int64
 }
 
+func (s *memStore) FileSections(context.Context) error { return nil }
 func (s *memStore) SaveSections(_ context.Context, secs []Section) error {
 	s.sections = append(s.sections, secs...)
 	return nil

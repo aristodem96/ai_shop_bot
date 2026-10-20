@@ -109,8 +109,8 @@ func TestCatalogParts(t *testing.T) {
 
 	prog, err := repo.Progress(ctx, vehicleID)
 	require.NoError(t, err)
-	assert.Equal(t, &domain.CatalogProgress{State: "none", Parts: 3, Filed: 2}, prog,
-		"three parts, the Brembo once; the two pads are filed, the filter is not")
+	assert.Equal(t, &domain.CatalogProgress{State: "none", Parts: 3, Filed: 3}, prog,
+		"three parts, the Brembo once; the pads filed by their translation, the filter by its section")
 	prog, err = repo.Progress(ctx, vehicleByCode(t, "lanos-15"))
 	require.NoError(t, err)
 	assert.Nil(t, prog, "a car from the shop's own list has no catalogue")
@@ -119,7 +119,8 @@ func TestCatalogParts(t *testing.T) {
 	padsID, brakesID := categoryBySlug(t, "brake-pads"), categoryBySlug(t, "brakes")
 	counts, err := repo.CategoryCounts(ctx, vehicleID)
 	require.NoError(t, err)
-	assert.Equal(t, map[int64]int{padsID: 1}, counts, "the oil filter has no category yet, the Delphi is in stock")
+	assert.Equal(t, map[int64]int{padsID: 1, categoryBySlug(t, "oil-filters"): 1}, counts,
+		"the filter filed by its section before its name is translated; the Delphi is in stock")
 
 	for _, cat := range []int64{padsID, brakesID} {
 		page, total, err := repo.ByCategory(ctx, cat, vehicleID, 8, 0)

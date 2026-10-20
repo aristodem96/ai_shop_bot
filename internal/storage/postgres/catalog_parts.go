@@ -26,8 +26,17 @@ func NewCatalogPartRepository(pool *pgxpool.Pool) *CatalogPartRepository {
 	return &CatalogPartRepository{pool: pool}
 }
 
+// partCategory is a catalogue part's category: the one its translation
+// gave, or else its section's, from the shop's words in the section's path.
+const partCategory = `coalesce(nullif(n.category, ''), sec.category, '')`
+
+// partNames joins a part (mp) to its translation (n) and its section (sec).
+const partNames = `
+	LEFT JOIN autodb_part_names n ON n.name = mp.name
+	LEFT JOIN autodb_sections sec ON sec.id = mp.section_id`
+
 // catalogPartColumns read a part with its translation, when there is one.
-const catalogPartColumns = `mp.id, mp.brand, mp.supplier_id, mp.number, coalesce(n.name_uk, mp.name) AS name, coalesce(n.category, '') AS category`
+const catalogPartColumns = `mp.id, mp.brand, mp.supplier_id, mp.number, coalesce(n.name_uk, mp.name) AS name, ` + partCategory + ` AS category`
 
 // notStocked keeps a catalogue part the shop has no product for: the same
 // article, from the same brand or one the shop's product names no brand.
@@ -38,14 +47,12 @@ const notStocked = `NOT EXISTS (
 		WHERE a.alias = mp.brand_key AND b.name = p.brand)))`
 
 // filedParts are a vehicle's catalogue parts the shop does not stock that
-// have a category, once each: a part only gets one when its name is
-// translated, and the menu has nowhere to put the rest.
+// have a category, once each: the menu has nowhere to put the rest.
 const filedParts = `
 	SELECT DISTINCT ON (mp.article_key, mp.brand_key) ` + catalogPartColumns + `
 	FROM vehicles v
-	JOIN autodb_mod_parts mp ON mp.mod_id = v.autodb_mod_id
-	JOIN autodb_part_names n ON n.name = mp.name AND n.category <> ''
-	WHERE v.id = $1 AND ` + notStocked + `
+	JOIN autodb_mod_parts mp ON mp.mod_id = v.autodb_mod_id` + partNames + `
+	WHERE v.id = $1 AND ` + partCategory + ` <> '' AND ` + notStocked + `
 	ORDER BY mp.article_key, mp.brand_key, mp.id`
 
 // CategoryCounts counts a vehicle's catalogue parts on order in each
@@ -105,9 +112,9 @@ func (r *CatalogPartRepository) ByCategory(ctx context.Context, categoryID, vehi
 
 // ForVehicle finds the catalogue's parts for a vehicle that the shop has no
 // product for. Query words match the Ukrainian name or the Russian one, a
-// category its subcategories too -- and a part not yet filed, its name not
-// translated, by its section's path holding a word of the category, so a
-// search right after a crawl does not miss what the crawl brought. Of a
+// category its subcategories too, a part's category being its section's
+// until its translation says better, so a search right after a crawl does
+// not miss what the crawl brought. Of a
 // query's ways of naming the part, any one matches, with all its words in
 // the Ukrainian name or the Russian one. A part listed in several sections
 // comes once.
@@ -117,17 +124,10 @@ func (r *CatalogPartRepository) ForVehicle(ctx context.Context, f service.Search
 		SELECT id, brand, supplier_id, number, name, category FROM (
 			SELECT DISTINCT ON (mp.article_key, mp.brand_key) `+catalogPartColumns+`
 			FROM vehicles v
-			JOIN autodb_mod_parts mp ON mp.mod_id = v.autodb_mod_id
-			LEFT JOIN autodb_part_names n ON n.name = mp.name
+			JOIN autodb_mod_parts mp ON mp.mod_id = v.autodb_mod_id`+partNames+`
 			WHERE v.id = $1
-			  AND ($2 = '' OR n.category = $2 OR n.category IN (
-			      SELECT c.slug FROM categories c JOIN categories s ON s.id = c.parent_id WHERE s.slug = $2)
-			      OR (coalesce(n.category, '') = '' AND EXISTS (
-			          SELECT 1 FROM autodb_sections sec
-			          JOIN category_keywords k ON lower(sec.path) LIKE '%' || lower(k.word) || '%'
-			          JOIN categories c ON c.id = k.category_id
-			          WHERE sec.id = mp.section_id
-			            AND (c.slug = $2 OR c.parent_id = (SELECT id FROM categories WHERE slug = $2)))))
+			  AND ($2 = '' OR `+partCategory+` = $2 OR `+partCategory+` IN (
+			      SELECT c.slug FROM categories c JOIN categories s ON s.id = c.parent_id WHERE s.slug = $2))
 			  AND (cardinality($3::text[]) = 0 OR EXISTS (
 			      SELECT 1 FROM unnest($3::text[]) ph
 			      WHERE (SELECT bool_and(lower(coalesce(n.name_uk, '') || ' ' || mp.name) LIKE '%' || w || '%')
@@ -154,8 +154,8 @@ func (r *CatalogPartRepository) ForVehicle(ctx context.Context, f service.Search
 // once a recrawl has replaced it.
 func (r *CatalogPartRepository) CatalogPart(ctx context.Context, id int64) (*domain.CatalogPart, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT `+catalogPartColumns+` FROM autodb_mod_parts mp
-		LEFT JOIN autodb_part_names n ON n.name = mp.name WHERE mp.id = $1`, id)
+		SELECT `+catalogPartColumns+` FROM autodb_mod_parts mp`+partNames+`
+		WHERE mp.id = $1`, id)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: catalogue part %d: %w", id, err)
 	}
@@ -205,8 +205,8 @@ func (r *CatalogPartRepository) Progress(ctx context.Context, vehicleID int64) (
 	}
 	err = r.pool.QueryRow(ctx, `
 		SELECT count(*), count(*) FILTER (WHERE filed) FROM (
-			SELECT mp.article_key, mp.brand_key, bool_or(coalesce(n.category, '') <> '') AS filed
-			FROM autodb_mod_parts mp LEFT JOIN autodb_part_names n ON n.name = mp.name
+			SELECT mp.article_key, mp.brand_key, bool_or(`+partCategory+` <> '') AS filed
+			FROM autodb_mod_parts mp`+partNames+`
 			WHERE mp.mod_id = $1
 			GROUP BY mp.article_key, mp.brand_key) x`, modID).Scan(&p.Parts, &p.Filed)
 	if err != nil {

@@ -116,6 +116,32 @@ func (r *CrawlRepository) SaveSections(ctx context.Context, sections []crawler.S
 	if err != nil {
 		return fmt.Errorf("postgres: save section paths: %w", err)
 	}
+	if _, err := r.pool.Exec(ctx, fileSections+` WHERE s.id = ANY($1)`, ids); err != nil {
+		return fmt.Errorf("postgres: file sections: %w", err)
+	}
+	return nil
+}
+
+// fileSections sets a section's category from the shop's words in its path:
+// a word in the section's own name before one in a parent's, a longer word
+// before a shorter -- "фильтр масл" before "фильтр" -- and only categories
+// that hold products, not sections with subcategories.
+const fileSections = `
+	UPDATE autodb_sections s SET category = coalesce((
+		SELECT c.slug FROM category_keywords k
+		JOIN categories c ON c.id = k.category_id
+		WHERE lower(s.path) LIKE '%' || lower(k.word) || '%'
+		  AND NOT EXISTS (SELECT 1 FROM categories ch WHERE ch.parent_id = c.id)
+		ORDER BY lower(regexp_replace(s.path, '^.*› ', '')) LIKE '%' || lower(k.word) || '%' DESC,
+		         char_length(k.word) DESC, c.id
+		LIMIT 1), '')`
+
+// FileSections files every known section again: the owner may have changed
+// the category words since.
+func (r *CrawlRepository) FileSections(ctx context.Context) error {
+	if _, err := r.pool.Exec(ctx, fileSections); err != nil {
+		return fmt.Errorf("postgres: file sections: %w", err)
+	}
 	return nil
 }
 

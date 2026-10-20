@@ -15,7 +15,10 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
 	"github.com/aristodem96/ai_shop_bot/internal/llm"
@@ -90,11 +93,7 @@ func (t *Translator) TranslateNow(ctx context.Context, names []string) error {
 	}
 	for len(missing) > 0 {
 		n := min(len(missing), batch)
-		got, err := t.Translate(ctx, missing[:n])
-		if err != nil {
-			return err
-		}
-		if err := t.store.SaveNames(ctx, got); err != nil {
+		if _, err := t.translateBatch(ctx, missing[:n]); err != nil {
 			return err
 		}
 		missing = missing[n:]
@@ -102,25 +101,69 @@ func (t *Translator) TranslateNow(ctx context.Context, names []string) error {
 	return nil
 }
 
-// Pass translates every pending name, a batch at a time.
+// parallel is how many batches are with the model at once: a car brings
+// thousands of names, and one batch takes the model half a minute.
+const parallel = 4
+
+// callTimeout bounds one batch. A request the provider never answers would
+// otherwise stop translation for good, with nothing in the log.
+const callTimeout = 3 * time.Minute
+
+// Pass translates every pending name, a few batches at a time. A round in
+// which no batch got through ends it, to be tried again later.
 func (t *Translator) Pass(ctx context.Context) error {
 	for {
-		names, err := t.store.Untranslated(ctx, batch)
+		names, err := t.store.Untranslated(ctx, batch*parallel)
 		if err != nil || len(names) == 0 {
 			return err
 		}
-		got, err := t.Translate(ctx, names)
-		if err != nil {
-			return err
+		t.log.InfoContext(ctx, "translating part names", slog.Int("names", len(names)))
+		var (
+			mu    sync.Mutex
+			saved int
+			last  error
+		)
+		g, gctx := errgroup.WithContext(ctx)
+		for i := 0; i < len(names); i += batch {
+			chunk := names[i:min(i+batch, len(names))]
+			g.Go(func() error {
+				n, err := t.translateBatch(gctx, chunk)
+				mu.Lock()
+				defer mu.Unlock()
+				saved += n
+				if err != nil {
+					last = err
+					t.log.WarnContext(gctx, "could not translate a batch of part names", slog.Int("names", len(chunk)), slog.Any("error", err))
+				}
+				return nil
+			})
 		}
-		if len(got) == 0 {
-			return errors.New("partnames: the model translated none of the batch")
+		_ = g.Wait()
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
-		if err := t.store.SaveNames(ctx, got); err != nil {
-			return err
+		t.log.InfoContext(ctx, "part names translated", slog.Int("names", saved))
+		if saved == 0 {
+			if last == nil {
+				last = errors.New("partnames: the model translated none of the names")
+			}
+			return last
 		}
-		t.log.InfoContext(ctx, "part names translated", slog.Int("names", len(got)))
 	}
+}
+
+// translateBatch translates and stores one batch, within callTimeout.
+func (t *Translator) translateBatch(ctx context.Context, names []string) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	got, err := t.Translate(ctx, names)
+	if err != nil {
+		return 0, err
+	}
+	if err := t.store.SaveNames(ctx, got); err != nil {
+		return 0, err
+	}
+	return len(got), nil
 }
 
 const toolName = "record_names"

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -226,4 +227,29 @@ func TestSectionsForASearch(t *testing.T) {
 	require.NoError(t, err)
 	assert.Zero(t, modID)
 	assert.Empty(t, secs, "a car from the shop's own list has no catalogue")
+}
+
+func TestSectionsAreFiledByTheShopsWords(t *testing.T) {
+	skipShort(t)
+	ctx := context.Background()
+	repo := NewCrawlRepository(testPool)
+	t.Cleanup(func() { _, _ = testPool.Exec(ctx, `DELETE FROM autodb_sections`) })
+
+	require.NoError(t, repo.SaveSections(ctx, []crawler.Section{
+		{ID: 1, Path: "тормозная система › Тормозной механизм › Тормозной диск"},
+		{ID: 2, Path: "фильтр › Масляный фильтр"},
+		{ID: 3, Path: "Подвеска оси › Несущий / направляющий шарнир"},
+		{ID: 4, Path: "Комплектующие › Шплинт"},
+	}))
+	got := map[int64]string{}
+	rows, err := testPool.Query(ctx, `SELECT id, category FROM autodb_sections`)
+	require.NoError(t, err)
+	var (
+		id  int64
+		cat string
+	)
+	_, err = pgx.ForEachRow(rows, []any{&id, &cat}, func() error { got[id] = cat; return nil })
+	require.NoError(t, err)
+	assert.Equal(t, map[int64]string{1: "brake-discs", 2: "oil-filters", 3: "arms", 4: ""}, got,
+		"by the shop's words in the path; none fits a split pin")
 }
