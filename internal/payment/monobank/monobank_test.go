@@ -33,6 +33,7 @@ type fakeMonobank struct {
 	created    map[string]any
 	keyFetches atomic.Int32
 	token      string
+	removed    map[string]any
 }
 
 func newFakeMonobank(t *testing.T) (*fakeMonobank, *Client) {
@@ -55,6 +56,9 @@ func newFakeMonobank(t *testing.T) (*fakeMonobank, *Client) {
 			}
 			_, _ = io.WriteString(w, `{"invoiceId":"p2_9ZgpZVsl3","status":"success","amount":145000,"ccy":980,
 				"finalAmount":145000,"reference":"17","modifiedDate":"2026-10-15T10:00:05Z"}`)
+		case "/api/merchant/invoice/remove":
+			_ = json.NewDecoder(r.Body).Decode(&f.removed)
+			_, _ = io.WriteString(w, `{}`)
 		case "/api/merchant/pubkey":
 			f.keyFetches.Add(1)
 			_, _ = io.WriteString(w, `{"key":"`+f.publicKey(t)+`"}`)
@@ -192,4 +196,10 @@ func TestWebhookHandlerFailureAsksForRetry(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, post(h, webhookBody, f.sign(t, []byte(webhookBody))),
 		"Monobank retries on 5xx")
+}
+
+func TestRemoveInvoice(t *testing.T) {
+	f, c := newFakeMonobank(t)
+	require.NoError(t, c.RemoveInvoice(context.Background(), "p2_9ZgpZVsl3"))
+	assert.Equal(t, map[string]any{"invoiceId": "p2_9ZgpZVsl3"}, f.removed)
 }

@@ -137,6 +137,13 @@ func (c *Client) InvoiceStatus(ctx context.Context, invoiceID string) (*domain.P
 	return s.event()
 }
 
+// RemoveInvoice invalidates an unpaid invoice: its payment page stops
+// taking payments.
+func (c *Client) RemoveInvoice(ctx context.Context, invoiceID string) error {
+	var out struct{}
+	return c.do(ctx, http.MethodPost, "/api/merchant/invoice/remove", map[string]string{"invoiceId": invoiceID}, &out)
+}
+
 func (c *Client) fetchPublicKey(ctx context.Context) (string, error) {
 	var out struct {
 		Key string `json:"key"`

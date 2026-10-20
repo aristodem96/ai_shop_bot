@@ -193,6 +193,10 @@ const (
 	msgPaymentUnavailable = "Оплата зараз недоступна. Спробуйте за хвилину — товари залишились у кошику."
 	msgBadTransition      = "Цей статус уже неможливо змінити."
 	msgNoOrders           = "У вас ще немає замовлень."
+
+	msgOrderCancelled      = "✖️ Замовлення №%d скасовано. Товари повернуто в кошик — можна змінити їх або оформити знову."
+	msgOrderCancelledToast = "Замовлення скасовано, товари в кошику"
+	msgOrderNotCancellable = "Замовлення №%d вже не можна скасувати: %s."
 )
 
 // Catalogue imports, in the managers' chat.

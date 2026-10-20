@@ -19,6 +19,9 @@ type Orders interface {
 	Order(ctx context.Context, id int64) (*domain.Order, error)
 	SetStatus(ctx context.Context, orderID int64, to domain.OrderStatus) (*domain.Order, error)
 	Customer(ctx context.Context, userID int64) (*domain.Contacts, error)
+	// CancelUnpaid cancels a buyer's order not paid yet; ErrBadTransition,
+	// with the order as it is, when it was paid or ended meanwhile.
+	CancelUnpaid(ctx context.Context, userID, orderID int64) (*domain.Order, error)
 }
 
 // Sessions keeps per-chat state between messages.
@@ -293,6 +296,40 @@ func (b *Bot) sendOrders(ctx context.Context, chat, user int64) {
 	}
 	text, kb := ordersView(orders)
 	b.send(ctx, chat, text, kb)
+}
+
+// cancelOrder is the buyer giving up an order before paying, from the
+// payment message or the list of orders.
+func (b *Bot) cancelOrder(ctx context.Context, cc callbackCtx, orderID int64, fromList bool) (string, error) {
+	o, err := b.orders.CancelUnpaid(ctx, cc.user, orderID)
+	if errors.Is(err, domain.ErrBadTransition) && o != nil {
+		// Paid, expired or cancelled meanwhile: say so, and show where it is.
+		return fmt.Sprintf(msgOrderNotCancellable, o.ID, orderStatusLabel(o)), b.redrawOrders(ctx, cc, fromList, nil)
+	}
+	if err != nil {
+		return "", err
+	}
+	return msgOrderCancelledToast, b.redrawOrders(ctx, cc, fromList, o)
+}
+
+// redrawOrders shows the list of orders again, or turns the payment message
+// into the notice that the order is cancelled.
+func (b *Bot) redrawOrders(ctx context.Context, cc callbackCtx, fromList bool, cancelled *domain.Order) error {
+	if fromList {
+		orders, err := b.orders.OrdersOf(ctx, cc.user, maxOrdersListed)
+		if err != nil {
+			return err
+		}
+		text, kb := ordersView(orders)
+		ikb, _ := kb.(*telegram.InlineKeyboard)
+		return b.editText(ctx, cc, text, ikb)
+	}
+	if cancelled == nil {
+		return ignoreNotModified(b.tg.EditMessageReplyMarkup(ctx, cc.chat, cc.msg, nil))
+	}
+	return b.editText(ctx, cc, fmt.Sprintf(msgOrderCancelled, cancelled.ID), &telegram.InlineKeyboard{Rows: [][]telegram.InlineButton{
+		{button(btnCart, actCart)},
+	}})
 }
 
 // manage is a manager's button in the admin chat. The chat is checked: the

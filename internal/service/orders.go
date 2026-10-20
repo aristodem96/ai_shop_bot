@@ -21,6 +21,9 @@ type OrderRepository interface {
 	AttachInvoice(ctx context.Context, orderID int64, invoiceID, url string) error
 	ApplyPayment(ctx context.Context, ev domain.PaymentEvent) (PaymentResult, error)
 	Expire(ctx context.Context, orderID int64) (PaymentResult, error)
+	// Cancel cancels an order still awaiting payment: its stock goes back
+	// on sale and its items back into the cart.
+	Cancel(ctx context.Context, orderID int64) (PaymentResult, error)
 	SetStatus(ctx context.Context, orderID int64, to domain.OrderStatus) (PaymentResult, error)
 	Order(ctx context.Context, id int64) (*domain.Order, error)
 	OrdersOf(ctx context.Context, userID int64, limit int) ([]domain.Order, error)
@@ -53,6 +56,8 @@ type Invoice struct {
 type PaymentProvider interface {
 	CreateInvoice(ctx context.Context, req InvoiceRequest) (*Invoice, error)
 	InvoiceStatus(ctx context.Context, invoiceID string) (*domain.PaymentEvent, error)
+	// RemoveInvoice makes an unpaid invoice's page stop taking payments.
+	RemoveInvoice(ctx context.Context, invoiceID string) error
 }
 
 // OrderNotifier is told about every order whose status moved: the buyer and
@@ -206,6 +211,50 @@ func (s *OrderService) Reconcile(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// CancelUnpaid is a buyer cancelling their order before paying. The
+// invoice is asked about first: a payment that went through, its webhook
+// not yet here, keeps the order, and the order comes back with its new
+// status and ErrBadTransition. Then the invoice is invalidated, so its page
+// takes no payment for a cancelled order -- and should that fail and the
+// buyer pay anyway, the payment is handled like any late one.
+func (s *OrderService) CancelUnpaid(ctx context.Context, userID, orderID int64) (*domain.Order, error) {
+	o, err := s.repo.Order(ctx, orderID)
+	if err != nil {
+		return nil, err
+	}
+	if o.UserID != userID {
+		return nil, domain.ErrNotFound
+	}
+	if o.Status == domain.OrderAwaitingPayment && o.InvoiceID != "" {
+		ev, err := s.payments.InvoiceStatus(ctx, o.InvoiceID)
+		if err != nil {
+			return nil, fmt.Errorf("status of order %d: %w", o.ID, err)
+		}
+		if ev.Reference == "" {
+			ev.Reference = strconv.FormatInt(o.ID, 10)
+		}
+		if err := s.HandlePayment(ctx, *ev); err != nil {
+			return nil, err
+		}
+		if o, err = s.repo.Order(ctx, orderID); err != nil {
+			return nil, err
+		}
+	}
+	if o.Status != domain.OrderAwaitingPayment {
+		return o, fmt.Errorf("%w: %s -> %s", domain.ErrBadTransition, o.Status, domain.OrderCancelled)
+	}
+	if o.InvoiceID != "" {
+		if err := s.payments.RemoveInvoice(ctx, o.InvoiceID); err != nil {
+			s.log.WarnContext(ctx, "could not invalidate the invoice of a cancelled order", slog.Int64("order_id", o.ID), slog.Any("error", err))
+		}
+	}
+	res, err := s.repo.Cancel(ctx, o.ID)
+	if err != nil {
+		return nil, err
+	}
+	return res.Order, nil
 }
 
 // Order returns one order.

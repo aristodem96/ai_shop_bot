@@ -73,6 +73,14 @@ func (f *fakeOrders) SetStatus(_ context.Context, _ int64, to domain.OrderStatus
 
 func (f *fakeOrders) Customer(context.Context, int64) (*domain.Contacts, error) { return f.saved, nil }
 
+func (f *fakeOrders) CancelUnpaid(_ context.Context, user, id int64) (*domain.Order, error) {
+	if f.order.Status != domain.OrderAwaitingPayment {
+		return &f.order, domain.ErrBadTransition
+	}
+	f.order.Status = domain.OrderCancelled
+	return &f.order, nil
+}
+
 const adminChat = int64(-100500)
 
 func withOrders() (testBot, *fakeOrders, *fakeSessions) {
@@ -306,4 +314,24 @@ func TestPickupOrderForManagersAndBuyer(t *testing.T) {
 	notice, _ = buyerNotice(o, domain.OrderConfirmed)
 	assert.Contains(t, notice, "видано")
 	assert.Equal(t, "🏪 видано", orderStatusLabel(o))
+}
+
+func TestBuyerCancelsBeforePaying(t *testing.T) {
+	b, orders, _ := withOrders()
+	ctx := context.Background()
+	orders.order.Status, orders.order.PaymentURL = domain.OrderAwaitingPayment, "https://pay.mbnk.biz/p2"
+
+	text, kb := paymentView(&orders.order)
+	assert.Contains(t, text, "Оплатіть")
+	assert.Contains(t, callbacks(kb), encode(actOrderCancel, 42, 0), "the payment message can be cancelled")
+	_, list := ordersView([]domain.Order{orders.order})
+	assert.Contains(t, callbacks(list), encode(actOrderCancel, 42, 1), "and so can the order in the list")
+
+	b.Handle(ctx, press(encode(actOrderCancel, 42, 0)))
+	assert.Equal(t, domain.OrderCancelled, orders.order.Status)
+	assert.Contains(t, b.tg.last("editMessageText").text, "Замовлення №42 скасовано. Товари повернуто в кошик")
+	assert.Equal(t, msgOrderCancelledToast, b.tg.last("answerCallbackQuery").text)
+
+	b.Handle(ctx, press(encode(actOrderCancel, 42, 1)))
+	assert.Contains(t, b.tg.last("answerCallbackQuery").text, "вже не можна скасувати", "a second tap says why")
 }

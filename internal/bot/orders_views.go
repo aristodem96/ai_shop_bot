@@ -78,6 +78,7 @@ func paymentView(o *domain.Order) (string, *telegram.InlineKeyboard) {
 		o.ID, o.Total, o.ReservedUntil.In(kyiv).Format("15:04"))
 	return text, &telegram.InlineKeyboard{Rows: [][]telegram.InlineButton{
 		{{Text: fmt.Sprintf("💳 Оплатити %s", o.Total), URL: o.PaymentURL}},
+		{button("✖️ Скасувати замовлення", actOrderCancel, o.ID, 0)},
 	}}
 }
 
@@ -94,7 +95,10 @@ func ordersView(orders []domain.Order) (string, telegram.ReplyMarkup) {
 			fmt.Fprintf(&b, "   • %s ×%d\n", esc(i.Name), i.Qty)
 		}
 		if o.Status == domain.OrderAwaitingPayment && o.PaymentURL != "" {
-			kb.Rows = append(kb.Rows, []telegram.InlineButton{{Text: fmt.Sprintf("💳 Оплатити №%d", o.ID), URL: o.PaymentURL}})
+			kb.Rows = append(kb.Rows, []telegram.InlineButton{
+				{Text: fmt.Sprintf("💳 Оплатити №%d", o.ID), URL: o.PaymentURL},
+				button(fmt.Sprintf("✖️ Скасувати №%d", o.ID), actOrderCancel, o.ID, 1),
+			})
 		}
 	}
 	if len(kb.Rows) == 0 {

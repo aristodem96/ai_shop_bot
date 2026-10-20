@@ -413,6 +413,17 @@ func paymentTransition(ctx context.Context, tx pgx.Tx, o *domain.Order, ev domai
 // back and its items back to the cart. It does nothing to an order that got
 // paid in the meantime.
 func (r *OrderRepository) Expire(ctx context.Context, orderID int64) (service.PaymentResult, error) {
+	return r.dropUnpaid(ctx, orderID, domain.OrderExpired)
+}
+
+// Cancel cancels an order the buyer gave up before paying: like an expired
+// one, its stock goes back on sale and its items into the cart.
+func (r *OrderRepository) Cancel(ctx context.Context, orderID int64) (service.PaymentResult, error) {
+	return r.dropUnpaid(ctx, orderID, domain.OrderCancelled)
+}
+
+// dropUnpaid ends an order still awaiting payment with status to.
+func (r *OrderRepository) dropUnpaid(ctx context.Context, orderID int64, to domain.OrderStatus) (service.PaymentResult, error) {
 	var res service.PaymentResult
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		o, err := r.lockOrder(ctx, tx, "o.id = $1", orderID)
@@ -427,7 +438,7 @@ func (r *OrderRepository) Expire(ctx context.Context, orderID int64) (service.Pa
 			return err
 		}
 		res.Changed = true
-		return setStatus(ctx, tx, o, domain.OrderExpired)
+		return setStatus(ctx, tx, o, to)
 	})
 	return res, err
 }

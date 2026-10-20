@@ -377,7 +377,7 @@ func (b *Bot) handleCallback(ctx context.Context, q *telegram.CallbackQuery) {
 func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, error) {
 	a := cb.args
 	switch cb.act {
-	case actCheckout, actPay, actEditContacts, actCancelCheckout, actManage:
+	case actCheckout, actPay, actEditContacts, actCancelCheckout, actManage, actOrderCancel:
 		if b.orders == nil {
 			// A bot running without payments may still meet these buttons
 			// on old messages.
@@ -430,6 +430,8 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 		return "", b.cancelCheckout(ctx, cc)
 	case actManage:
 		return b.manage(ctx, cc, a[0], a[1])
+	case actOrderCancel:
+		return b.cancelOrder(ctx, cc, a[0], a[1] == 1)
 	case actReport, actReportExcel:
 		if b.reports == nil {
 			return "", errBadCallback

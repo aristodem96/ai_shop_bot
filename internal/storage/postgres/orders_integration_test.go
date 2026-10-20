@@ -405,3 +405,28 @@ func TestPickupOrderKeepsTheShopAddress(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, c.Pickup, "the next checkout offers the same way")
 }
+
+func TestBuyerCancelsBeforePaying(t *testing.T) {
+	skipShort(t)
+	ctx := context.Background()
+	repo := NewOrderRepository(testPool)
+	disc := withStock(t, "BRK-007", 1)
+
+	const user = int64(5207)
+	buyerCart(t, user, disc.ID, 1)
+	o := place(t, user)
+	assert.Zero(t, stockOf(t, disc.ID), "held while the buyer pays")
+
+	res, err := repo.Cancel(ctx, o.ID)
+	require.NoError(t, err)
+	assert.True(t, res.Changed)
+	assert.Equal(t, domain.OrderCancelled, res.Order.Status)
+	assert.Equal(t, 1, stockOf(t, disc.ID), "the unit is back on sale")
+	cart, err := NewCartRepository(testPool).Cart(ctx, user)
+	require.NoError(t, err)
+	require.Len(t, cart.Lines, 1, "and back in the buyer's cart")
+
+	res, err = repo.Cancel(ctx, o.ID)
+	require.NoError(t, err)
+	assert.False(t, res.Changed, "a second tap changes nothing")
+}

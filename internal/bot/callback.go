@@ -39,6 +39,7 @@ const (
 	actEditContacts   action = "ce"   // type the contacts again
 	actCancelCheckout action = "cq"   // leave the checkout
 	actManage         action = "om"   // om:<order>:<move> a manager's button
+	actOrderCancel    action = "oc"   // oc:<order>:<1 from the orders list> the buyer cancels an unpaid order
 	actImportApply    action = "ia"   // ia:<job>:<force> apply a checked file
 	actImportCancel   action = "ix"   // ix:<job> drop an uploaded file
 	actSetupField     action = "sf"   // sf:<job>:<field> which column a field of a new file is
@@ -96,7 +97,7 @@ var arity = map[action]int{
 	actCategories: 0, actCategory: 2, actCategoryN: 1, actCategoryAll: 2, actProduct: 1,
 	actAdd: 1, actAnalogues: 1, actCart: 0, actInc: 1, actDec: 1, actDel: 1,
 	actClear: 0, actForgetCar: 0, actCarScreen: 0, actMenuRefresh: 0, actKit: 0, actKitAdd: 0, actNoop: 0,
-	actCheckout: 0, actPay: 0, actEditContacts: 0, actCancelCheckout: 0, actManage: 2,
+	actCheckout: 0, actPay: 0, actEditContacts: 0, actCancelCheckout: 0, actManage: 2, actOrderCancel: 2,
 	actImportApply: 2, actImportCancel: 1,
 	actSetupField: 2, actSetupColumn: 3, actSetupNext: 1, actSetupLead: 2, actSetupMarkup: 2, actSetupSupplier: 2,
 	actSupplierOpen: 1, actSupplierMarkup: 2, actSupplierLead: 2, actSupplierDelete: 2,

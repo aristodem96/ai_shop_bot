@@ -65,6 +65,15 @@ func (f *fakeOrders) Expire(_ context.Context, id int64) (PaymentResult, error) 
 	return PaymentResult{Order: o, From: from, Changed: o.Status != from}, nil
 }
 
+func (f *fakeOrders) Cancel(_ context.Context, id int64) (PaymentResult, error) {
+	o := f.orders[id]
+	from := o.Status
+	if o.Status == domain.OrderAwaitingPayment {
+		o.Status = domain.OrderCancelled
+	}
+	return PaymentResult{Order: o, From: from, Changed: o.Status != from}, nil
+}
+
 func (f *fakeOrders) SetStatus(context.Context, int64, domain.OrderStatus) (PaymentResult, error) {
 	return PaymentResult{}, nil
 }
@@ -92,6 +101,12 @@ type fakePayments struct {
 	statusErr error
 	status    domain.PaymentStatus
 	requests  []InvoiceRequest
+	removed   []string
+}
+
+func (f *fakePayments) RemoveInvoice(_ context.Context, id string) error {
+	f.removed = append(f.removed, id)
+	return nil
 }
 
 func (f *fakePayments) CreateInvoice(_ context.Context, req InvoiceRequest) (*Invoice, error) {
@@ -215,4 +230,33 @@ func TestValidateContacts(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrInvalidContacts)
 	_, err = ValidateContacts(domain.Contacts{Name: "Тарас", Phone: contacts.Phone, Delivery: "Київ"})
 	require.ErrorIs(t, err, domain.ErrInvalidContacts)
+}
+
+func TestBuyerCancelsAnUnpaidOrder(t *testing.T) {
+	svc, repo, pay, _ := newOrderFixture()
+	ctx := context.Background()
+	o, err := svc.Checkout(ctx, user, contacts)
+	require.NoError(t, err)
+
+	_, err = svc.CancelUnpaid(ctx, user+1, o.ID)
+	require.ErrorIs(t, err, domain.ErrNotFound, "only the buyer's own order")
+
+	got, err := svc.CancelUnpaid(ctx, user, o.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.OrderCancelled, got.Status)
+	assert.Equal(t, []string{"inv"}, pay.removed, "the payment page stops taking payments")
+	assert.Equal(t, domain.OrderCancelled, repo.orders[o.ID].Status)
+}
+
+func TestCancelKeepsAnOrderJustPaid(t *testing.T) {
+	svc, _, pay, _ := newOrderFixture()
+	ctx := context.Background()
+	o, err := svc.Checkout(ctx, user, contacts)
+	require.NoError(t, err)
+	pay.status = domain.PaymentSuccess // paid, the webhook not here yet
+
+	got, err := svc.CancelUnpaid(ctx, user, o.ID)
+	require.ErrorIs(t, err, domain.ErrBadTransition)
+	assert.Equal(t, domain.OrderPaid, got.Status, "the payment wins")
+	assert.Empty(t, pay.removed)
 }
