@@ -39,6 +39,10 @@ func (f *fakeOrderCatalog) CatalogPart(_ context.Context, id int64) (*domain.Cat
 
 func (f *fakeOrderCatalog) CrawlState(context.Context, int64) (string, error) { return f.state, nil }
 
+func (f *fakeOrderCatalog) Brands(context.Context, service.SearchFilter, int) ([]domain.PartKind, error) {
+	return []domain.PartKind{{Name: "BREMBO", Count: 9}, {Name: "TRW", Count: 5}}, nil
+}
+
 func (f *fakeOrderCatalog) Kinds(context.Context, service.SearchFilter, int) ([]domain.PartKind, int, error) {
 	return []domain.PartKind{{Name: bremboPads.Name, Count: 14}, {Name: "Пильовик амортизатора", Count: 3}}, 17, nil
 }
@@ -300,4 +304,48 @@ func TestCallManagerWithoutManagers(t *testing.T) {
 	_, err := f.agent.Reply(context.Background(), 1, 1, "дайте менеджера")
 	require.NoError(t, err)
 	assert.Contains(t, result(model, 1).Content, `"status":"unavailable"`)
+}
+
+type fakeArticles struct{}
+
+func (fakeArticles) Article(_ context.Context, supplierID int64, number string) (*enrich.Article, error) {
+	return &enrich.Article{SupplierID: supplierID, Number: number,
+		Specs:   []domain.Spec{{Name: "Діаметр", Value: "280 мм"}, {Name: "Тип", Value: "вентильований"}},
+		OEMKeys: []string{"1K0615301AA"}}, nil
+}
+
+func TestGetCatalogPartsReadsTheirSpecs(t *testing.T) {
+	model := llm.NewFake(
+		llm.Call("c1", "get_catalog_parts", map[string]any{"catalog_part_ids": []int{77, 78}}),
+		llm.Say("Brembo — вентильований, 280 мм."),
+	)
+	f := newAgent(t, model)
+	f.agent.UseOrderCatalog(&fakeOrderCatalog{state: "done"})
+	f.agent.UseCatalogArticles(fakeArticles{})
+
+	_, err := f.agent.Reply(context.Background(), 1, 1, "в чому різниця?")
+	require.NoError(t, err)
+	res := result(model, 1).Content
+	assert.Contains(t, res, `"specs":["Діаметр: 280 мм","Тип: вентильований"]`, "the specs to tell them apart")
+	assert.Contains(t, res, `"oem_numbers":["1K0615301AA"]`)
+	assert.Contains(t, res, `"catalog_part_id":78,"name":"","brand":"","number":"","note":"no such catalogue part`,
+		"an unknown id is said to be one, not a failed answer")
+}
+
+func TestRefusedCardsAreNotSaidTwice(t *testing.T) {
+	// The first step writes its answer with a call that is refused: an id
+	// that does not exist.
+	first := llm.Call("c1", toolShowProducts, map[string]any{"catalog_part_ids": []int{77, 999}})
+	first.Response.Message.Text = "Перша версія відповіді."
+	model := llm.NewFake(
+		first,
+		llm.Call("c2", toolShowProducts, map[string]any{"catalog_part_ids": []int{77}}),
+		llm.Say("Друга версія відповіді."),
+	)
+	f := newAgent(t, model)
+	f.agent.UseOrderCatalog(&fakeOrderCatalog{state: "done"})
+
+	reply, err := f.agent.Reply(context.Background(), 1, 1, "диски")
+	require.NoError(t, err)
+	assert.Equal(t, "Друга версія відповіді.", reply.Text, "the answer written with refused cards is not said again")
 }

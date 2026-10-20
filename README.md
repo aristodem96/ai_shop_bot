@@ -191,7 +191,7 @@ stock check and the same limits.
 ## How the consultant works
 
 The model never touches the database or the chat. It sees a system prompt, the
-conversation, and the descriptions of eleven tools, and its only way to act is
+conversation, and the descriptions of twelve tools, and its only way to act is
 to call one:
 
 | Tool | What it does |
@@ -201,6 +201,7 @@ to call one:
 | `get_my_vehicle` / `set_my_vehicle` | Reads and saves the buyer's car |
 | `search_parts` | Catalogue search: car, category, part number, brand, price, word stems |
 | `get_part` | One part's details, the cars it fits, and whether it fits the buyer's |
+| `get_catalog_parts` | The specs of parts on order, to tell them apart |
 | `service_kit` | The maintenance kit the shop's rules assemble for a car |
 | `show_products` | Lists products under the reply, numbered, with a button each |
 | `add_to_cart` | Adds a part, through the cart's rules |

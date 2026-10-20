@@ -11,6 +11,8 @@ import (
 	"time"
 	"unicode"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
 	"github.com/aristodem96/ai_shop_bot/internal/llm"
 	"github.com/aristodem96/ai_shop_bot/internal/service"
@@ -54,10 +56,11 @@ type toolbox struct {
 	garage   Garage
 	kits     Maintenance
 	orders   Orders
-	parts    OrderCatalog  // nil: stock only
-	fits     CatalogFits   // nil: no catalogue fits
-	loader   CatalogLoader // nil: catalogues load only when a car is chosen
-	handoff  Handoff       // nil: no managers' chat to call
+	parts    OrderCatalog    // nil: stock only
+	fits     CatalogFits     // nil: no catalogue fits
+	loader   CatalogLoader   // nil: catalogues load only when a car is chosen
+	handoff  Handoff         // nil: no managers' chat to call
+	articles CatalogArticles // nil: no specs for parts on order
 	now      func() time.Time
 	// catSlug maps category ids to the slugs the model knows them by.
 	catSlug map[int64]string
@@ -162,7 +165,8 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, ord
 		{
 			Name: toolShowProducts,
 			Description: "Show parts to the buyer under your reply: products as cards with photo, price, stock and fit, " +
-				"catalogue parts as buttons to request them on order. Use it whenever you recommend parts. At most 5 of each per reply.",
+				"catalogue parts as buttons to request them on order. Use it whenever you recommend parts. " +
+				"At most 5 products and 8 catalogue parts per reply; say in your text how many you show, as many as you pass.",
 			Schema: object(map[string]any{
 				"product_ids": map[string]any{
 					"type": "array", "items": map[string]any{"type": "integer"},
@@ -188,6 +192,17 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, ord
 			}, "product_id"),
 		},
 		{
+			Name: "get_catalog_parts",
+			Description: "Get the specs of catalogue parts on order -- diameter, thickness, ventilated or not, axle, length and the like -- " +
+				"and the carmakers' numbers each replaces, to tell them apart or compare brands. Up to 5 at a time.",
+			Schema: object(map[string]any{
+				"catalog_part_ids": map[string]any{
+					"type": "array", "items": map[string]any{"type": "integer"},
+					"description": "Ids of catalog_parts from search results.",
+				},
+			}, "catalog_part_ids"),
+		},
+		{
 			Name: "call_manager",
 			Description: "Ask the shop's managers to write to the buyer in this chat. Use it when the buyer asks for a person " +
 				"(a manager, an admin, the owner, a call), or for what you cannot do: a return, a complaint, a warranty claim, " +
@@ -200,17 +215,18 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, ord
 	}
 
 	tb.handlers = map[string]handler{
-		"find_vehicle":   tb.findVehicle,
-		"decode_vin":     tb.decodeVIN,
-		"get_my_vehicle": tb.getMyVehicle,
-		"set_my_vehicle": tb.setMyVehicle,
-		"search_parts":   tb.searchParts,
-		"get_part":       tb.getPart,
-		"service_kit":    tb.serviceKit,
-		toolShowProducts: tb.showProducts,
-		"add_to_cart":    tb.addToCart,
-		"order_status":   tb.orderStatus,
-		"call_manager":   tb.callManager,
+		"find_vehicle":      tb.findVehicle,
+		"decode_vin":        tb.decodeVIN,
+		"get_my_vehicle":    tb.getMyVehicle,
+		"set_my_vehicle":    tb.setMyVehicle,
+		"search_parts":      tb.searchParts,
+		"get_part":          tb.getPart,
+		"service_kit":       tb.serviceKit,
+		toolShowProducts:    tb.showProducts,
+		"add_to_cart":       tb.addToCart,
+		"order_status":      tb.orderStatus,
+		"call_manager":      tb.callManager,
+		"get_catalog_parts": tb.getCatalogParts,
 	}
 	return tb
 }
@@ -549,8 +565,9 @@ var catalogNotes = map[string]string{
 // maxCatalogShown and maxCatalogKinds bound the catalogue's answer to one
 // search: a sample of parts, a few of each kind, and the kinds there are.
 const (
-	maxCatalogShown = 8
-	maxCatalogKinds = 12
+	maxCatalogShown  = 8
+	maxCatalogKinds  = 12
+	maxCatalogBrands = 20
 )
 
 // catalogKindView is a kind of part the catalogue has for the car.
@@ -592,6 +609,88 @@ func gradeKey(s string) string {
 	}
 	return b.String()
 }
+
+// maxCatalogDetails bounds the parts one get_catalog_parts reads: each is a
+// call to the catalogue while the buyer waits.
+const maxCatalogDetails = 5
+
+// catalogDetailView is a catalogue part's card.
+type catalogDetailView struct {
+	ID         int64    `json:"catalog_part_id"`
+	Name       string   `json:"name"`
+	Brand      string   `json:"brand"`
+	Number     string   `json:"number"`
+	Specs      []string `json:"specs,omitempty"`
+	OEMNumbers []string `json:"oem_numbers,omitempty"`
+	Note       string   `json:"note,omitempty"`
+}
+
+// getCatalogParts reads the cards of parts on order, a few at once.
+func (tb *toolbox) getCatalogParts(ctx context.Context, _ *runState, input json.RawMessage) (any, error) {
+	var in struct {
+		IDs []int64 `json:"catalog_part_ids"`
+	}
+	if err := decode(input, &in); err != nil {
+		return nil, err
+	}
+	if tb.parts == nil {
+		return nil, fmt.Errorf("%w: no catalogue parts in this shop", errInput)
+	}
+	if len(in.IDs) == 0 || len(in.IDs) > maxCatalogDetails {
+		return nil, fmt.Errorf("%w: 1 to %d catalog_part_ids", errInput, maxCatalogDetails)
+	}
+	out := make([]catalogDetailView, len(in.IDs))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(3)
+	for i, id := range in.IDs {
+		g.Go(func() error {
+			p, err := tb.parts.CatalogPart(gctx, id)
+			if err != nil {
+				if errors.Is(err, domain.ErrNotFound) {
+					out[i] = catalogDetailView{ID: id, Note: "no such catalogue part; use catalog_part_id from search results"}
+					return nil
+				}
+				return err
+			}
+			out[i] = tb.catalogCard(gctx, p)
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	return map[string]any{"parts": out}, nil
+}
+
+// catalogCard is a part's card with what the catalogue says of it. A card
+// that cannot be read says so: worth having, not worth failing the answer
+// over.
+func (tb *toolbox) catalogCard(ctx context.Context, p *domain.CatalogPart) catalogDetailView {
+	v := catalogDetailView{ID: p.ID, Name: p.Name, Brand: p.Brand, Number: p.Number}
+	if tb.articles == nil {
+		v.Note = "specs are not available"
+		return v
+	}
+	a, err := tb.articles.Article(ctx, p.SupplierID, p.Number)
+	if err != nil || a == nil {
+		v.Note = "specs could not be read now"
+		return v
+	}
+	for _, s := range a.Specs[:min(len(a.Specs), maxSpecs)] {
+		v.Specs = append(v.Specs, s.Name+": "+s.Value)
+	}
+	v.OEMNumbers = a.OEMKeys[:min(len(a.OEMKeys), oemShownToModel)]
+	if len(v.Specs) == 0 {
+		v.Note = "the catalogue lists no specs for this part"
+	}
+	return v
+}
+
+// maxSpecs and oemShownToModel bound a card for the model.
+const (
+	maxSpecs        = 15
+	oemShownToModel = 8
+)
 
 // callManager tells the managers a buyer wants a person.
 func (tb *toolbox) callManager(ctx context.Context, run *runState, input json.RawMessage) (any, error) {
@@ -684,6 +783,15 @@ func (tb *toolbox) addCatalogParts(ctx context.Context, userID int64, out map[st
 			kv[i] = catalogKindView{Name: k.Name, Count: k.Count}
 		}
 		out["catalog_kinds"], out["catalog_parts_total"] = kv, total
+		brands, err := tb.parts.Brands(ctx, f, maxCatalogBrands)
+		if err != nil {
+			return err
+		}
+		bv := make([]catalogKindView, len(brands))
+		for i, b := range brands {
+			bv[i] = catalogKindView{Name: b.Name, Count: b.Count}
+		}
+		out["catalog_brands"] = bv
 	}
 	if note := catalogNotes[state]; note != "" {
 		out["catalog_note"] = note
@@ -794,8 +902,8 @@ func (tb *toolbox) showCatalogParts(ctx context.Context, run *runState, ids []in
 		if slices.Contains(run.shownParts, id) {
 			continue
 		}
-		if len(run.shownParts) == maxShown {
-			return fmt.Errorf("%w: at most %d catalogue parts per reply", errInput, maxShown)
+		if len(run.shownParts) == maxCatalogShown {
+			return fmt.Errorf("%w: at most %d catalogue parts per reply", errInput, maxCatalogShown)
 		}
 		if _, err := tb.parts.CatalogPart(ctx, id); err != nil {
 			if errors.Is(err, domain.ErrNotFound) {

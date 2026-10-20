@@ -161,7 +161,8 @@ func TestCatalogSampleCoversEveryKind(t *testing.T) {
 		return crawler.Part{SupplierID: 1, ArticleKey: number, Number: number, Brand: brand, BrandKey: brand, Name: name}
 	}
 	require.NoError(t, NewCrawlRepository(testPool).SaveParts(ctx, mod.ID, 100500, []crawler.Part{
-		part("AAA", "B1", "Пыльник амортизатора"), part("BBB", "B2", "Пыльник амортизатора"),
+		part("AAA", "B1", "Пыльник амортизатора"), part("AAA", "B0", "Пыльник амортизатора"),
+		part("BBB", "B2", "Пыльник амортизатора"),
 		part("CCC", "B3", "Пыльник амортизатора"), part("ZZZ", "S1", "Амортизатор"),
 	}))
 	repo := NewCatalogPartRepository(testPool)
@@ -175,6 +176,21 @@ func TestCatalogSampleCoversEveryKind(t *testing.T) {
 
 	kinds, total, err := repo.Kinds(ctx, f, 10)
 	require.NoError(t, err)
-	assert.Equal(t, []domain.PartKind{{Name: "Пыльник амортизатора", Count: 3}, {Name: "Амортизатор", Count: 1}}, kinds)
-	assert.Equal(t, 4, total)
+	assert.Equal(t, []domain.PartKind{{Name: "Пыльник амортизатора", Count: 4}, {Name: "Амортизатор", Count: 1}}, kinds)
+	assert.Equal(t, 5, total)
+
+	f.Limit = 4
+	got, err = repo.ForVehicle(ctx, f)
+	require.NoError(t, err)
+	brands := map[string]int{}
+	for _, p := range got {
+		brands[p.Brand]++
+	}
+	assert.Equal(t, map[string]int{"AAA": 1, "BBB": 1, "CCC": 1, "ZZZ": 1}, brands,
+		"every brand once before a second of any: a kind is not shown as its first brand alone")
+
+	byBrand, err := repo.Brands(ctx, f, 10)
+	require.NoError(t, err)
+	assert.Equal(t, []domain.PartKind{{Name: "AAA", Count: 2}, {Name: "BBB", Count: 1}, {Name: "CCC", Count: 1}, {Name: "ZZZ", Count: 1}}, byBrand,
+		"the brands found, the most parts first")
 }

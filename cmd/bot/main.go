@@ -362,6 +362,8 @@ func (a *app) wireConsultant() error {
 	}
 	// get_part tells the model which cars the catalogue lists a part for.
 	consultant.UseCatalogFits(c.enricher)
+	// get_catalog_parts reads the specs of parts on order, to tell them apart.
+	consultant.UseCatalogArticles(c.enricher)
 	// Catalogue parts carry Russian names; each is translated once, as
 	// crawls bring them.
 	catalogParts := postgres.NewCatalogPartRepository(a.pool)

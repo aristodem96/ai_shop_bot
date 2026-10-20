@@ -67,8 +67,10 @@ type memStore struct {
 	waiters  map[int64][]Waiter // by modification
 	watched  []Waiter
 	sections []Section
-	fetched  map[int64]bool
-	matching []int64
+	// progressLog is every progress saved, in order.
+	progressLog [][3]int
+	fetched     map[int64]bool
+	matching    []int64
 }
 
 func (s *memStore) FileSections(context.Context) error { return nil }
@@ -118,6 +120,7 @@ func (s *memStore) Progress(_ context.Context, _ int64, total, done, parts int) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.progress = [3]int{total, done, parts}
+	s.progressLog = append(s.progressLog, s.progress)
 	return nil
 }
 func (s *memStore) Finish(_ context.Context, _ int64, err error) error {
@@ -293,9 +296,11 @@ func TestCrawlLoadsTheWantedBranchFirst(t *testing.T) {
 	c := New(api, store, Config{Parallel: 1}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	require.NoError(t, c.Crawl(context.Background(), 18537))
-	assert.Equal(t, []string{"tree 0", "tree 2", "parts 21", "parts 22", "tree 1", "parts 11"}, api.calls,
-		"the brakes are walked and loaded before the door handles are even looked for")
+	assert.Equal(t, []string{"tree 0", "tree 2", "tree 1", "parts 21", "parts 22", "parts 11"}, api.calls,
+		"the tree first, the brakes before the door handles")
 	assert.Equal(t, [3]int{3, 3, 3}, store.progress, "every section counted at the end")
+	require.NotEmpty(t, store.progressLog)
+	assert.Equal(t, [3]int{3, 0, 0}, store.progressLog[0], "the number of sections is known before any is loaded: a percentage at once")
 }
 
 func TestCrawlFailsWithoutTheRoot(t *testing.T) {

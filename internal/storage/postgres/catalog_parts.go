@@ -119,14 +119,19 @@ func (r *CatalogPartRepository) ByCategory(ctx context.Context, categoryID, vehi
 // the Ukrainian name or the Russian one. A part listed in several sections
 // comes once.
 func (r *CatalogPartRepository) ForVehicle(ctx context.Context, f service.SearchFilter) ([]domain.CatalogPart, error) {
-	// A few of every kind rather than the first brands of one: a category
-	// of shock absorbers, boots and bump stops would otherwise show eight
-	// boots, and the consultant tell the buyer there are no shock absorbers.
+	// A few of every kind rather than the first brands of one -- a
+	// category of shock absorbers, boots and bump stops would otherwise
+	// show eight boots, and the consultant tell the buyer there are no
+	// shock absorbers -- and within a kind, one of every brand before a
+	// second of any, or 147 brake discs show as A.B.S. alone.
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, brand, supplier_id, number, name, category FROM (
-			SELECT x.*, row_number() OVER (PARTITION BY x.name ORDER BY x.brand, x.number) AS nth
-			FROM (`+matchingParts+`) x
-		) y
+			SELECT y.*, row_number() OVER (PARTITION BY y.name ORDER BY y.of_brand, y.brand) AS nth
+			FROM (
+				SELECT x.*, row_number() OVER (PARTITION BY x.name, x.brand ORDER BY x.number) AS of_brand
+				FROM (`+matchingParts+`) x
+			) y
+		) z
 		ORDER BY category = '', nth, name
 		LIMIT $6`, matchingArgs(f, f.Limit)...)
 	if err != nil {
@@ -175,6 +180,23 @@ func (r *CatalogPartRepository) Kinds(ctx context.Context, f service.SearchFilte
 		return nil, 0, fmt.Errorf("postgres: scan kinds of catalogue parts: %w", err)
 	}
 	return kinds, total, nil
+}
+
+// Brands sums up the brands a search finds in a vehicle's catalogue: up to
+// limit of them, the most parts first.
+func (r *CatalogPartRepository) Brands(ctx context.Context, f service.SearchFilter, limit int) ([]domain.PartKind, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT brand, count(*) FROM (`+matchingParts+`) x
+		GROUP BY brand ORDER BY count(*) DESC, brand
+		LIMIT $6`, matchingArgs(f, limit)...)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: brands of catalogue parts of vehicle %d: %w", f.VehicleID, err)
+	}
+	brands, err := pgx.CollectRows(rows, pgx.RowToStructByPos[domain.PartKind])
+	if err != nil {
+		return nil, fmt.Errorf("postgres: scan brands of catalogue parts: %w", err)
+	}
+	return brands, nil
 }
 
 // matchingParts are a vehicle's catalogue parts a search names ($1 the

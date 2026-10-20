@@ -63,6 +63,8 @@ type OrderCatalog interface {
 	// Kinds sums up what a search finds: up to limit kinds of part with
 	// their counts, and how many parts in all.
 	Kinds(ctx context.Context, f service.SearchFilter, limit int) ([]domain.PartKind, int, error)
+	// Brands sums up the brands a search finds, the most parts first.
+	Brands(ctx context.Context, f service.SearchFilter, limit int) ([]domain.PartKind, error)
 	CatalogPart(ctx context.Context, id int64) (*domain.CatalogPart, error)
 	// CrawlState is "" for a car outside the catalogue, "none", "queued" or
 	// "running" while its parts are still loading, "done" or "failed".
@@ -80,6 +82,12 @@ type CatalogLoader interface {
 	// rest loads gets an answer now. A failure leaves the search to what
 	// is stored.
 	FetchNow(ctx context.Context, vehicleID int64, category, query string)
+}
+
+// CatalogArticles reads a catalogue part's card: its specs and the
+// carmakers' numbers it replaces. enrich.Enricher is the implementation.
+type CatalogArticles interface {
+	Article(ctx context.Context, supplierID int64, number string) (*enrich.Article, error)
 }
 
 // Handoff puts a buyer who wants a person before the shop's managers.
@@ -178,6 +186,14 @@ func (a *Agent) UseCatalogLoader(l CatalogLoader) {
 	a.tools.loader = l
 }
 
+// UseCatalogArticles lets the consultant read the specs of parts on order,
+// to tell them apart.
+func (a *Agent) UseCatalogArticles(c CatalogArticles) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.tools.articles = c
+}
+
 // UseHandoff lets the consultant call a manager to the buyer.
 func (a *Agent) UseHandoff(h Handoff) {
 	a.mu.Lock()
@@ -207,7 +223,7 @@ func (a *Agent) toolsFor(ctx context.Context) *toolbox {
 	}
 	if s := treeSignature(cats); s != sig {
 		next := newToolbox(cur.catalog, cur.cart, cur.garage, cur.kits, cur.orders, cats)
-		next.parts, next.fits, next.loader, next.handoff = cur.parts, cur.fits, cur.loader, cur.handoff
+		next.parts, next.fits, next.loader, next.handoff, next.articles = cur.parts, cur.fits, cur.loader, cur.handoff, cur.articles
 		a.mu.Lock()
 		a.tools, a.treeSig, cur = next, s, next
 		a.mu.Unlock()
@@ -262,6 +278,7 @@ func (a *Agent) Reply(ctx context.Context, userID, chatID int64, text string, im
 	turn := []llm.Message{{Role: llm.RoleUser, Text: text, Images: images}}
 	tools := a.toolsFor(ctx)
 	run := &runState{userID: userID, question: text}
+	discard := map[int]bool{}
 	var usage llm.Usage
 	start := time.Now()
 
@@ -276,6 +293,7 @@ func (a *Agent) Reply(ctx context.Context, userID, chatID int64, text string, im
 		}
 		addUsage(&usage, resp.Usage)
 		turn = append(turn, resp.Message)
+		step := len(turn) - 1
 
 		switch resp.StopReason {
 		case llm.StopRefusal:
@@ -287,6 +305,12 @@ func (a *Agent) Reply(ctx context.Context, userID, chatID int64, text string, im
 		case llm.StopToolUse:
 			results := tools.run(ctx, run, resp.Message.ToolCalls)
 			turn = append(turn, llm.Message{Role: llm.RoleUser, ToolResults: results})
+			// An answer written with cards that were refused -- too many,
+			// a wrong id -- is written again with the right ones; said
+			// twice, the buyer reads two versions of one answer.
+			if showRefused(resp.Message, results) {
+				discard[step] = true
+			}
 			if !answered(resp.Message, results) {
 				continue
 			}
@@ -301,7 +325,7 @@ func (a *Agent) Reply(ctx context.Context, userID, chatID int64, text string, im
 
 		// An answer, possibly cut off by max_tokens; a cut answer still
 		// beats none, and the prompt keeps answers far below the limit.
-		reply := &Reply{Text: turnText(turn), ProductIDs: run.shown, CatalogPartIDs: run.shownParts,
+		reply := &Reply{Text: turnText(turn, discard), ProductIDs: run.shown, CatalogPartIDs: run.shownParts,
 			CartChanged: run.cartChanged, CarSaved: run.carSaved}
 		if reply.Text == "" && len(reply.ProductIDs) == 0 && len(reply.CatalogPartIDs) == 0 {
 			reply.Text = replyStuck
@@ -415,14 +439,42 @@ func answered(m llm.Message, results []llm.ToolResult) bool {
 	return true
 }
 
+// showRefused reports whether m called show_products and was refused.
+func showRefused(m llm.Message, results []llm.ToolResult) bool {
+	for _, c := range m.ToolCalls {
+		if c.Name != toolShowProducts {
+			continue
+		}
+		for _, r := range results {
+			if r.CallID == c.ID && r.IsError {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // turnText is everything the model said to the buyer in this turn. The model
 // often explains its pick in the step that calls show_products and ends with
 // a short closing line -- or none at all -- so the last step alone can be
 // "Shall I add it to the cart?" with the explanation lost. Seen live; caught
 // by the evals.
-func turnText(turn []llm.Message) string {
+func turnText(turn []llm.Message, discard map[int]bool) string {
+	// A refused step's text goes only if a later step says it again.
+	later := false
+	for i := len(turn) - 1; i >= 0; i-- {
+		if discard[i] && !later {
+			discard[i] = false
+		}
+		if turn[i].Role == llm.RoleAssistant && strings.TrimSpace(turn[i].Text) != "" && !discard[i] {
+			later = true
+		}
+	}
 	var parts []string
-	for _, m := range turn {
+	for i, m := range turn {
+		if discard[i] {
+			continue
+		}
 		// The same text again -- written with a call that failed, then with
 		// its retry -- is said once.
 		if t := strings.TrimSpace(m.Text); m.Role == llm.RoleAssistant && t != "" && !slices.Contains(parts, t) {

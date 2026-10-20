@@ -330,8 +330,13 @@ type taskQueue []*crawlTask
 // Len, Less, Swap, Push and Pop make taskQueue a container/heap.
 func (q taskQueue) Len() int { return len(q) }
 
-// Less puts the more wanted first, then the earlier found.
+// Less puts branches before leaves -- walking the tree takes seconds and
+// tells the buyer how much there is to load -- then the more wanted first,
+// then the earlier found.
 func (q taskQueue) Less(i, j int) bool {
+	if q[i].leaf != q[j].leaf {
+		return !q[i].leaf
+	}
 	if q[i].rank != q[j].rank {
 		return q[i].rank < q[j].rank
 	}
@@ -380,6 +385,7 @@ type walk struct {
 	done, failed int
 	parts        int
 	lastProgress int
+	walked       bool // every branch walked, the number of sections known
 	rootErr      error
 }
 
@@ -412,6 +418,14 @@ func (w *walk) work(ctx context.Context) {
 		w.inflight--
 		if !t.leaf {
 			w.pending--
+			if w.pending == 0 && w.queueHasNoBranches() && !w.walked {
+				// The whole tree is known: from here the buyer sees a
+				// percentage.
+				w.walked = true
+				if err := w.c.store.Progress(ctx, w.modID, len(w.leaves), w.done, w.parts); err != nil {
+					w.c.log.WarnContext(ctx, "could not save crawl progress", slog.Any("error", err))
+				}
+			}
 		}
 		w.cond.Broadcast()
 		w.mu.Unlock()
@@ -493,7 +507,7 @@ func (w *walk) load(ctx context.Context, t *crawlTask) {
 		// The total is known only once no branch is left to walk; until
 		// then the buyer sees the parts so far.
 		total := 0
-		if w.pending == 0 && w.queueHasNoBranches() {
+		if w.walked {
 			total = len(w.leaves)
 		}
 		if perr := w.c.store.Progress(ctx, w.modID, total, w.done, w.parts); perr != nil {
