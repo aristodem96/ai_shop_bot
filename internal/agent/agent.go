@@ -40,6 +40,8 @@ type Cart interface {
 type Garage interface {
 	Find(ctx context.Context, q service.VehicleQuery) ([]domain.Vehicle, error)
 	Makes(ctx context.Context) ([]string, error)
+	// Models lists a make's models, those made in year unless zero.
+	Models(ctx context.Context, makeName string, year int) ([]service.ModelName, error)
 	Get(ctx context.Context, userID int64) (*domain.Vehicle, error)
 	Set(ctx context.Context, userID, vehicleID int64) (*domain.Vehicle, error)
 }

@@ -67,17 +67,26 @@ func (f *fakeCart) Add(_ context.Context, _, productID int64) (*domain.Cart, err
 type fakeGarage struct {
 	saved   map[int64]int64
 	queries []service.VehicleQuery
+	// noMatch makes every lookup find nothing.
+	noMatch bool
 }
 
 func (f *fakeGarage) Find(_ context.Context, q service.VehicleQuery) ([]domain.Vehicle, error) {
 	f.queries = append(f.queries, q)
-	if strings.EqualFold(q.Make, octavia.Make) {
+	if !f.noMatch && strings.EqualFold(q.Make, octavia.Make) {
 		return []domain.Vehicle{octavia}, nil
 	}
 	return nil, nil
 }
 
 func (f *fakeGarage) Makes(context.Context) ([]string, error) { return []string{octavia.Make}, nil }
+
+func (f *fakeGarage) Models(_ context.Context, makeName string, _ int) ([]service.ModelName, error) {
+	if strings.EqualFold(makeName, octavia.Make) {
+		return []service.ModelName{{Name: "Octavia A7", Years: "2013–2020"}, {Name: "Fabia III", Years: "2014–н.ч."}}, nil
+	}
+	return nil, nil
+}
 
 func (f *fakeGarage) Get(_ context.Context, user int64) (*domain.Vehicle, error) {
 	if _, ok := f.saved[user]; ok {

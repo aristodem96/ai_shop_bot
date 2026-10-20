@@ -45,6 +45,13 @@ func (s *GarageService) Find(ctx context.Context, q VehicleQuery) ([]domain.Vehi
 	return s.vehicles.FindVehicles(ctx, q, maxVehicleMatches)
 }
 
+// Models returns the models of a make, those made in year unless zero: what
+// a buyer's "T4" or "E46" has to be matched against when it is not in a
+// model's name as written.
+func (s *GarageService) Models(ctx context.Context, makeName string, year int) ([]ModelName, error) {
+	return s.vehicles.Models(ctx, strings.TrimSpace(makeName), year)
+}
+
 // Makes returns the makes the shop covers.
 func (s *GarageService) Makes(ctx context.Context) ([]string, error) {
 	return s.vehicles.Makes(ctx)

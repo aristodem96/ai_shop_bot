@@ -80,6 +80,36 @@ func (r *VehicleRepository) Makes(ctx context.Context) ([]string, error) {
 	return makes, nil
 }
 
+// Models returns the shop's models of a make, with the years they span.
+func (r *VehicleRepository) Models(ctx context.Context, makeName string, year int) ([]service.ModelName, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT v.model, min(v.year_from), max(coalesce(v.year_to, 0)), bool_or(v.year_to IS NULL)
+		FROM vehicles v
+		WHERE lower(v.make) = lower($1) AND v.autodb_mod_id IS NULL
+		  AND ($2 = 0 OR ($2 >= v.year_from AND (v.year_to IS NULL OR $2 <= v.year_to)))
+		GROUP BY v.model ORDER BY v.model`, makeName, year)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: models of %s: %w", makeName, err)
+	}
+	var (
+		out      []service.ModelName
+		name     string
+		from, to int
+		running  bool
+	)
+	if _, err := pgx.ForEachRow(rows, []any{&name, &from, &to, &running}, func() error {
+		years := fmt.Sprintf("%d–%d", from, to)
+		if running || to == 0 {
+			years = fmt.Sprintf("%d–н.ч.", from)
+		}
+		out = append(out, service.ModelName{Name: name, Years: years})
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("postgres: scan models of %s: %w", makeName, err)
+	}
+	return out, nil
+}
+
 // escapeLike makes LIKE treat %, _ and the escape character itself literally.
 func escapeLike(s string) string {
 	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)

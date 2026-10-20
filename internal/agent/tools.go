@@ -102,10 +102,12 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, ord
 		{
 			Name: "find_vehicle",
 			Description: "Find vehicles by make, model, year and engine, in the parts catalogue of every car and the shop's own list. " +
-				"Returns the matching vehicles with their ids; with no match, the makes known by a similar name, to spot a misspelling.",
+				"Returns the matching vehicles with their ids. With no match: the make's models as the catalogue names them, " +
+				"to call again with the exact name -- a generation code a buyer uses (\"T4\", \"E46\", \"W210\", \"B5\") is often " +
+				"not in it, the catalogue writing \"Transporter IV\" or \"3 (E46)\" -- or, for an unknown make, the makes known by a similar name.",
 			Schema: object(map[string]any{
 				"make":   str("Make in Latin letters, e.g. \"Skoda\"."),
-				"model":  str("Model in Latin letters, e.g. \"Octavia\"."),
+				"model":  str("Model in Latin letters, e.g. \"Octavia\": a word of the catalogue's model name. Leave out a generation code the name may not hold; the year narrows the generation."),
 				"year":   integer("Year of manufacture."),
 				"engine": str("Engine as the buyer gives it: a displacement (\"1.6\"), an engine code (\"F16D3\") or a fuel (\"дизель\")."),
 			}),
@@ -348,16 +350,44 @@ func (tb *toolbox) findVehicle(ctx context.Context, _ *runState, input json.RawM
 	}
 	out := map[string]any{"vehicles": views}
 
-	// Nothing matched: the makes with a similar name, so the model can spot
-	// a misspelt one. Not all of them: the catalogue knows two hundred.
-	if len(found) == 0 && in.Make != "" {
-		makes, err := tb.garage.Makes(ctx)
-		if err != nil {
-			return nil, err
-		}
-		out["similar_makes"] = similarMakes(in.Make, makes)
+	if len(found) > 0 || in.Make == "" {
+		return out, nil
 	}
+	// Nothing matched. A known make: its models as the catalogue names
+	// them, so a buyer's "T4" can be found as "Transporter IV" in one more
+	// call rather than guessed at until the steps run out.
+	models, err := tb.garage.Models(ctx, in.Make, in.Year)
+	if err != nil {
+		return nil, err
+	}
+	if len(models) > 0 {
+		views := make([]modelView, 0, min(len(models), maxModelsListed))
+		for _, m := range models[:min(len(models), maxModelsListed)] {
+			views = append(views, modelView{Name: m.Name, Years: m.Years})
+		}
+		out["models_of_make"] = views
+		out["hint"] = "No vehicle matched. Pick the buyer's model from models_of_make and call find_vehicle again " +
+			"with a distinctive word of its name as model (e.g. \"Transporter IV\" for a T4)."
+		return out, nil
+	}
+	// An unknown make: the makes with a similar name, so the model can spot
+	// a misspelt one. Not all of them: the catalogue knows two hundred.
+	makes, err := tb.garage.Makes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out["similar_makes"] = similarMakes(in.Make, makes)
 	return out, nil
+}
+
+// maxModelsListed bounds the models of a make listed for the model to pick
+// from: a make like Volkswagen has well over a hundred.
+const maxModelsListed = 150
+
+// modelView is a model of a make as the catalogue names it.
+type modelView struct {
+	Name  string `json:"name"`
+	Years string `json:"years,omitempty"`
 }
 
 // maxSimilarMakes bounds the makes a failed lookup suggests.

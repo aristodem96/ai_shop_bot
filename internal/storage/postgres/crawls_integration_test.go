@@ -253,3 +253,20 @@ func TestSectionsAreFiledByTheShopsWords(t *testing.T) {
 	assert.Equal(t, map[int64]string{1: "brake-discs", 2: "oil-filters", 3: "arms", 4: ""}, got,
 		"by the shop's words in the path; none fits a split pin")
 }
+
+func TestModelsOfTheShopsList(t *testing.T) {
+	skipShort(t)
+	models, err := NewVehicleRepository(testPool).Models(context.Background(), "daewoo", 0)
+	require.NoError(t, err)
+	names := make([]string, len(models))
+	for i, m := range models {
+		names[i] = m.Name
+	}
+	assert.Contains(t, names, "Lanos", "any case of the make")
+	for _, m := range models {
+		assert.NotEmpty(t, m.Years)
+	}
+	none, err := NewVehicleRepository(testPool).Models(context.Background(), "daewoo", 1950)
+	require.NoError(t, err)
+	assert.Empty(t, none, "nothing made in 1950")
+}

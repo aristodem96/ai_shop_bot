@@ -189,7 +189,7 @@ func LoadBot() (*Bot, error) {
 			AdminChatID:    envInt64("ADMIN_CHAT_ID", 0, collect),
 		},
 		Agent: Agent{
-			MaxSteps:   envInt("AGENT_MAX_STEPS", 6, collect),
+			MaxSteps:   envInt("AGENT_MAX_STEPS", 8, collect),
 			Timeout:    envDuration("AGENT_TIMEOUT", 45*time.Second, collect),
 			MaxHistory: envInt("AGENT_HISTORY_MESSAGES", 30, collect),
 			HistoryTTL: envDuration("AGENT_HISTORY_TTL", 24*time.Hour, collect),

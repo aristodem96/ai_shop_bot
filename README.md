@@ -202,7 +202,7 @@ buyer ──► model ──tool_use──► find_vehicle ──► model ─�
           reply + cards ◄── model ◄── show_products(ids) ◄── model ◄───┘
 ```
 
-The loop is bounded: at most 6 model calls and 45 seconds per message, then a
+The loop is bounded: at most 8 model calls and 45 seconds per message, then a
 fixed answer. A refusal from the provider gets a fixed answer too, and is not
 kept in the conversation.
 

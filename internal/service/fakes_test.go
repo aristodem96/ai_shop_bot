@@ -194,6 +194,16 @@ func (f *fakeVehicles) FindVehicles(_ context.Context, q VehicleQuery, limit int
 	return out, nil
 }
 
+func (f *fakeVehicles) Models(_ context.Context, makeName string, _ int) ([]ModelName, error) {
+	var out []ModelName
+	for _, v := range f.list {
+		if strings.EqualFold(v.Make, makeName) {
+			out = append(out, ModelName{Name: v.Model})
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeVehicles) Makes(context.Context) ([]string, error) {
 	var makes []string
 	for _, v := range f.list {

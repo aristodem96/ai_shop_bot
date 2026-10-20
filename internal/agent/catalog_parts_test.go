@@ -252,3 +252,18 @@ func TestOtherOilGrade(t *testing.T) {
 	assert.False(t, otherOilGrade(oil("5W-30"), "", "Яке масло?"), "a car of unknown grade: no rule")
 	assert.False(t, otherOilGrade(&frontPads, "0W-20", ""), "only oil has a grade")
 }
+
+func TestFindVehicleListsTheMakesModelsWhenNoneMatches(t *testing.T) {
+	model := llm.NewFake(
+		llm.Call("c1", "find_vehicle", map[string]any{"make": "Skoda", "model": "A7"}),
+		llm.Say("Уточніть модель."),
+	)
+	f := newAgent(t, model)
+	f.garage.noMatch = true
+	_, err := f.agent.Reply(context.Background(), 1, 1, "шкода а7")
+	require.NoError(t, err)
+	res := result(model, 1).Content
+	assert.Contains(t, res, `"models_of_make":[{"name":"Octavia A7","years":"2013–2020"}`,
+		"the catalogue's names, to call again with the exact one")
+	assert.NotContains(t, res, "similar_makes", "the make is known")
+}

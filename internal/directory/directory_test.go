@@ -191,6 +191,12 @@ func (fakeOwnList) FindVehicles(_ context.Context, q service.VehicleQuery, _ int
 func (fakeOwnList) Makes(context.Context) ([]string, error) {
 	return []string{"Chery", "Chevrolet", "Volkswagen"}, nil
 }
+func (fakeOwnList) Models(_ context.Context, makeName string, _ int) ([]service.ModelName, error) {
+	if makeName == "Chery" {
+		return []service.ModelName{{Name: "Tiggo", Years: "2005–н.ч."}}, nil
+	}
+	return nil, nil
+}
 func (fakeOwnList) Vehicle(context.Context, int64) (*domain.Vehicle, error) {
 	return nil, domain.ErrNotFound
 }
@@ -243,4 +249,23 @@ func TestTitleCase(t *testing.T) {
 	assert.Equal(t, "Golf V (1K1)", titleCase("GOLF V (1K1)"))
 	assert.Equal(t, "Mercedes-Benz", titleCase("MERCEDES-BENZ"))
 	assert.Equal(t, "Lacetti Универсал (J200)", titleCase("LACETTI универсал (J200)"))
+}
+
+func TestModelsOfAMake(t *testing.T) {
+	d, _, _ := newDirectory()
+	d.WithFallback(fakeOwnList{})
+	ctx := context.Background()
+
+	all, err := d.Models(ctx, "шевроле", 0)
+	require.NoError(t, err)
+	assert.Equal(t, []service.ModelName{{Name: "Lacetti (J200)", Years: "2003–н.ч."}, {Name: "Aveo (T250)", Years: "2005–2011"}}, all,
+		"as the catalogue names them, for a buyer's word to be matched against")
+
+	in2013, err := d.Models(ctx, "Chevrolet", 2013)
+	require.NoError(t, err)
+	assert.Equal(t, []service.ModelName{{Name: "Lacetti (J200)", Years: "2003–н.ч."}}, in2013, "the Aveo T250 ended in 2011")
+
+	own, err := d.Models(ctx, "Chery", 0)
+	require.NoError(t, err)
+	assert.Equal(t, []service.ModelName{{Name: "Tiggo", Years: "2005–н.ч."}}, own, "a make the catalogue lacks: the shop's list")
 }

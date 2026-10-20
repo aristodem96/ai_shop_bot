@@ -41,7 +41,17 @@ type VehicleRepository interface {
 	FindVehicles(ctx context.Context, q VehicleQuery, limit int) ([]domain.Vehicle, error)
 	// Makes returns the distinct makes covered.
 	Makes(ctx context.Context) ([]string, error)
+	// Models returns the models of a make, those made in year unless it is
+	// zero, with their years.
+	Models(ctx context.Context, makeName string, year int) ([]ModelName, error)
 	Vehicle(ctx context.Context, id int64) (*domain.Vehicle, error)
+}
+
+// ModelName is a model as the directory names it, "Transporter IV Bus
+// (70B, 70C)", and its production years, "1990–2003".
+type ModelName struct {
+	Name  string
+	Years string
 }
 
 // GarageRepository stores each buyer's car.

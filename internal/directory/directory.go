@@ -82,7 +82,7 @@ func (d *Directory) WithFallback(r service.VehicleRepository) *Directory {
 // maxModels bounds the models one lookup reads modifications of: "Golf"
 // matches eight generations, and each is a call to a slow API the first
 // time.
-const maxModels = 4
+const maxModels = 6
 
 // FindVehicles finds modifications matching what the buyer said. The make
 // is required -- "1.6" alone is every car there is -- and the model is
@@ -175,6 +175,41 @@ func (d *Directory) Makes(ctx context.Context) ([]string, error) {
 	}
 	slices.Sort(names)
 	return names, nil
+}
+
+// Models lists a make's models, from the catalogue for a make it has and
+// from the shop's list otherwise, with their years.
+func (d *Directory) Models(ctx context.Context, makeName string, year int) ([]service.ModelName, error) {
+	mk, ok, err := d.findMake(ctx, makeName)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		if d.fallback == nil {
+			return nil, nil
+		}
+		return d.fallback.Models(ctx, makeName, year)
+	}
+	models, err := d.models(ctx, mk.ID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]service.ModelName, 0, len(models))
+	for _, m := range models {
+		if !yearsOverlap(m.Years, year) {
+			continue
+		}
+		from, to := parseInterval(m.Years)
+		years := ""
+		switch {
+		case from > 0 && to > 0:
+			years = fmt.Sprintf("%d–%d", from, to)
+		case from > 0:
+			years = fmt.Sprintf("%d–н.ч.", from)
+		}
+		out = append(out, service.ModelName{Name: titleCase(m.Name), Years: years})
+	}
+	return out, nil
 }
 
 // Vehicle returns a vehicle chosen earlier.
