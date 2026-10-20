@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -108,13 +107,12 @@ func (r *CatalogPartRepository) ByCategory(ctx context.Context, categoryID, vehi
 // product for. Query words match the Ukrainian name or the Russian one, a
 // category its subcategories too -- and a part not yet filed, its name not
 // translated, by its section's path holding a word of the category, so a
-// search right after a crawl does not miss what the crawl brought. A part listed in several sections comes
-// once.
+// search right after a crawl does not miss what the crawl brought. Of a
+// query's ways of naming the part, any one matches, with all its words in
+// the Ukrainian name or the Russian one. A part listed in several sections
+// comes once.
 func (r *CatalogPartRepository) ForVehicle(ctx context.Context, f service.SearchFilter) ([]domain.CatalogPart, error) {
-	words := strings.Fields(strings.ToLower(f.Query))
-	if words == nil {
-		words = []string{}
-	}
+	phrases := service.Phrases(f.Query)
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, brand, supplier_id, number, name, category FROM (
 			SELECT DISTINCT ON (mp.article_key, mp.brand_key) `+catalogPartColumns+`
@@ -130,8 +128,10 @@ func (r *CatalogPartRepository) ForVehicle(ctx context.Context, f service.Search
 			          JOIN categories c ON c.id = k.category_id
 			          WHERE sec.id = mp.section_id
 			            AND (c.slug = $2 OR c.parent_id = (SELECT id FROM categories WHERE slug = $2)))))
-			  AND (SELECT coalesce(bool_and(lower(coalesce(n.name_uk, '') || ' ' || mp.name) LIKE '%' || w || '%'), true)
-			       FROM unnest($3::text[]) w)
+			  AND (cardinality($3::text[]) = 0 OR EXISTS (
+			      SELECT 1 FROM unnest($3::text[]) ph
+			      WHERE (SELECT bool_and(lower(coalesce(n.name_uk, '') || ' ' || mp.name) LIKE '%' || w || '%')
+			             FROM unnest(string_to_array(ph, ' ')) w)))
 			  AND ($4 = '' OR mp.article_key = $4)
 			  AND ($5 = '' OR mp.brand_key = $5)
 			  AND `+notStocked+`
@@ -139,7 +139,7 @@ func (r *CatalogPartRepository) ForVehicle(ctx context.Context, f service.Search
 		) x
 		ORDER BY category = '', brand, number
 		LIMIT $6`,
-		f.VehicleID, f.Category, words, domain.NormalizeOEM(f.PartNumber), domain.NormalizeOEM(f.Brand), f.Limit)
+		f.VehicleID, f.Category, phrases, domain.NormalizeOEM(f.PartNumber), domain.NormalizeOEM(f.Brand), f.Limit)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: catalogue parts of vehicle %d: %w", f.VehicleID, err)
 	}

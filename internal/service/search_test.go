@@ -60,3 +60,10 @@ func TestSearchWithoutKeywordsIsNotRelaxed(t *testing.T) {
 	assert.Empty(t, res.Products)
 	assert.Len(t, f.filters, 1, "nothing to relax, so no second query")
 }
+
+func TestPhrases(t *testing.T) {
+	assert.Equal(t, []string{"гальмівн диск", "тормозн диск"}, Phrases("Гальмівн диск,  тормозн   диск"))
+	assert.Equal(t, []string{"шаров опор", "шарнир", "кульов"}, Phrases("шаров опор; шарнир | кульов ,"))
+	assert.Equal(t, []string{"колодк"}, Phrases("колодк"), "one way is a query as before")
+	assert.Equal(t, []string{}, Phrases(" , я "), "no way at all")
+}

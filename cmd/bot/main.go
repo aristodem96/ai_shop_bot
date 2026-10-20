@@ -21,7 +21,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -461,7 +460,7 @@ func (l catalogueLoader) Watch(ctx context.Context, userID, vehicleID int64) err
 
 func (l catalogueLoader) FetchNow(ctx context.Context, vehicleID int64, category, query string) {
 	start := time.Now()
-	got, err := l.crawl.FetchNow(ctx, vehicleID, category, strings.Fields(strings.ToLower(query)))
+	got, err := l.crawl.FetchNow(ctx, vehicleID, category, service.Phrases(query))
 	if err != nil {
 		l.log.WarnContext(ctx, "could not load sections for a search", slog.Int64("vehicle_id", vehicleID), slog.Any("error", err))
 	}

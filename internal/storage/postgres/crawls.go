@@ -140,9 +140,10 @@ func (r *CrawlRepository) Fetched(ctx context.Context, modID int64, since time.T
 // Matching finds the sections a buyer's search names for their vehicle:
 // those whose paths hold a word of the category or of its subcategories --
 // the shop's words are Ukrainian and Russian, and the catalogue's paths
-// Russian -- or one of the search's own words. Sections stored since then
-// are left out; the more specific ones, deeper in the tree, come first.
-func (r *CrawlRepository) Matching(ctx context.Context, vehicleID int64, category string, words []string, since time.Time, limit int) (int64, []int64, error) {
+// Russian -- or all the words of one of the search's ways of naming the
+// part. Sections stored since then are left out; the more specific ones,
+// deeper in the tree, come first.
+func (r *CrawlRepository) Matching(ctx context.Context, vehicleID int64, category string, phrases []string, since time.Time, limit int) (int64, []int64, error) {
 	var modID int64
 	err := r.pool.QueryRow(ctx, `SELECT autodb_mod_id FROM vehicles WHERE id = $1 AND autodb_mod_id IS NOT NULL`, vehicleID).Scan(&modID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -151,22 +152,23 @@ func (r *CrawlRepository) Matching(ctx context.Context, vehicleID int64, categor
 	if err != nil {
 		return 0, nil, fmt.Errorf("postgres: modification of vehicle %d: %w", vehicleID, err)
 	}
-	if words == nil {
-		words = []string{}
+	if phrases == nil {
+		phrases = []string{}
 	}
 	rows, err := r.pool.Query(ctx, `
 		WITH terms AS (
 			SELECT lower(k.word) AS term FROM category_keywords k JOIN categories c ON c.id = k.category_id
 			WHERE $2 <> '' AND (c.slug = $2 OR c.parent_id = (SELECT id FROM categories WHERE slug = $2))
-			UNION
-			SELECT lower(w) FROM unnest($3::text[]) w WHERE char_length(w) >= 4
 		)
 		SELECT s.id FROM autodb_sections s
-		WHERE EXISTS (SELECT 1 FROM terms WHERE lower(s.path) LIKE '%' || terms.term || '%')
+		WHERE (EXISTS (SELECT 1 FROM terms WHERE lower(s.path) LIKE '%' || terms.term || '%')
+		       OR EXISTS (
+		          SELECT 1 FROM unnest($3::text[]) ph WHERE char_length(ph) >= 4
+		            AND (SELECT bool_and(lower(s.path) LIKE '%' || w || '%') FROM unnest(string_to_array(ph, ' ')) w)))
 		  AND NOT EXISTS (SELECT 1 FROM autodb_mod_sections f
 		                  WHERE f.mod_id = $1 AND f.section_id = s.id AND f.fetched_at >= $4)
 		ORDER BY char_length(s.path) - char_length(replace(s.path, '›', '')) DESC, s.id
-		LIMIT $5`, modID, category, words, since, limit)
+		LIMIT $5`, modID, category, phrases, since, limit)
 	if err != nil {
 		return 0, nil, fmt.Errorf("postgres: sections matching a search: %w", err)
 	}

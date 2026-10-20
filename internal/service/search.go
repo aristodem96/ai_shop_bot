@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
 )
@@ -15,7 +16,10 @@ const (
 
 // SearchFilter is a structured catalogue query. Zero fields do not filter.
 type SearchFilter struct {
-	// Query is matched as word prefixes against name, brand and description.
+	// Query names the kind of part, as word stems, in one or more ways
+	// separated by commas -- in Ukrainian and Russian and by synonyms:
+	// "гальмівн диск, тормозн диск". A product matches any of the words, the
+	// best match first; a catalogue part, all the words of any one way.
 	Query string
 	// PartNumber matches an OEM number in any spelling ("1K0 698 151").
 	PartNumber string
@@ -64,4 +68,24 @@ func (s *CatalogService) Search(ctx context.Context, f SearchFilter) (*SearchRes
 		return &SearchResult{Products: products, Relaxed: len(products) > 0}, nil
 	}
 	return &SearchResult{Products: products}, nil
+}
+
+// Phrases splits a query into its ways of naming a part, each lowercased,
+// its words single-spaced: "Гальмівн диск, тормозн  диск" is "гальмівн
+// диск" and "тормозн диск". Commas, semicolons and bars separate ways; a word
+// of one letter is dropped.
+func Phrases(query string) []string {
+	out := []string{}
+	for _, ph := range strings.FieldsFunc(strings.ToLower(query), func(r rune) bool { return r == ',' || r == ';' || r == '|' }) {
+		var words []string
+		for _, w := range strings.Fields(ph) {
+			if len([]rune(w)) >= 2 {
+				words = append(words, w)
+			}
+		}
+		if len(words) > 0 {
+			out = append(out, strings.Join(words, " "))
+		}
+	}
+	return out
 }

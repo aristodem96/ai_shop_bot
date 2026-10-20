@@ -204,9 +204,12 @@ func TestSectionsForASearch(t *testing.T) {
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []int64{100300, 100310}, secs, "the shop's Russian words find the catalogue's sections: \"рычаг\", \"направляющий шарнир\"")
 
-	_, secs, err = repo.Matching(ctx, vehicleID, "", []string{"шарнир", "на"}, since, 6)
+	_, secs, err = repo.Matching(ctx, vehicleID, "", []string{"кульов опор", "направляющ шарнир", "на"}, since, 6)
 	require.NoError(t, err)
-	assert.Equal(t, []int64{100310}, secs, "by the search's own words; short ones are no evidence")
+	assert.Equal(t, []int64{100310}, secs, "by any of the search's ways of naming it; a short one is no evidence")
+	_, secs, err = repo.Matching(ctx, vehicleID, "", []string{"шарнир двери"}, since, 6)
+	require.NoError(t, err)
+	assert.Empty(t, secs, "all the words of a way must be there")
 
 	require.NoError(t, repo.SaveParts(ctx, modID, 100030, nil))
 	fetched, err := repo.Fetched(ctx, modID, since)

@@ -88,10 +88,10 @@ type Store interface {
 	// Fetched returns the sections of a modification stored since then.
 	Fetched(ctx context.Context, modID int64, since time.Time) (map[int64]bool, error)
 	// Matching returns a vehicle's modification and up to limit sections
-	// not stored for it since then whose paths hold the words of the
-	// category (and its subcategories) or any of words; zero for a vehicle
-	// not from the catalogue.
-	Matching(ctx context.Context, vehicleID int64, category string, words []string, since time.Time, limit int) (int64, []int64, error)
+	// not stored for it since then whose paths hold a word of the category
+	// (and its subcategories) or all the words of one of phrases; zero for
+	// a vehicle not from the catalogue.
+	Matching(ctx context.Context, vehicleID int64, category string, phrases []string, since time.Time, limit int) (int64, []int64, error)
 }
 
 // Section is a section with no subsections, where parts are listed, and
@@ -409,8 +409,8 @@ const (
 // and that are not stored yet, at a buyer's priority rather than the
 // background's. It returns the names of the parts it brought, to be
 // translated before the search reads them.
-func (c *Crawler) FetchNow(ctx context.Context, vehicleID int64, category string, words []string) ([]string, error) {
-	modID, secs, err := c.store.Matching(ctx, vehicleID, category, words, time.Now().Add(-c.cfg.MaxAge), fetchNowLimit)
+func (c *Crawler) FetchNow(ctx context.Context, vehicleID int64, category string, phrases []string) ([]string, error) {
+	modID, secs, err := c.store.Matching(ctx, vehicleID, category, phrases, time.Now().Add(-c.cfg.MaxAge), fetchNowLimit)
 	if err != nil || len(secs) == 0 {
 		return nil, err
 	}

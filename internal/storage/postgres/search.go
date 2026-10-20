@@ -84,7 +84,7 @@ func (r *CatalogRepository) Search(ctx context.Context, f service.SearchFilter) 
 }
 
 // maxQueryWords bounds the tsquery a single search can build.
-const maxQueryWords = 8
+const maxQueryWords = 16
 
 // tsQuery turns free words into a prefix OR-query: "тепл пуховик" becomes
 // "тепл:* | пуховик:*". Each word is reduced to letters and digits first, so
@@ -96,15 +96,17 @@ const maxQueryWords = 8
 // words first, and one unknown word should not empty the result.
 func tsQuery(text string) string {
 	var terms []string
+	seen := map[string]bool{}
 	for _, word := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
 		// U+02BC, the Ukrainian apostrophe in "вʼязана", is a letter to
 		// Unicode, but Postgres splits words on it like on any apostrophe;
 		// splitting the same way keeps the query and the index in step.
 		return r == '\u02bc' || (!unicode.IsLetter(r) && !unicode.IsDigit(r))
 	}) {
-		if len([]rune(word)) < 2 {
+		if len([]rune(word)) < 2 || seen[word] {
 			continue
 		}
+		seen[word] = true
 		terms = append(terms, word+":*")
 		if len(terms) == maxQueryWords {
 			break

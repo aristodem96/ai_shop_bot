@@ -71,6 +71,7 @@ func TestCatalogParts(t *testing.T) {
 
 	for _, f := range []service.SearchFilter{
 		{Category: "brakes"}, {Category: "brake-pads"}, {Query: "колодк"}, {Query: "тормозн колодок"}, {PartNumber: "s59-513"}, {Brand: "Brembo"},
+		{Query: "гальмівн колодк"}, {Query: "накладк гальм, тормозн колодок"}, {Query: "колодки гальмівні, комплект тормозных колодок"},
 	} {
 		f.VehicleID, f.Limit = vehicleID, 10
 		got, err := repo.ForVehicle(ctx, f)
@@ -91,6 +92,14 @@ func TestCatalogParts(t *testing.T) {
 		require.Len(t, got, 1, cat)
 		assert.Equal(t, "MANN-FILTER", got[0].Brand, "found by its section before its name is translated")
 	}
+
+	got, err = repo.ForVehicle(ctx, service.SearchFilter{VehicleID: vehicleID, Query: "масляний фільтр", Limit: 10})
+	require.NoError(t, err)
+	assert.Empty(t, got, "the Ukrainian name alone misses a part only named in Russian yet")
+	got, err = repo.ForVehicle(ctx, service.SearchFilter{VehicleID: vehicleID, Query: "масляний фільтр, масляный фильтр", Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, got, 1, "named both ways, it is found")
+	assert.Equal(t, "MANN-FILTER", got[0].Brand)
 
 	one, err := repo.CatalogPart(ctx, all[0].ID)
 	require.NoError(t, err)

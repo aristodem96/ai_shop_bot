@@ -132,7 +132,7 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, ord
 			Schema: object(map[string]any{
 				"vehicle_id":    integer("Only parts that fit this vehicle; universal products always match."),
 				"category":      map[string]any{"type": "string", "enum": slugs, "description": "Kind of part."},
-				"query":         str("Word stems of the kind of part, e.g. \"колодк\", \"амортиз\". Leave empty when category says it."),
+				"query":         str("The kind of part as short word stems, named every way a seller would know it, comma-separated: in Ukrainian and in Russian, and by common synonyms, e.g. \"гальмівн диск, тормозн диск\" or \"кульов опор, шаров опор, шарнир\". The shop's and the catalogue's names are in either language, so always give both. Leave empty when category says it all."),
 				"part_number":   str("An OEM or shop part number in any spelling."),
 				"brand":         str("Part brand."),
 				"min_price_uah": integer("Lowest price in hryvnias."),
