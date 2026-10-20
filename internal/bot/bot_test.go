@@ -219,8 +219,11 @@ func newTestBot() testBot {
 	garage := &fakeGarage{}
 	tg := &fakeTelegram{}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	bot := New(nil, tg, catalog, cart, garage, fakeKits{catalog}, Config{}, log)
+	// Slow work runs before the handler returns, for tests to see its end.
+	bot.later = func(ctx context.Context, f func(context.Context)) { f(ctx) }
 	return testBot{
-		Bot:     New(nil, tg, catalog, cart, garage, fakeKits{catalog}, Config{}, log),
+		Bot:     bot,
 		catalog: catalog, tg: tg, cart: cart, garage: garage,
 	}
 }

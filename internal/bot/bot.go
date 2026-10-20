@@ -86,6 +86,8 @@ type Bot struct {
 	kits    Maintenance
 	cfg     Config
 	log     *slog.Logger
+	// later runs slow work after the handler, inBackground but in tests.
+	later func(ctx context.Context, f func(ctx context.Context))
 
 	// orders and sessions are nil until UseOrders is called.
 	orders    Orders
@@ -138,7 +140,30 @@ type Bot struct {
 
 // New wires a Bot.
 func New(updates UpdateSource, tg Messenger, catalog Catalog, cart Cart, garage Garage, kits Maintenance, cfg Config, log *slog.Logger) *Bot {
-	return &Bot{updates: updates, tg: tg, catalog: catalog, cart: cart, garage: garage, kits: kits, cfg: cfg, log: log}
+	b := &Bot{updates: updates, tg: tg, catalog: catalog, cart: cart, garage: garage, kits: kits, cfg: cfg, log: log}
+	b.later = b.inBackground
+	return b
+}
+
+// slowWorkTimeout bounds work a handler hands to the background: the model
+// filing hundreds of a supplier's groups, a batch a minute.
+const slowWorkTimeout = 30 * time.Minute
+
+// inBackground runs f after the handler returns, on a context of its own.
+// Work that takes the model minutes would otherwise be cut off at
+// HandlerTimeout -- and the message saying it failed with it, sent on the
+// same expired context -- leaving the managers' chat silent.
+func (b *Bot) inBackground(ctx context.Context, f func(ctx context.Context)) {
+	bctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), slowWorkTimeout)
+	go func() {
+		defer cancel()
+		defer func() {
+			if rec := recover(); rec != nil {
+				b.log.ErrorContext(bctx, "background work panicked", slog.Any("panic", rec), slog.String("stack", string(debug.Stack())))
+			}
+		}()
+		f(bctx)
+	}()
 }
 
 // Run long-polls for updates until ctx is cancelled, then finishes the updates

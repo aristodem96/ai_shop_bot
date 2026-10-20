@@ -88,17 +88,27 @@ func (b *Bot) UseGrouping(g Grouping) {
 // files what it is sure of, and what is left is put to the owner before
 // the report.
 func (b *Bot) sortGroups(ctx context.Context, job *importJob) {
-	var (
-		sum *grouping.Summary
-		err error
-	)
-	if b.grouping.CanSuggest() {
-		b.send(ctx, job.chat, msgGroupsSorting, nil)
-		b.typing(ctx, job.chat)
-		sum, err = b.grouping.Sort(ctx, job.supplier)
-	} else {
-		sum, err = b.grouping.Summary(ctx, job.supplier)
+	if !b.grouping.CanSuggest() {
+		sum, err := b.grouping.Summary(ctx, job.supplier)
+		b.groupsSorted(ctx, job, sum, err)
+		return
 	}
+	// The model takes a minute a batch of eighty groups, and a 1C export
+	// has hundreds: past the handler's deadline. It goes on in the
+	// background, and what it filed is kept batch by batch, so a restart
+	// halfway picks up where it stopped.
+	b.send(ctx, job.chat, msgGroupsSorting, nil)
+	b.later(ctx, func(ctx context.Context) {
+		stop := b.keepTyping(ctx, job.chat)
+		sum, err := b.grouping.Sort(ctx, job.supplier)
+		stop()
+		b.groupsSorted(ctx, job, sum, err)
+	})
+}
+
+// groupsSorted shows what sorting a file's groups came to: the report, when
+// nothing is left for the owner, or the proposals and doubts first.
+func (b *Bot) groupsSorted(ctx context.Context, job *importJob, sum *grouping.Summary, err error) {
 	if err != nil {
 		b.log.WarnContext(ctx, "could not sort groups", slog.Any("error", err))
 		b.send(ctx, job.chat, msgGroupsFailed, nil)

@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -123,4 +124,25 @@ func TestFileWithNewGroupsIsSortedFirst(t *testing.T) {
 	assert.Contains(t, b.tg.last("editMessageText").text, "Сумнівні групи розібрано", "skipping the last one ends the review")
 	assert.Greater(t, len(imports.runs), runs, "and the file is checked again")
 	assert.Contains(t, b.tg.last("sendMessage").text, "каталог ще не змінено", "with its report")
+}
+
+// The model files hundreds of groups for minutes; the handler that started
+// it has a deadline of a minute. The work, and the message at its end, must
+// outlive the handler.
+func TestSlowWorkOutlivesItsHandler(t *testing.T) {
+	b := newTestBot()
+	handler, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+	<-handler.Done() // the handler's deadline has passed
+
+	got := make(chan error, 1)
+	b.inBackground(handler, func(ctx context.Context) {
+		got <- ctx.Err()
+	})
+	select {
+	case err := <-got:
+		assert.NoError(t, err, "the background has a deadline of its own")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the background work never ran")
+	}
 }

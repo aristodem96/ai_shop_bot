@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/aristodem96/ai_shop_bot/internal/categories"
 )
@@ -113,6 +114,10 @@ type Matcher interface {
 // each, and the answers stay well inside one response.
 const batch = 80
 
+// batchTimeout bounds the model's answer for one batch: a request the
+// provider never answers would otherwise hold the whole file.
+const batchTimeout = 4 * time.Minute
+
 // Service files groups.
 type Service struct {
 	store   Store
@@ -175,7 +180,9 @@ func (s *Service) Sort(ctx context.Context, supplierID int64) (*Summary, error) 
 		var proposed []string
 		for start := 0; start < len(ask); start += batch {
 			part := ask[start:min(start+batch, len(ask))]
-			got, err := s.matcher.Suggest(ctx, tree, proposed, part)
+			bctx, cancel := context.WithTimeout(ctx, batchTimeout)
+			got, err := s.matcher.Suggest(bctx, tree, proposed, part)
+			cancel()
 			if err != nil {
 				return nil, fmt.Errorf("grouping: %w", err)
 			}

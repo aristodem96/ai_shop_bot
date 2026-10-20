@@ -122,25 +122,37 @@ func (b *Bot) startMatch(ctx context.Context, cc callbackCtx, importID int64) (s
 		return "", err
 	}
 	job := &matchJob{importJob: importID, chat: cc.chat, supplier: ij.supplier, models: models, created: time.Now()}
-	var suggestions map[string]importer.VehicleSuggestion
-	if b.matching.CanSuggest() {
-		b.send(ctx, cc.chat, fmt.Sprintf(msgMatchThinking, num(len(unknown))), nil)
-		b.typing(ctx, cc.chat)
-		if suggestions, err = b.matching.SuggestVehicles(ctx, unknown); err != nil {
+	if !b.matching.CanSuggest() {
+		b.showMatch(ctx, job, unknown, nil)
+		return "", nil
+	}
+	// Forty names to the model can outlast the handler's deadline: the
+	// suggestions come in the background.
+	b.send(ctx, cc.chat, fmt.Sprintf(msgMatchThinking, num(len(unknown))), nil)
+	b.later(ctx, func(ctx context.Context) {
+		stop := b.keepTyping(ctx, job.chat)
+		suggestions, err := b.matching.SuggestVehicles(ctx, unknown)
+		stop()
+		if err != nil {
 			// Picking by hand works without the model; its failure costs
 			// the suggestions, not the session.
 			b.log.WarnContext(ctx, "could not suggest vehicle matches", slog.Any("error", err))
 			job.aiError = true
 		}
-	}
+		b.showMatch(ctx, job, unknown, suggestions)
+	})
+	return "", nil
+}
+
+// showMatch starts the matching session with the model's suggestions.
+func (b *Bot) showMatch(ctx context.Context, job *matchJob, unknown []importer.UnknownVehicle, suggestions map[string]importer.VehicleSuggestion) {
 	for _, u := range unknown {
 		s := suggestions[u.Name]
 		job.items = append(job.items, matchItem{UnknownVehicle: u, suggested: s.ModelIDs, note: s.Note})
 	}
 	b.matchJobs.add(ctx, job)
 	text, kb := matchItemView(job, b.matching.CanSuggest())
-	b.send(ctx, cc.chat, text, kb)
-	return "", nil
+	b.send(ctx, job.chat, text, kb)
 }
 
 // pickMatch confirms models for the current name: one, or with model zero
