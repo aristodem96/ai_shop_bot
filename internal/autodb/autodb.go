@@ -4,9 +4,10 @@
 // specifications, photos, OEM numbers, analogues.
 //
 // The catalogue is read from the vehicle's side: "what fits this car" is
-// getSectionParts, which works. The part's side, "which cars does this
-// fit", is getVehicles, which returned nothing for every part tried; the
-// client has no method for it until the provider fixes it.
+// getSectionParts. It has no parts for modifications added since about
+// 2012 (ids from about 29500), though getVehicles, the part's side, lists
+// those same modifications among the cars a part fits; the client has no
+// method for getVehicles yet.
 //
 // The API answers with a byte order mark (twice) before its JSON, gives
 // some ids as strings and others as numbers, and lets a login in from one
