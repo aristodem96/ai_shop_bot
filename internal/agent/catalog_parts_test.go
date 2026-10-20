@@ -267,3 +267,37 @@ func TestFindVehicleListsTheMakesModelsWhenNoneMatches(t *testing.T) {
 		"the catalogue's names, to call again with the exact one")
 	assert.NotContains(t, res, "similar_makes", "the make is known")
 }
+
+type fakeHandoff struct{ reasons []string }
+
+func (f *fakeHandoff) CallManager(_ context.Context, _ int64, reason string) (bool, error) {
+	f.reasons = append(f.reasons, reason)
+	return len(f.reasons) == 1, nil // the second call comes too soon
+}
+
+func TestCallManager(t *testing.T) {
+	model := llm.NewFake(
+		llm.Call("c1", "call_manager", map[string]any{"reason": "Повернення: колодки не підійшли"}),
+		llm.Call("c2", "call_manager", map[string]any{"reason": "Ще раз"}),
+		llm.Say("Менеджер напише вам у цей чат."),
+	)
+	f := newAgent(t, model)
+	h := &fakeHandoff{}
+	f.agent.UseHandoff(h)
+	_, err := f.agent.Reply(context.Background(), 1, 1, "хочу повернути колодки, дайте менеджера")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Повернення: колодки не підійшли", "Ще раз"}, h.reasons)
+	assert.Contains(t, result(model, 1).Content, `"status":"called"`)
+	assert.Contains(t, result(model, 2).Content, `"status":"already_called"`, "the managers are not rung twice in a row")
+}
+
+func TestCallManagerWithoutManagers(t *testing.T) {
+	model := llm.NewFake(
+		llm.Call("c1", "call_manager", map[string]any{"reason": "Опт"}),
+		llm.Say("Зараз не можу з'єднати."),
+	)
+	f := newAgent(t, model)
+	_, err := f.agent.Reply(context.Background(), 1, 1, "дайте менеджера")
+	require.NoError(t, err)
+	assert.Contains(t, result(model, 1).Content, `"status":"unavailable"`)
+}

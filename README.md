@@ -75,6 +75,9 @@ the buttons. Most of this README is about that boundary.
   the buyer pays.
 - **Orders** — status of every order; a notice at every change.
 - **Abandoned cart** — one reminder after a day of silence, never at night.
+- **A person when wanted** — asked for a manager, or for a return, a
+  complaint or a wholesale price, the consultant calls the managers' chat
+  with what the buyer needs and how to reach them.
 
 **For the shop**
 
@@ -83,6 +86,9 @@ the buttons. Most of this README is about that boundary.
 - **Part requests** — a buyer's request for a part on order arrives with
   *Found / Not found*; the manager answers with the price and the days, and
   the bot does the rest.
+- **Where buyers come from** — `/link sto_ivan` makes a link with a mark
+  for a QR code, an ad or a mechanic; the report shows the buyers and
+  orders each mark brought.
 - **Sales reports** — `/report`: revenue, orders, average check, pickup
   against delivery, refunds, best sellers, sales by category and part
   requests for today, yesterday, this or last week or month, or any dates;

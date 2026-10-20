@@ -127,6 +127,7 @@ type Bot struct {
 	quoteWait *awaitedQuotes
 	sources   Sources // nil: where buyers come from is not kept
 	botName   string
+	handoffs  handoffs
 	parts     CatalogParts
 
 	// dialogStore keeps the managers' dialogs across restarts; nil keeps
@@ -343,6 +344,7 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 		return
 	}
 	chat, user := m.Chat.ID, m.From.ID
+	b.handoffs.saw(m.From)
 
 	if st, ok := b.inCheckout(ctx, chat, m); ok {
 		b.checkoutInput(ctx, chat, user, m, st)

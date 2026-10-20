@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -281,4 +282,24 @@ func TestKitOnOrderWhenTheShelvesAreEmpty(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 2, managers, "each request goes to the managers")
+}
+
+func TestCallManagerTellsTheManagersWhoAndWhy(t *testing.T) {
+	b, _ := withRequests()
+	ctx := context.Background()
+	b.Handle(ctx, text("/start")) // the bot learns the buyer's name from their messages
+
+	sent, err := b.CallManager(ctx, chat, "Повернення: колодки не підійшли")
+	require.NoError(t, err)
+	assert.True(t, sent)
+	msg := b.tg.last("sendMessage")
+	assert.Equal(t, adminChat, msg.chat)
+	assert.Contains(t, msg.text, "Покупець просить менеджера")
+	assert.Contains(t, msg.text, "Повернення: колодки не підійшли")
+	assert.Contains(t, msg.text, "Skoda Octavia A7", "the buyer's car")
+	assert.Contains(t, msg.text, fmt.Sprintf("tg://user?id=%d", chat), "a way to write to them")
+
+	sent, err = b.CallManager(ctx, chat, "Ще раз")
+	require.NoError(t, err)
+	assert.False(t, sent, "not again within ten minutes")
 }

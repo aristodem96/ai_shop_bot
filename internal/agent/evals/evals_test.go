@@ -197,9 +197,15 @@ func newShop(t *testing.T) *shop {
 		agent.Config{MaxSteps: 8, MaxHistory: 40, Timeout: 90 * time.Second},
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.NoError(t, err)
+	a.UseHandoff(managers{})
 	s.agent = a
 	return s
 }
+
+// managers is a managers' chat that is always there.
+type managers struct{}
+
+func (managers) CallManager(context.Context, int64, string) (bool, error) { return true, nil }
 
 func (s *shop) say(t *testing.T, text string) *agent.Reply {
 	t.Helper()
@@ -387,4 +393,22 @@ func TestAdvisesBetweenBrands(t *testing.T) {
 	reply := s.say(t, adviseRequest)
 	judge(t, "The reply compares the brands of the brake pads shown, recommends one of them for a stated kind of buyer, "+
 		"and states no service life in kilometres, defect rate, test result or warranty term it could not know.", adviseRequest, reply.Text)
+}
+
+func TestCallsAManagerWhenAsked(t *testing.T) {
+	s := newShop(t)
+	msg := "Хочу повернути колодки, вони не підійшли. З'єднайте мене з менеджером."
+	reply := s.say(t, msg)
+
+	calls := s.rec.called("call_manager")
+	require.Len(t, calls, 1, "the buyer asked for a person")
+	assert.NotEmpty(t, calls[0]["reason"])
+	judge(t, "The reply tells the buyer a manager will contact them in this chat and does not promise a specific time.", msg, reply.Text)
+}
+
+func TestDoesNotCallAManagerForWhatItCanAnswer(t *testing.T) {
+	s := newShop(t)
+	s.setCar(t, "octavia-a7-14tsi")
+	s.say(t, "Покажи передні гальмівні колодки")
+	assert.Empty(t, s.rec.called("call_manager"), "a search is the consultant's own work")
 }

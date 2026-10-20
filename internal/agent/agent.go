@@ -82,6 +82,13 @@ type CatalogLoader interface {
 	FetchNow(ctx context.Context, vehicleID int64, category, query string)
 }
 
+// Handoff puts a buyer who wants a person before the shop's managers.
+type Handoff interface {
+	// CallManager tells the managers what the buyer needs; false when they
+	// were told about this buyer a moment ago.
+	CallManager(ctx context.Context, userID int64, reason string) (bool, error)
+}
+
 // CatalogFits says what cars a stock product fits by the parts catalogue.
 // enrich.Enricher is the implementation.
 type CatalogFits interface {
@@ -171,6 +178,13 @@ func (a *Agent) UseCatalogLoader(l CatalogLoader) {
 	a.tools.loader = l
 }
 
+// UseHandoff lets the consultant call a manager to the buyer.
+func (a *Agent) UseHandoff(h Handoff) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.tools.handoff = h
+}
+
 // UseCatalogFits adds to get_part the cars a product fits by the parts
 // catalogue.
 func (a *Agent) UseCatalogFits(f CatalogFits) {
@@ -193,7 +207,7 @@ func (a *Agent) toolsFor(ctx context.Context) *toolbox {
 	}
 	if s := treeSignature(cats); s != sig {
 		next := newToolbox(cur.catalog, cur.cart, cur.garage, cur.kits, cur.orders, cats)
-		next.parts, next.fits, next.loader = cur.parts, cur.fits, cur.loader
+		next.parts, next.fits, next.loader, next.handoff = cur.parts, cur.fits, cur.loader, cur.handoff
 		a.mu.Lock()
 		a.tools, a.treeSig, cur = next, s, next
 		a.mu.Unlock()

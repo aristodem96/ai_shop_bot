@@ -57,6 +57,7 @@ type toolbox struct {
 	parts    OrderCatalog  // nil: stock only
 	fits     CatalogFits   // nil: no catalogue fits
 	loader   CatalogLoader // nil: catalogues load only when a car is chosen
+	handoff  Handoff       // nil: no managers' chat to call
 	now      func() time.Time
 	// catSlug maps category ids to the slugs the model knows them by.
 	catSlug map[int64]string
@@ -186,6 +187,16 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, ord
 				"quantity":   integer("How many units, 1-4. Default 1."),
 			}, "product_id"),
 		},
+		{
+			Name: "call_manager",
+			Description: "Ask the shop's managers to write to the buyer in this chat. Use it when the buyer asks for a person " +
+				"(a manager, an admin, the owner, a call), or for what you cannot do: a return, a complaint, a warranty claim, " +
+				"a wholesale price, a part you could not find, a problem with an order or a payment. Returns whether the managers were told.",
+			Schema: object(map[string]any{
+				"reason": str("What the buyer needs, in Ukrainian, one or two sentences the manager can act on: " +
+					"\"Повернення: колодки не підійшли до Octavia, замовлення №42\"."),
+			}, "reason"),
+		},
 	}
 
 	tb.handlers = map[string]handler{
@@ -199,6 +210,7 @@ func newToolbox(catalog Catalog, cart Cart, garage Garage, kits Maintenance, ord
 		toolShowProducts: tb.showProducts,
 		"add_to_cart":    tb.addToCart,
 		"order_status":   tb.orderStatus,
+		"call_manager":   tb.callManager,
 	}
 	return tb
 }
@@ -579,6 +591,44 @@ func gradeKey(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// callManager tells the managers a buyer wants a person.
+func (tb *toolbox) callManager(ctx context.Context, run *runState, input json.RawMessage) (any, error) {
+	var in struct {
+		Reason string `json:"reason"`
+	}
+	if err := decode(input, &in); err != nil {
+		return nil, err
+	}
+	reason := strings.TrimSpace(in.Reason)
+	if reason == "" {
+		return nil, fmt.Errorf("%w: reason is required", errInput)
+	}
+	if tb.handoff == nil {
+		return map[string]any{"status": "unavailable",
+			"note": "no manager can be reached from here now; say so plainly and suggest the buyer contact the shop directly. Do not invent a phone number, a website or an address"}, nil
+	}
+	sent, err := tb.handoff.CallManager(ctx, run.userID, truncateRunes(reason, maxReasonRunes))
+	if err != nil {
+		return nil, err
+	}
+	if !sent {
+		return map[string]any{"status": "already_called",
+			"note": "the managers were told a few minutes ago; tell the buyer they will write here soon"}, nil
+	}
+	return map[string]any{"status": "called",
+		"note": "the managers were told; tell the buyer a manager will write to them in this chat. Do not promise a time"}, nil
+}
+
+// maxReasonRunes bounds what the model writes to the managers.
+const maxReasonRunes = 500
+
+func truncateRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
 }
 
 // fetchNowWait bounds how long a search waits for the sections it loads

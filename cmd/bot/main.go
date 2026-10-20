@@ -350,6 +350,11 @@ func (a *app) wireConsultant() error {
 		return err
 	}
 	a.bot.UseConsultant(consultant, redisstore.NewRateLimiter(a.rdb, a.cfg.Agent.RateLimit, a.cfg.Agent.RateWindow), a.tg)
+	// A buyer who wants a person gets one: the consultant calls the
+	// managers' chat.
+	if a.cfg.Payments.AdminChatID != 0 {
+		consultant.UseHandoff(a.bot)
+	}
 
 	c := a.catalogue
 	if c == nil {
