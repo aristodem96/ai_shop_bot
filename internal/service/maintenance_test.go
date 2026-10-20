@@ -91,3 +91,32 @@ func TestKitUnknownVehicle(t *testing.T) {
 	_, err := svc.Kit(context.Background(), 99)
 	require.ErrorIs(t, err, domain.ErrNotFound)
 }
+
+// kitOrders are a car's catalogue parts by part type.
+type kitOrders map[string][]domain.CatalogPart
+
+func (k kitOrders) ForPartType(_ context.Context, _ int64, partType string, limit int) ([]domain.CatalogPart, error) {
+	parts := k[partType]
+	return parts[:min(limit, len(parts))], nil
+}
+
+func TestKitOffersWhatIsNotInStockOnOrder(t *testing.T) {
+	svc, catalog := newKitFixture()
+	catalog.products = nil // nothing on the shelves
+	svc.UseOrderParts(kitOrders{
+		domain.PartOilFilter: {{ID: 71, Name: "Масляний фільтр", Brand: "MANN-FILTER", Number: "W 712/95"}},
+		domain.PartSparkPlug: {{ID: 81, Name: "Свічка запалювання", Brand: "NGK", Number: "BKR6E"}, {ID: 82, Brand: "BOSCH"}},
+	})
+
+	kit, err := svc.Kit(context.Background(), 1)
+	require.NoError(t, err)
+	assert.Empty(t, kit.Items)
+	require.Len(t, kit.OnOrder, 2, "the car's catalogue has an oil filter and plugs")
+	assert.Equal(t, domain.PartOilFilter, kit.OnOrder[0].PartType)
+	assert.Equal(t, 1, kit.OnOrder[0].Qty)
+	assert.Equal(t, domain.PartSparkPlug, kit.OnOrder[1].PartType)
+	assert.Equal(t, 4, kit.OnOrder[1].Qty, "a plug per cylinder")
+	assert.Len(t, kit.OnOrder[1].Options, 2)
+	assert.Contains(t, kit.Missing, domain.PartEngineOil, "oil is planned against the engine, never offered on order")
+	assert.Contains(t, kit.Missing, domain.PartAirFilter, "and what the catalogue lacks is still missing")
+}

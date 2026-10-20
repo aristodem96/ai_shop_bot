@@ -444,6 +444,8 @@ func (b *Bot) route(ctx context.Context, cc callbackCtx, cb callback) (string, e
 		return "", b.sendKit(ctx, cc)
 	case actKitAdd:
 		return b.addKit(ctx, cc)
+	case actKitOrder:
+		return b.orderKit(ctx, cc)
 	case actCheckout:
 		return b.startCheckout(ctx, cc)
 	case actPay:

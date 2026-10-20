@@ -748,13 +748,29 @@ func (tb *toolbox) serviceKit(ctx context.Context, _ *runState, input json.RawMe
 			items[i].Alternatives = append(items[i].Alternatives, tb.view(&alt))
 		}
 	}
-	return map[string]any{
+	type order struct {
+		PartType string            `json:"part_type"`
+		Qty      int               `json:"qty"`
+		Options  []catalogPartView `json:"options"`
+	}
+	orders := make([]order, len(kit.OnOrder))
+	for i, o := range kit.OnOrder {
+		orders[i] = order{PartType: o.PartType, Qty: o.Qty}
+		for _, p := range o.Options {
+			orders[i].Options = append(orders[i].Options, catalogPartView{ID: p.ID, Name: p.Name, Brand: p.Brand, Number: p.Number, Category: p.Category})
+		}
+	}
+	out := map[string]any{
 		"vehicle":          viewVehicle(kit.Vehicle),
 		"oil":              map[string]any{"viscosity": kit.Vehicle.OilViscosity, "litres": kit.Vehicle.OilVolume},
 		"items":            items,
 		"missing_in_stock": kit.Missing,
 		"total_uah":        int64(kit.Total()) / 100,
-	}, nil
+	}
+	if len(orders) > 0 {
+		out["on_order"] = orders
+	}
+	return out, nil
 }
 
 // statusMeanings tell the model what each status means for the buyer, so it

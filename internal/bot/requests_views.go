@@ -90,6 +90,17 @@ func quoteView(r *domain.PartRequest) (string, *telegram.InlineKeyboard) {
 	}}}
 }
 
+// kitRequestsView is the buyer's message once a kit's parts are requested.
+func kitRequestsView(reqs []*domain.PartRequest) string {
+	var b strings.Builder
+	b.WriteString("✅ <b>Запити на комплект прийнято</b>\n")
+	for _, r := range reqs {
+		fmt.Fprintf(&b, "\n№%d · %s · <b>%s %s</b> × %d", r.ID, esc(r.Name), esc(r.Brand), esc(r.Number), r.Qty)
+	}
+	b.WriteString("\n\nМенеджер знайде деталі в постачальників і надішле сюди ціну й термін на кожну. Ви вирішите, що брати.")
+	return b.String()
+}
+
 // notFoundView tells the buyer no supplier has the part.
 func notFoundView(r *domain.PartRequest) string {
 	return fmt.Sprintf("😔 За запитом №%d деталь не знайшли в постачальників:\n%s\n\n"+

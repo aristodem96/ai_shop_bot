@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
+	"github.com/aristodem96/ai_shop_bot/internal/service"
 	"github.com/aristodem96/ai_shop_bot/internal/telegram"
 )
 
@@ -231,4 +232,53 @@ func TestQuoteWithoutReplying(t *testing.T) {
 
 	b.Handle(ctx, say(adminChat, "1300 2"))
 	assert.Equal(t, domain.UAH(1450), reqs.byID[1].Price, "the wait ends with the price: a later number is not a second quote")
+}
+
+// emptyShelfKits is a kit with nothing in stock and two parts on order.
+type emptyShelfKits struct{}
+
+func (emptyShelfKits) Kit(context.Context, int64) (*service.Kit, error) {
+	return &service.Kit{
+		Vehicle: octavia,
+		Missing: []string{domain.PartEngineOil, domain.PartOilFilter, domain.PartSparkPlug},
+		OnOrder: []service.KitOrder{
+			{PartType: domain.PartOilFilter, Qty: 1, Options: []domain.CatalogPart{{ID: 71, Name: "Масляний фільтр", Brand: "MANN-FILTER", Number: "W 712/95"}}},
+			{PartType: domain.PartSparkPlug, Qty: 4, Options: []domain.CatalogPart{{ID: 81, Name: "Свічка запалювання", Brand: "NGK", Number: "BKR6E"}}},
+		},
+	}, nil
+}
+
+func TestKitOnOrderWhenTheShelvesAreEmpty(t *testing.T) {
+	b, reqs := withRequests()
+	b.kits = emptyShelfKits{}
+	ctx := context.Background()
+
+	b.Handle(ctx, press(encode(actKit)))
+	view := b.tg.last("sendMessage")
+	assert.Contains(t, view.text, "але все це можемо замовити", "not \"there is nothing\"")
+	assert.Contains(t, view.text, "<b>1.</b> 🔎 Масляний фільтр · MANN-FILTER W 712/95 — 1 шт.")
+	assert.Contains(t, view.text, "<b>2.</b> 🔎 Свічка запалювання · NGK BKR6E — 4 шт.")
+	assert.Contains(t, view.text, "Немає в наявності для вашого авто: моторна олива", "oil is still missing")
+	assert.Contains(t, callbacks(view.markup), encode(actKitOrder))
+	assert.Contains(t, callbacks(view.markup), encode(actRequest, 81), "or one part at a time")
+
+	b.Handle(ctx, press(encode(actKitOrder)))
+	require.Len(t, reqs.byID, 2, "a request per part on order")
+	assert.Equal(t, 4, reqs.byID[2].Qty, "in the kit's quantity")
+	assert.Equal(t, "NGK", reqs.byID[2].Brand)
+	toBuyer := ""
+	for _, c := range b.tg.calls {
+		if c.method == "sendMessage" && c.chat == chat {
+			toBuyer = c.text
+		}
+	}
+	assert.Contains(t, toBuyer, "Запити на комплект прийнято")
+	assert.Contains(t, toBuyer, "№1 · Масляний фільтр")
+	managers := 0
+	for _, c := range b.tg.calls {
+		if c.method == "sendMessage" && c.chat == adminChat {
+			managers++
+		}
+	}
+	assert.Equal(t, 2, managers, "each request goes to the managers")
 }

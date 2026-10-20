@@ -198,6 +198,7 @@ const (
 	msgBadTransition      = "Цей статус уже неможливо змінити."
 	msgNoOrders           = "У вас ще немає замовлень."
 
+	msgKitNothingToOrder   = "Усе з комплекту є на складі — замовляти нічого."
 	msgOrderCancelled      = "✖️ Замовлення №%d скасовано. Товари повернуто в кошик — можна змінити їх або оформити знову."
 	msgOrderCancelledToast = "Замовлення скасовано, товари в кошику"
 	msgOrderNotCancellable = "Замовлення №%d вже не можна скасувати: %s."

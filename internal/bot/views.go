@@ -436,29 +436,56 @@ func kitView(kit *service.Kit) (string, *telegram.InlineKeyboard) {
 	b.WriteString("\n")
 
 	kb := &telegram.InlineKeyboard{}
-	for n, i := range kit.Items {
-		fmt.Fprintf(&b, "<b>%d.</b> %s · %s — %d × %s\n", n+1, esc(i.Product.Name), esc(i.Product.Brand), i.Qty, i.Product.Price)
+	n := 0
+	for _, i := range kit.Items {
+		n++
+		fmt.Fprintf(&b, "<b>%d.</b> %s · %s — %d × %s\n", n, esc(i.Product.Name), esc(i.Product.Brand), i.Qty, i.Product.Price)
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{
-			button(fmt.Sprintf("%d · %s · %s", n+1, i.Product.Brand, i.Product.Price), actProduct, i.Product.ID),
+			button(fmt.Sprintf("%d · %s · %s", n, i.Product.Brand, i.Product.Price), actProduct, i.Product.ID),
 		})
 	}
-	if len(kit.Missing) > 0 {
-		missing := make([]string, len(kit.Missing))
-		for i, t := range kit.Missing {
-			missing[i] = partTypeLabels[t]
-		}
-		b.WriteString("\n⚠️ Немає в наявності для вашого авто: " + strings.Join(missing, ", ") + "\n")
+	if len(kit.Items) > 0 {
+		fmt.Fprintf(&b, "\nРазом: <b>%s</b>\n", kit.Total())
+		kb.Rows = append(kb.Rows, []telegram.InlineButton{
+			button(fmt.Sprintf("🛒 Додати весь комплект — %s", kit.Total()), actKitAdd),
+		})
 	}
 
-	if len(kit.Items) == 0 {
-		b.WriteString("Для вашого авто зараз нічого з комплекту немає в наявності.")
-		return b.String(), kb
+	// What is not in stock but can be ordered, its first option each.
+	onOrder := map[string]bool{}
+	if len(kit.OnOrder) > 0 {
+		if len(kit.Items) == 0 {
+			b.WriteString("На складі для вашого авто зараз нічого з комплекту немає, але все це можемо замовити:\n")
+		} else {
+			b.WriteString("\n🔎 <b>Немає на складі, але можемо замовити:</b>\n")
+		}
+		for _, o := range kit.OnOrder {
+			onOrder[o.PartType] = true
+			p := o.Options[0]
+			n++
+			fmt.Fprintf(&b, "<b>%d.</b> 🔎 %s · %s — %d шт., ціна за запитом\n", n, esc(p.Name), esc(strings.TrimSpace(p.Brand+" "+p.Number)), o.Qty)
+			kb.Rows = append(kb.Rows, []telegram.InlineButton{button(orderPartLabel(n, p), actRequest, p.ID)})
+		}
+		kb.Rows = append(kb.Rows, []telegram.InlineButton{
+			button(fmt.Sprintf("🔎 Замовити все, чого немає — %d поз.", len(kit.OnOrder)), actKitOrder),
+		})
 	}
-	fmt.Fprintf(&b, "\nРазом: <b>%s</b>", kit.Total())
-	kb.Rows = append(kb.Rows, []telegram.InlineButton{
-		button(fmt.Sprintf("🛒 Додати весь комплект — %s", kit.Total()), actKitAdd),
-	})
-	return b.String(), kb
+	var missing []string
+	for _, t := range kit.Missing {
+		if !onOrder[t] {
+			missing = append(missing, partTypeLabels[t])
+		}
+	}
+	switch {
+	case len(missing) > 0:
+		b.WriteString("\n⚠️ Немає в наявності для вашого авто: " + strings.Join(missing, ", ") + "\n")
+	case len(kit.Items) == 0 && len(kit.OnOrder) == 0:
+		b.WriteString("Для вашого авто зараз нічого з комплекту немає в наявності.")
+	}
+	if len(kit.OnOrder) > 0 {
+		b.WriteString("\n🔎 — менеджер знайде деталь у постачальників і надішле ціну й термін; оплачуєте, лише якщо вас влаштує.")
+	}
+	return strings.TrimRight(b.String(), "\n"), kb
 }
 
 func carForgottenView() (string, *telegram.InlineKeyboard) {

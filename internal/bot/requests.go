@@ -132,19 +132,59 @@ func (b *Bot) sendRequest(ctx context.Context, cc callbackCtx, partID, qty int64
 	if err != nil {
 		return "", err
 	}
-	req := domain.PartRequest{UserID: cc.user, Brand: p.Brand, Number: p.Number, PartKey: domain.NormalizeOEM(p.Number),
-		Name: p.Name, Category: p.Category, Qty: int(qty)}
-	if car := b.car(ctx, cc.user); car != nil {
+	req, err := b.placeRequest(ctx, cc.user, p, int(qty))
+	if err != nil {
+		return "", err
+	}
+	return msgRequestSentToast, b.editText(ctx, cc, requestSentView(req), nil)
+}
+
+// placeRequest stores a buyer's request for a part on order and puts it
+// before the managers.
+func (b *Bot) placeRequest(ctx context.Context, user int64, p *domain.CatalogPart, qty int) (*domain.PartRequest, error) {
+	req := domain.PartRequest{UserID: user, Brand: p.Brand, Number: p.Number, PartKey: domain.NormalizeOEM(p.Number),
+		Name: p.Name, Category: p.Category, Qty: qty}
+	if car := b.car(ctx, user); car != nil {
 		req.Vehicle = car.Label()
 	}
+	var err error
 	if req.ID, err = b.requests.Create(ctx, req); err != nil {
-		return "", err
+		return nil, err
 	}
 	text, kb := adminRequestView(&req)
 	if err := b.tg.SendMessage(ctx, b.adminChat, text, kb); err != nil {
-		return "", fmt.Errorf("bot: request %d to the managers: %w", req.ID, err)
+		return nil, fmt.Errorf("bot: request %d to the managers: %w", req.ID, err)
 	}
-	return msgRequestSentToast, b.editText(ctx, cc, requestSentView(&req), nil)
+	return &req, nil
+}
+
+// orderKit requests every part of the buyer's kit that is not in stock, the
+// first option of each, in the kit's quantities: one tap for a shop whose
+// shelves are empty.
+func (b *Bot) orderKit(ctx context.Context, cc callbackCtx) (string, error) {
+	if b.requests == nil {
+		return "", errBadCallback
+	}
+	if b.adminChat == 0 {
+		return "", errPaymentUnavailable
+	}
+	kit, err := b.buyerKit(ctx, cc.user)
+	if err != nil {
+		return "", err
+	}
+	if len(kit.OnOrder) == 0 {
+		return msgKitNothingToOrder, nil
+	}
+	reqs := make([]*domain.PartRequest, 0, len(kit.OnOrder))
+	for _, o := range kit.OnOrder {
+		req, err := b.placeRequest(ctx, cc.user, &o.Options[0], o.Qty)
+		if err != nil {
+			return "", err
+		}
+		reqs = append(reqs, req)
+	}
+	b.send(ctx, cc.chat, kitRequestsView(reqs), nil)
+	return msgRequestSentToast, nil
 }
 
 // askQuote asks the manager for the price and lead time, as a reply: the

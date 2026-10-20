@@ -369,6 +369,8 @@ func (a *app) wireConsultant() error {
 	a.bot.UseRequests(requests, catalogParts)
 	// The buttons' catalogue lists them too, after the stock.
 	a.catalog.UseOrderParts(catalogParts)
+	// So does the maintenance kit, for what is not in stock.
+	a.kits.UseOrderParts(catalogParts)
 	a.bot.UseCatalogueProgress(catalogParts)
 	a.every(10*time.Minute, "expiring quotes", func(ctx context.Context) error {
 		_, err := requests.Expire(ctx)

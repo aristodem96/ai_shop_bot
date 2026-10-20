@@ -93,6 +93,14 @@ func TestCatalogParts(t *testing.T) {
 		assert.Equal(t, "MANN-FILTER", got[0].Brand, "found by its section before its name is translated")
 	}
 
+	kit, err := repo.ForPartType(ctx, vehicleID, domain.PartOilFilter, 3)
+	require.NoError(t, err)
+	require.Len(t, kit, 1, "a maintenance kit finds the oil filter on order by its part type")
+	assert.Equal(t, "MANN-FILTER", kit[0].Brand)
+	kit, err = repo.ForPartType(ctx, vehicleID, "no-such-type", 3)
+	require.NoError(t, err)
+	assert.Empty(t, kit)
+
 	got, err = repo.ForVehicle(ctx, service.SearchFilter{VehicleID: vehicleID, Query: "масляний фільтр", Limit: 10})
 	require.NoError(t, err)
 	assert.Empty(t, got, "the Ukrainian name alone misses a part only named in Russian yet")

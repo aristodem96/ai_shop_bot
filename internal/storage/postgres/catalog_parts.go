@@ -139,6 +139,20 @@ func (r *CatalogPartRepository) ForVehicle(ctx context.Context, f service.Search
 	return parts, nil
 }
 
+// ForPartType returns a vehicle's catalogue parts of a kind a maintenance
+// kit needs, from the category the shop files that kind in.
+func (r *CatalogPartRepository) ForPartType(ctx context.Context, vehicleID int64, partType string, limit int) ([]domain.CatalogPart, error) {
+	var slug string
+	err := r.pool.QueryRow(ctx, `SELECT slug FROM categories WHERE part_type = $1 ORDER BY id LIMIT 1`, partType).Scan(&slug)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("postgres: category of part type %q: %w", partType, err)
+	}
+	return r.ForVehicle(ctx, service.SearchFilter{VehicleID: vehicleID, Category: slug, Limit: limit})
+}
+
 // Kinds sums up what a search finds in a vehicle's catalogue: up to limit
 // kinds of part, the most numerous first, and how many parts in all.
 func (r *CatalogPartRepository) Kinds(ctx context.Context, f service.SearchFilter, limit int) ([]domain.PartKind, int, error) {

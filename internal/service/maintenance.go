@@ -30,6 +30,25 @@ type Kit struct {
 	// Missing lists the part types the kit needs but the shop has none of in
 	// stock for this vehicle. The buyer is told, not left to assume.
 	Missing []string
+	// OnOrder are the missing parts the car's catalogue has, to be ordered:
+	// a shop with nothing on its shelves can still assemble a kit.
+	OnOrder []KitOrder
+}
+
+// KitOrder is a part of a kit not in stock that the shop can order: the
+// first option is the one ordered with the whole kit.
+type KitOrder struct {
+	PartType string
+	Qty      int
+	Options  []domain.CatalogPart
+}
+
+// KitOrderParts finds the car's catalogue parts of a kind a kit needs.
+// postgres.CatalogPartRepository is the implementation.
+type KitOrderParts interface {
+	// ForPartType returns up to limit of them, from the category the
+	// shop files that kind of part in.
+	ForPartType(ctx context.Context, vehicleID int64, partType string, limit int) ([]domain.CatalogPart, error)
 }
 
 // Total is the price of the kit with the default parts.
@@ -53,7 +72,15 @@ const kitAlternatives = 2
 type MaintenanceService struct {
 	catalog  CatalogRepository
 	vehicles VehicleRepository
+	order    KitOrderParts // nil: the stock alone
 }
+
+// UseOrderParts lets a kit offer, for what is not in stock, the car's
+// catalogue parts the shop can order.
+func (s *MaintenanceService) UseOrderParts(o KitOrderParts) { s.order = o }
+
+// kitOrderOptions bounds the options on order listed per kit line.
+const kitOrderOptions = 3
 
 // NewMaintenanceService wires a MaintenanceService.
 func NewMaintenanceService(catalog CatalogRepository, vehicles VehicleRepository) *MaintenanceService {
@@ -84,7 +111,7 @@ func (s *MaintenanceService) Kit(ctx context.Context, vehicleID int64) (*Kit, er
 		parts = append(parts, struct {
 			partType string
 			qty      int
-		}{domain.PartSparkPlug, v.Cylinders})
+		}{domain.PartSparkPlug, max(v.Cylinders, 1)})
 	}
 
 	for _, p := range parts {
@@ -94,6 +121,9 @@ func (s *MaintenanceService) Kit(ctx context.Context, vehicleID int64) (*Kit, er
 		}
 		if len(found) == 0 {
 			kit.Missing = append(kit.Missing, p.partType)
+			if err := s.addOrder(ctx, kit, p.partType, p.qty); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		kit.Items = append(kit.Items, KitItem{
@@ -101,6 +131,23 @@ func (s *MaintenanceService) Kit(ctx context.Context, vehicleID int64) (*Kit, er
 		})
 	}
 	return kit, nil
+}
+
+// addOrder offers a missing part from the car's catalogue, if it has one.
+// Oil is not offered: its cans are planned against the engine's volume and
+// grade, which a catalogue part does not carry.
+func (s *MaintenanceService) addOrder(ctx context.Context, kit *Kit, partType string, qty int) error {
+	if s.order == nil {
+		return nil
+	}
+	options, err := s.order.ForPartType(ctx, kit.Vehicle.ID, partType, kitOrderOptions)
+	if err != nil {
+		return err
+	}
+	if len(options) > 0 {
+		kit.OnOrder = append(kit.OnOrder, KitOrder{PartType: partType, Qty: qty, Options: options})
+	}
+	return nil
 }
 
 // addOil covers the engine's oil volume with the cans in stock.
