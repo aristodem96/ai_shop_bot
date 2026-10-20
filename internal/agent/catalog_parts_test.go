@@ -240,3 +240,15 @@ func TestSearchWithoutACarOffersTheSavedCarsParts(t *testing.T) {
 	assert.Contains(t, res, `"catalog_parts":[`, "a search in general still offers the parts on order of the buyer's car")
 	assert.Contains(t, res, fmt.Sprintf(`"catalog_parts_vehicle_id":%d`, octavia.ID), "and says whose they are")
 }
+
+func TestOtherOilGrade(t *testing.T) {
+	oil := func(grade string) *domain.Product {
+		return &domain.Product{PartType: domain.PartEngineOil, Specs: []domain.Spec{{Name: "В'язкість", Value: grade}}}
+	}
+	assert.True(t, otherOilGrade(oil("5W-30"), "0W-20", "Яке моторне масло мені взяти?"), "the Camry takes 0W-20")
+	assert.False(t, otherOilGrade(oil("0W-20"), "0W-20", "Яке масло?"))
+	assert.False(t, otherOilGrade(oil("0w20"), "0W-20", ""), "however it is spelt")
+	assert.False(t, otherOilGrade(oil("5W-30"), "0W-20", "а 5w 30 є?"), "the buyer asked for that grade by name")
+	assert.False(t, otherOilGrade(oil("5W-30"), "", "Яке масло?"), "a car of unknown grade: no rule")
+	assert.False(t, otherOilGrade(&frontPads, "0W-20", ""), "only oil has a grade")
+}

@@ -245,7 +245,7 @@ func (a *Agent) Reply(ctx context.Context, userID, chatID int64, text string, im
 	}
 	turn := []llm.Message{{Role: llm.RoleUser, Text: text, Images: images}}
 	tools := a.toolsFor(ctx)
-	run := &runState{userID: userID}
+	run := &runState{userID: userID, question: text}
 	var usage llm.Usage
 	start := time.Now()
 

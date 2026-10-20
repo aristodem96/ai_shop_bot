@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
 	"github.com/aristodem96/ai_shop_bot/internal/llm"
@@ -33,7 +34,9 @@ const maxAddQty = 6
 const toolShowProducts = "show_products"
 
 type runState struct {
-	userID      int64
+	userID int64
+	// question is the buyer's message this turn answers.
+	question    string
 	shown       []int64
 	shownParts  []int64
 	cartChanged bool
@@ -514,6 +517,40 @@ type catalogKindView struct {
 	Count int    `json:"count"`
 }
 
+// carOilGrade is the oil grade of the buyer's saved car, "" when unknown.
+func (tb *toolbox) carOilGrade(ctx context.Context, userID int64) string {
+	car, err := tb.garage.Get(ctx, userID)
+	if err != nil || car == nil {
+		return ""
+	}
+	return car.OilViscosity
+}
+
+// otherOilGrade reports whether p is engine oil of a grade other than the
+// car's, which the buyer did not ask for by name.
+func otherOilGrade(p *domain.Product, carGrade, question string) bool {
+	if carGrade == "" || p.PartType != domain.PartEngineOil {
+		return false
+	}
+	g, ok := p.Spec("В'язкість")
+	if !ok || gradeKey(g) == gradeKey(carGrade) {
+		return false
+	}
+	return !strings.Contains(gradeKey(question), gradeKey(g))
+}
+
+// gradeKey writes an oil grade, or text holding one, without its spelling:
+// "5W-30", "5w30" and "5W 30" are "5w30".
+func gradeKey(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // fetchNowWait bounds how long a search waits for the sections it loads
 // itself: a few seconds of a buyer's time, inside the answer's deadline.
 const fetchNowWait = 20 * time.Second
@@ -628,7 +665,8 @@ func (tb *toolbox) showProducts(ctx context.Context, run *runState, input json.R
 		return nil, err
 	}
 
-	var unknown []int64
+	var unknown, wrongOil []int64
+	grade := tb.carOilGrade(ctx, run.userID)
 	for _, id := range in.ProductIDs {
 		if slices.Contains(run.shown, id) {
 			continue
@@ -636,17 +674,31 @@ func (tb *toolbox) showProducts(ctx context.Context, run *runState, input json.R
 		if len(run.shown) == maxShown {
 			return nil, fmt.Errorf("%w: at most %d products per reply", errInput, maxShown)
 		}
-		if _, err := tb.catalog.Product(ctx, id); err != nil {
+		p, err := tb.catalog.Product(ctx, id)
+		if err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
 				unknown = append(unknown, id)
 				continue
 			}
 			return nil, err
 		}
+		if otherOilGrade(p, grade, run.question) {
+			wrongOil = append(wrongOil, id)
+			continue
+		}
 		run.shown = append(run.shown, id)
 	}
 	if len(unknown) > 0 {
 		return nil, fmt.Errorf("%w: no products with ids %v; use ids from search results", errInput, unknown)
+	}
+	// Oil is universal, so a search finds every grade; the car takes one.
+	// Shown beside it, another grade reads as a fit -- the buyer's text says
+	// 0W-20 while a 5W-30 card sits under it -- so it is refused here, not
+	// left to the model's care, unless the buyer named that grade.
+	if len(wrongOil) > 0 {
+		return nil, fmt.Errorf("%w: products %v are engine oils of another grade than the buyer's car takes (%s); "+
+			"they were not shown -- show only %s oil unless the buyer asks for another grade, and do not offer them in your text",
+			errInput, wrongOil, grade, grade)
 	}
 	return map[string]any{"shown": len(run.shown), "shown_catalog_parts": len(run.shownParts)}, nil
 }
