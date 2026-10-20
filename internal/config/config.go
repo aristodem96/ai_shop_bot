@@ -134,6 +134,10 @@ type AutoDB struct {
 	// a buyer's lookup never queues behind them.
 	RPS           int
 	BackgroundRPS int
+	// CrawlParallel is how many calls a crawl keeps in flight. A call takes
+	// the API a second or two, so this, as much as RPS, sets how fast a
+	// car's catalogue loads.
+	CrawlParallel int
 }
 
 // LoadBot reads the bot configuration.
@@ -163,10 +167,12 @@ func LoadBot() (*Bot, error) {
 			URL:      envString("AUTODB_API_URL", "https://auto-db.pro/api/v1/"),
 			User:     envString("AUTODB_USER", ""),
 			Password: envString("AUTODB_PASSWORD", ""),
-			// The plan's limits are not published; a few a second is what
-			// the API was seen to bear without slowing down.
-			RPS:           envInt("AUTODB_RPS", 4, collect),
-			BackgroundRPS: envInt("AUTODB_BACKGROUND_RPS", 2, collect),
+			// The plan's limits are not published. Ten a second loads a car
+			// in under a minute; should the API answer 429 or 5xx, every
+			// call backs off and retries, and these can be lowered here.
+			RPS:           envInt("AUTODB_RPS", 10, collect),
+			BackgroundRPS: envInt("AUTODB_BACKGROUND_RPS", 6, collect),
+			CrawlParallel: envInt("AUTODB_CRAWL_PARALLEL", 10, collect),
 		},
 		ImportDir: envString("IMPORT_DIR", filepath.Join(os.TempDir(), "ai_shop_bot-imports")),
 		Redis: Redis{

@@ -292,7 +292,7 @@ func (a *app) newCatalogue() *catalogue {
 		RPS: a.cfg.AutoDB.RPS, BackgroundRPS: a.cfg.AutoDB.BackgroundRPS})
 	return &catalogue{
 		dir:      directory.New(api, postgres.NewDirectoryRepository(a.pool), a.log).WithFallback(a.vehicleRepo),
-		crawl:    crawler.New(api, postgres.NewCrawlRepository(a.pool), crawler.Config{}, a.log),
+		crawl:    crawler.New(api, postgres.NewCrawlRepository(a.pool), crawler.Config{Parallel: a.cfg.AutoDB.CrawlParallel}, a.log),
 		enricher: enrich.New(api, postgres.NewEnrichRepository(a.pool), enrich.Config{}, a.log),
 	}
 }
