@@ -271,6 +271,19 @@ consultant asks for the engine when more than one matches. Saved in Postgres,
 the car outlives the 24-hour conversation and filters the catalogue for
 buttons too.
 
+### Only the cars buyers ask about are stored
+
+A parts catalogue of every car is enormous, and owning a copy means a data
+licence and a server to hold and update it. The bot keeps none of that. It
+reads Auto-DB through an ordinary subscription and stores only the cars its
+buyers choose or ask about: about ten thousand parts each -- a BMW 3 (E46)
+came to 10 112 from 363 sections -- loaded in two or three minutes and then
+read locally. A car one buyer chose is ready for the next, and is refreshed
+only when it is chosen again after thirty days. The database grows with the
+shop's customers, not with the catalogue: forty cars came to 310 000 rows,
+which a small server holds with ease. Section paths are the same for every
+car, so they are learnt once and serve all of them.
+
 ### The parts catalogue is read from a cache
 
 Auto-DB answers a section of a car's parts tree in seconds, and a car has
