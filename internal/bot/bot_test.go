@@ -300,7 +300,7 @@ func TestMaintenanceKitButton(t *testing.T) {
 	msg := b.tg.last("sendMessage")
 	assert.Contains(t, msg.text, "Комплект для ТО")
 	assert.Contains(t, msg.text, "2 × 1\u202f450 грн")
-	assert.Contains(t, msg.text, "Немає в наявності для вашого авто: салонний фільтр")
+	assert.Contains(t, msg.text, "Для вашого авто зараз немає: салонний фільтр")
 	assert.Contains(t, callbacks(msg.markup), encode(actKitAdd))
 }
 

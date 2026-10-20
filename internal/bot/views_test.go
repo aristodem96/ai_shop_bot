@@ -189,3 +189,15 @@ func TestListingNumbersAcrossPages(t *testing.T) {
 	assert.Contains(t, text, "<b>9.</b> Фільтр масляний з дуже довгою назвою, що не влізла б у кнопку · MANN-FILTER", "page two starts at nine")
 	assert.Equal(t, "9 · MANN-FILTER · 310 грн", kb.Rows[0][0].Text)
 }
+
+func TestKitSaysWhyThereIsNoOil(t *testing.T) {
+	grade := domain.Vehicle{Make: "Skoda", Model: "Octavia A7", Engine: "1.4 TSI", YearFrom: 2013, OilViscosity: "5W-30", OilVolume: 3.6}
+	text, _ := kitView(&service.Kit{Vehicle: grade, Missing: []string{domain.PartEngineOil}})
+	assert.Contains(t, text, "Моторної оливи 5W-30</b> (3,6 л) зараз немає на складі", "a grade known, just not in stock")
+
+	noGrade := grade
+	noGrade.OilViscosity, noGrade.OilVolume = "", 0
+	text, _ = kitView(&service.Kit{Vehicle: noGrade, Missing: []string{domain.PartEngineOil}})
+	assert.Contains(t, text, "немає норми в'язкості й об'єму", "a car from the catalogue: no grade to pick by")
+	assert.NotContains(t, text, "немає на складі", "so it is not a matter of stock")
+}

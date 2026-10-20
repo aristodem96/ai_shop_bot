@@ -256,10 +256,12 @@ func TestKitOnOrderWhenTheShelvesAreEmpty(t *testing.T) {
 
 	b.Handle(ctx, press(encode(actKit)))
 	view := b.tg.last("sendMessage")
-	assert.Contains(t, view.text, "але все це можемо замовити", "not \"there is nothing\"")
+	assert.Contains(t, view.text, "На складі для вашого авто зараз нічого з комплекту немає.", "said plainly: nothing is in stock")
+	assert.Contains(t, view.text, "Під замовлення можемо привезти:", "and what can be ordered")
 	assert.Contains(t, view.text, "<b>1.</b> 🔎 Масляний фільтр · MANN-FILTER W 712/95 — 1 шт.")
 	assert.Contains(t, view.text, "<b>2.</b> 🔎 Свічка запалювання · NGK BKR6E — 4 шт.")
-	assert.Contains(t, view.text, "Немає в наявності для вашого авто: моторна олива", "oil is still missing")
+	assert.Contains(t, view.text, "Моторна олива:</b> для цього двигуна в довіднику немає норми", "oil is missing for a reason, and says which")
+	assert.NotContains(t, view.text, "Немає в наявності для вашого авто: моторна олива", "not as if the rest were in stock")
 	assert.Contains(t, callbacks(view.markup), encode(actKitOrder))
 	assert.Contains(t, callbacks(view.markup), encode(actRequest, 81), "or one part at a time")
 

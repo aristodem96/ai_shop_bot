@@ -435,7 +435,7 @@ func kitView(kit *service.Kit) (string, *telegram.InlineKeyboard) {
 	b.WriteString("🔧 <b>Комплект для ТО</b>\n")
 	b.WriteString(esc(kit.Vehicle.Label()) + "\n")
 	if kit.Vehicle.OilViscosity != "" {
-		fmt.Fprintf(&b, "Олива %s, %.1f л\n", esc(kit.Vehicle.OilViscosity), kit.Vehicle.OilVolume)
+		fmt.Fprintf(&b, "Олива %s, %s л\n", esc(kit.Vehicle.OilViscosity), strings.Replace(fmt.Sprintf("%.1f", kit.Vehicle.OilVolume), ".", ",", 1))
 	}
 	b.WriteString("\n")
 
@@ -459,9 +459,9 @@ func kitView(kit *service.Kit) (string, *telegram.InlineKeyboard) {
 	onOrder := map[string]bool{}
 	if len(kit.OnOrder) > 0 {
 		if len(kit.Items) == 0 {
-			b.WriteString("На складі для вашого авто зараз нічого з комплекту немає, але все це можемо замовити:\n")
+			b.WriteString("На складі для вашого авто зараз нічого з комплекту немає.\n\n🔎 <b>Під замовлення можемо привезти:</b>\n")
 		} else {
-			b.WriteString("\n🔎 <b>Немає на складі, але можемо замовити:</b>\n")
+			b.WriteString("\n🔎 <b>Немає на складі, але можемо привезти під замовлення:</b>\n")
 		}
 		for _, o := range kit.OnOrder {
 			onOrder[o.PartType] = true
@@ -474,17 +474,33 @@ func kitView(kit *service.Kit) (string, *telegram.InlineKeyboard) {
 			button(fmt.Sprintf("🔎 Замовити все, чого немає — %d поз.", len(kit.OnOrder)), actKitOrder),
 		})
 	}
+	// What is neither in stock nor to be ordered, said for what it is.
 	var missing []string
+	oilMissing := false
 	for _, t := range kit.Missing {
-		if !onOrder[t] {
+		switch {
+		case onOrder[t]:
+		case t == domain.PartEngineOil:
+			oilMissing = true
+		default:
 			missing = append(missing, partTypeLabels[t])
 		}
 	}
-	switch {
-	case len(missing) > 0:
-		b.WriteString("\n⚠️ Немає в наявності для вашого авто: " + strings.Join(missing, ", ") + "\n")
-	case len(kit.Items) == 0 && len(kit.OnOrder) == 0:
-		b.WriteString("Для вашого авто зараз нічого з комплекту немає в наявності.")
+	if len(kit.Items) == 0 && len(kit.OnOrder) == 0 {
+		b.WriteString("Для вашого авто зараз нічого з комплекту немає ні на складі, ні під замовлення.\n")
+	}
+	if oilMissing {
+		v := kit.Vehicle
+		if v.OilViscosity == "" || v.OilVolume <= 0 {
+			// Most cars from the parts catalogue: it lists no oil grade.
+			b.WriteString("\n🛢 <b>Моторна олива:</b> для цього двигуна в довіднику немає норми в'язкості й об'єму, тож підібрати оливу сам я не можу. Напишіть, і підкажемо.\n")
+		} else {
+			litres := strings.Replace(fmt.Sprintf("%.1f", v.OilVolume), ".", ",", 1)
+			fmt.Fprintf(&b, "\n🛢 <b>Моторної оливи %s</b> (%s л) зараз немає на складі. Напишіть, і менеджер підбере.\n", esc(v.OilViscosity), litres)
+		}
+	}
+	if len(missing) > 0 {
+		b.WriteString("\n⚠️ Для вашого авто зараз немає: " + strings.Join(missing, ", ") + ". Напишіть, і менеджер підбере.\n")
 	}
 	if len(kit.OnOrder) > 0 {
 		b.WriteString("\n🔎 — менеджер знайде деталь у постачальників і надішле ціну й термін; оплачуєте, лише якщо вас влаштує.")
