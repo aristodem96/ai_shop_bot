@@ -45,6 +45,10 @@ type Report struct {
 	Products   []Line
 	Categories []Line
 	Requests   Requests
+	// Sources are where buyers came from: those new in the period and the
+	// paid orders of buyers from each, by the mark of the link that brought
+	// them, "" for none.
+	Sources []Source
 	// Sales are the paid orders, one by one, for the spreadsheet.
 	Sales []Sale
 }
@@ -63,6 +67,14 @@ type Line struct {
 	Brand string
 	Qty   int
 	Sum   domain.Money
+}
+
+// Source is one channel buyers come by.
+type Source struct {
+	Mark      string
+	NewBuyers int
+	Orders    int
+	Revenue   domain.Money
 }
 
 // Requests sums up the buyers' requests for parts on order made in the

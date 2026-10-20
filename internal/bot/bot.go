@@ -125,6 +125,8 @@ type Bot struct {
 	// requests and parts are nil until UseRequests is called.
 	requests  PartRequests
 	quoteWait *awaitedQuotes
+	sources   Sources // nil: where buyers come from is not kept
+	botName   string
 	parts     CatalogParts
 
 	// dialogStore keeps the managers' dialogs across restarts; nil keeps
@@ -288,6 +290,10 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 			b.send(ctx, m.Chat.ID, msgAdminHelp, nil)
 			return
 		}
+		if arg, ok := commandArg(m.Text, cmdLink); ok {
+			b.handleLink(ctx, m.Chat.ID, arg)
+			return
+		}
 		if _, ok := commandArg(m.Text, cmdCars); ok && b.matching != nil {
 			text, kb := b.carsList(ctx)
 			b.send(ctx, m.Chat.ID, text, kb)
@@ -345,6 +351,12 @@ func (b *Bot) handleMessage(ctx context.Context, m *telegram.Message) {
 	if len(m.Photo) > 0 {
 		b.consultPhoto(ctx, chat, user, m)
 		return
+	}
+
+	// "/start sto_ivan": the bot opened from a link with a mark.
+	if payload, ok := commandArg(m.Text, "/start"); ok {
+		b.recordSource(ctx, user, payload)
+		m.Text = "/start"
 	}
 
 	switch m.Text {

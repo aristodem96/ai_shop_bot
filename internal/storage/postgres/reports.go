@@ -123,6 +123,31 @@ func (r *ReportRepository) Report(ctx context.Context, from, to time.Time) (*rep
 			Scan(&q.Made, &q.Quoted, &q.NotFound, &q.Declined, &q.Expired, &q.Waiting, &q.Paid); err != nil {
 			return fmt.Errorf("requests: %w", err)
 		}
+
+		// A buyer's orders count for the channel that first brought them,
+		// whenever they pay.
+		rows, err = tx.Query(ctx, `
+			WITH newcomers AS (
+				SELECT source, count(*) AS n FROM buyer_sources
+				WHERE created_at >= $1 AND created_at < $2 GROUP BY source
+			), sales AS (
+				SELECT coalesce(bs.source, '') AS source, count(*) AS orders, sum(o.total) AS revenue
+				FROM orders o LEFT JOIN buyer_sources bs ON bs.user_id = o.user_id
+				WHERE `+sold+` GROUP BY 1
+			)
+			SELECT coalesce(n.source, s.source), coalesce(n.n, 0), coalesce(s.orders, 0), coalesce(s.revenue, 0)
+			FROM newcomers n FULL JOIN sales s ON s.source = n.source
+			ORDER BY 4 DESC, 2 DESC, 1`, from, to)
+		if err != nil {
+			return fmt.Errorf("sources: %w", err)
+		}
+		var src reports.Source
+		if _, err := pgx.ForEachRow(rows, []any{&src.Mark, &src.NewBuyers, &src.Orders, &src.Revenue}, func() error {
+			rep.Sources = append(rep.Sources, src)
+			return nil
+		}); err != nil {
+			return fmt.Errorf("sources: %w", err)
+		}
 		return nil
 	})
 	if err != nil {

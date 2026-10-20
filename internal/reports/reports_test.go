@@ -82,7 +82,7 @@ func TestExcel(t *testing.T) {
 	require.NoError(t, err)
 	f, err := excelize.OpenReader(bytes.NewReader(data))
 	require.NoError(t, err)
-	assert.Equal(t, []string{"Підсумок", "Замовлення", "Товари", "Категорії"}, f.GetSheetList())
+	assert.Equal(t, []string{"Підсумок", "Замовлення", "Товари", "Категорії", "Джерела"}, f.GetSheetList())
 	v, _ := f.GetCellValue("Підсумок", "B5")
 	assert.Equal(t, "1500", v, "the average check")
 	v, _ = f.GetCellValue("Замовлення", "E2")

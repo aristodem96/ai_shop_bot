@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/aristodem96/ai_shop_bot/internal/domain"
+	"github.com/aristodem96/ai_shop_bot/internal/reports"
 )
 
 func TestReport(t *testing.T) {
@@ -24,6 +25,14 @@ func TestReport(t *testing.T) {
 	from := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
 	in := from.Add(10 * time.Hour)
 	before := from.Add(-time.Hour)
+	t.Cleanup(func() { _, _ = testPool.Exec(ctx, `DELETE FROM buyer_sources`) })
+	sources := NewSourceRepository(testPool)
+	require.NoError(t, sources.Record(ctx, 7101, "sto_ivan"))
+	require.NoError(t, sources.Record(ctx, 7101, "olx"), "a second channel changes nothing")
+	require.NoError(t, sources.Record(ctx, 7105, "sto_ivan"))
+	_, err := testPool.Exec(ctx, `UPDATE buyer_sources SET created_at = $1`, in)
+	require.NoError(t, err)
+
 	sale := order(7101, "confirmed", &in, true)
 	order(7102, "cancelled", &in, false)
 	order(7103, "expired", nil, false)
@@ -44,6 +53,9 @@ func TestReport(t *testing.T) {
 	assert.Equal(t, 2, rep.Products[0].Qty)
 	require.Len(t, rep.Categories, 1)
 	assert.Contains(t, rep.Categories[0].Name, "›", "a category by its path")
+
+	assert.Equal(t, []reports.Source{{Mark: "sto_ivan", NewBuyers: 2, Orders: 1, Revenue: pads.Price * 2}}, rep.Sources,
+		"two buyers came by the mechanic's link, one of them bought; the first channel keeps them")
 }
 
 // reportOrder places an order of two units and sets how it ended.

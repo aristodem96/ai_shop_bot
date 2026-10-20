@@ -111,6 +111,19 @@ func Excel(r *Report) ([]byte, error) {
 		return nil, fmt.Errorf("reports: categories sheet: %w", err)
 	}
 
+	sources := make([][]any, len(r.Sources))
+	for i, s := range r.Sources {
+		mark := s.Mark
+		if mark == "" {
+			mark = "без мітки"
+		}
+		sources[i] = []any{mark, s.NewBuyers, s.Orders, hrn(int64(s.Revenue))}
+	}
+	if err := sheet("Джерела", []any{"Мітка посилання", "Нових покупців", "Замовлень", "Сума, грн"},
+		sources, []float64{24, 16, 12, 13}, "D"); err != nil {
+		return nil, fmt.Errorf("reports: sources sheet: %w", err)
+	}
+
 	if err := f.DeleteSheet("Sheet1"); err != nil {
 		return nil, fmt.Errorf("reports: %w", err)
 	}

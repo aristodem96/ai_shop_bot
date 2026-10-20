@@ -237,6 +237,15 @@ func (a *app) wireShop() {
 		HandlerTimeout: a.cfg.HandlerTimeout,
 		PickupAddress:  a.cfg.PickupAddress,
 	}, a.log)
+	// Where buyers come from, by the mark of the link that opened the bot;
+	// /link writes such links with the bot's name.
+	botName := ""
+	if me, err := a.tg.GetMe(a.startup); err == nil {
+		botName = me.Username
+	} else {
+		a.log.Warn("could not read the bot's name: /link is off", slog.Any("error", err))
+	}
+	a.bot.UseSources(postgres.NewSourceRepository(a.pool), botName)
 	// Photos go to Telegram converted and are sent again by Telegram's id.
 	a.bot.UsePhotos(photos.New(a.tg, postgres.NewPhotoRepository(a.pool), a.log))
 	// Managers' dialogs -- an upload waiting for Apply, a matching session --

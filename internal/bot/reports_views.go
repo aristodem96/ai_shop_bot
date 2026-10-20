@@ -80,6 +80,13 @@ func reportView(r *reports.Report) (string, *telegram.InlineKeyboard) {
 		b.WriteString("\n")
 	}
 
+	if marked(r.Sources) {
+		b.WriteString("\n📍 <b>Звідки прийшли покупці</b>\n")
+		for _, s := range r.Sources {
+			fmt.Fprintf(&b, "• %s — нових %s · замовлень %s на %s\n", esc(sourceLabel(s.Mark)), num(s.NewBuyers), num(s.Orders), s.Revenue)
+		}
+	}
+
 	kb := &telegram.InlineKeyboard{}
 	if r.Orders > 0 || r.Refunds > 0 || r.Requests.Made > 0 {
 		kb.Rows = append(kb.Rows, []telegram.InlineButton{
@@ -88,4 +95,23 @@ func reportView(r *reports.Report) (string, *telegram.InlineKeyboard) {
 	}
 	kb.Rows = append(kb.Rows, periodKeyboard().Rows...)
 	return b.String(), kb
+}
+
+// marked reports whether any buyer came by a marked link: until the shop
+// hands out links, every buyer is unmarked and the section says nothing.
+func marked(sources []reports.Source) bool {
+	for _, s := range sources {
+		if s.Mark != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// sourceLabel names a channel in the report.
+func sourceLabel(mark string) string {
+	if mark == "" {
+		return "без мітки"
+	}
+	return mark
 }
