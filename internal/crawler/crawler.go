@@ -312,8 +312,22 @@ func (c *Crawler) Crawl(ctx context.Context, modID int64) error {
 	if w.failed*4 > max(len(w.leaves), 1) {
 		return fmt.Errorf("crawler: %d of %d sections failed", w.failed, len(w.leaves))
 	}
+	// A car whose every section came back empty has not been read: the
+	// catalogue answers an overloaded caller with empty lists, not errors.
+	// Called done, it would sit empty for a month; failed, it is tried again.
+	if w.parts == 0 && len(w.leaves) >= minSectionsForParts {
+		return fmt.Errorf("%w: %d sections, no parts", ErrNoParts, len(w.leaves))
+	}
 	return nil
 }
+
+// ErrNoParts means a crawl found sections but not one part in them.
+var ErrNoParts = errors.New("crawler: the catalogue returned no parts")
+
+// minSectionsForParts is how many sections a car must have for none of
+// them holding a part to be taken as the catalogue failing: a real car has
+// hundreds, and parts in most.
+const minSectionsForParts = 20
 
 // crawlTask is a section to ask about: its subsections, or, for a leaf,
 // its parts. The root is the zero task.

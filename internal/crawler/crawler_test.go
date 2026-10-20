@@ -308,3 +308,28 @@ func TestCrawlFailsWithoutTheRoot(t *testing.T) {
 	c := New(api, &memStore{parts: map[int64][]Part{}}, Config{Parallel: 2}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.ErrorIs(t, c.Crawl(context.Background(), 18537), autodb.ErrIPNotAllowed, "no tree, no crawl")
 }
+
+// emptyAPI has a wide tree whose every section comes back empty, as an
+// overloaded catalogue answers.
+type emptyAPI struct{}
+
+func (emptyAPI) Sections(_ context.Context, _ autodb.Group, _ int64, parent int64) ([]autodb.Section, error) {
+	if parent != 0 {
+		return nil, nil
+	}
+	secs := make([]autodb.Section, minSectionsForParts)
+	for i := range secs {
+		secs[i] = autodb.Section{ID: int64(i + 1), Name: "розділ"}
+	}
+	return secs, nil
+}
+
+func (emptyAPI) SectionParts(context.Context, autodb.Group, int64, int64) ([]autodb.Part, error) {
+	return nil, nil
+}
+
+func TestCrawlWithNoPartsAtAllFails(t *testing.T) {
+	c := New(emptyAPI{}, &memStore{parts: map[int64][]Part{}}, Config{Parallel: 4}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	err := c.Crawl(context.Background(), 18537)
+	require.ErrorIs(t, err, ErrNoParts, "twenty sections and not one part is the catalogue failing, not an empty car")
+}

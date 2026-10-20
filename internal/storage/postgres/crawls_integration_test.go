@@ -212,10 +212,14 @@ func TestSectionsForASearch(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, secs, "all the words of a way must be there")
 
-	require.NoError(t, repo.SaveParts(ctx, modID, 100030, nil))
+	require.NoError(t, repo.SaveParts(ctx, modID, 100300, nil))
+	require.NoError(t, repo.SaveParts(ctx, modID, 100030, []crawler.Part{
+		{SupplierID: 65, ArticleKey: "P85075", Number: "P 85 075", Brand: "BREMBO", BrandKey: "BREMBO", Name: "Колодки"},
+	}))
 	fetched, err := repo.Fetched(ctx, modID, since)
 	require.NoError(t, err)
-	assert.Equal(t, map[int64]bool{100030: true}, fetched, "a section stored, even empty, is stored")
+	assert.Equal(t, map[int64]bool{100030: true}, fetched,
+		"a section with parts is stored; an empty one is asked again, the catalogue answering an overloaded caller with empty lists")
 	_, secs, err = repo.Matching(ctx, vehicleID, "brake-pads", nil, since, 6)
 	require.NoError(t, err)
 	assert.Empty(t, secs, "and not loaded again")

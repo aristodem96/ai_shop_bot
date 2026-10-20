@@ -87,10 +87,15 @@ func (r *CrawlRepository) SaveParts(ctx context.Context, modID, sectionID int64,
 			ON CONFLICT DO NOTHING`, modID, sectionID, sup, art, num, brand, bkey, name); err != nil {
 			return fmt.Errorf("postgres: save section %d of %d: %w", sectionID, modID, err)
 		}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO autodb_mod_sections (mod_id, section_id) VALUES ($1, $2)
-			ON CONFLICT (mod_id, section_id) DO UPDATE SET fetched_at = now()`, modID, sectionID); err != nil {
-			return fmt.Errorf("postgres: mark section %d of %d stored: %w", sectionID, modID, err)
+		// An empty section is not marked stored: the catalogue answers an
+		// overloaded caller with empty lists, and a section marked stored
+		// would not be asked again on the next crawl.
+		if len(parts) > 0 {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO autodb_mod_sections (mod_id, section_id) VALUES ($1, $2)
+				ON CONFLICT (mod_id, section_id) DO UPDATE SET fetched_at = now()`, modID, sectionID); err != nil {
+				return fmt.Errorf("postgres: mark section %d of %d stored: %w", sectionID, modID, err)
+			}
 		}
 		// The brands' names, to tell whose a search hit is.
 		if _, err := tx.Exec(ctx, `
