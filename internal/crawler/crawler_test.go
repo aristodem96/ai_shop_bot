@@ -21,6 +21,7 @@ type fakeAPI struct {
 	mu        sync.Mutex
 	failsLeft map[int64]int // section -> failures before it answers
 	calls     int
+	asked     []int64 // sections whose parts were asked for
 }
 
 var tree = map[int64][]autodb.Section{
@@ -47,6 +48,7 @@ func (f *fakeAPI) SectionParts(_ context.Context, _ autodb.Group, _ int64, sec i
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
+	f.asked = append(f.asked, sec)
 	if f.failsLeft[sec] > 0 {
 		f.failsLeft[sec]--
 		return nil, errors.New("autodb: unavailable: timeout")
@@ -63,6 +65,23 @@ type memStore struct {
 	queue    []int64
 	waiters  map[int64][]Waiter // by modification
 	watched  []Waiter
+	sections []Section
+	fetched  map[int64]bool
+	matching []int64
+}
+
+func (s *memStore) SaveSections(_ context.Context, secs []Section) error {
+	s.sections = append(s.sections, secs...)
+	return nil
+}
+func (s *memStore) Fetched(context.Context, int64, time.Time) (map[int64]bool, error) {
+	return s.fetched, nil
+}
+func (s *memStore) Matching(_ context.Context, vehicleID int64, _ string, _ []string, _ time.Time, _ int) (int64, []int64, error) {
+	if vehicleID != 40 {
+		return 0, nil, nil
+	}
+	return 18537, s.matching, nil
 }
 
 func (s *memStore) Enqueue(context.Context, int64, time.Duration) error { return nil }
@@ -194,4 +213,42 @@ func TestWatchQueuesAndWaits(t *testing.T) {
 	c, store := newCrawler(&fakeAPI{})
 	require.NoError(t, c.Watch(context.Background(), 5, 40))
 	assert.Equal(t, []Waiter{{UserID: 5, VehicleID: 40}}, store.watched)
+}
+
+func TestCrawlSavesPathsAndSkipsWhatIsStored(t *testing.T) {
+	api := &fakeAPI{}
+	c, store := newCrawler(api)
+	store.fetched = map[int64]bool{11: true}
+
+	require.NoError(t, c.Crawl(context.Background(), 18537))
+	assert.ElementsMatch(t, []Section{
+		{ID: 2, Path: "фильтр"}, {ID: 11, Path: "тормозная система › колодки"},
+		{ID: 121, Path: "тормозная система › диски › диски передние"},
+	}, store.sections, "paths, for a buyer's search to find sections by")
+	assert.ElementsMatch(t, []int64{2, 121}, api.asked, "a section a search stored is not asked again")
+	assert.Equal(t, [3]int{3, 3, 3}, store.progress, "and counts as done")
+}
+
+func TestPriorityPutsWearPartsFirst(t *testing.T) {
+	assert.Equal(t, 0, priority("тормозная система › Тормозные колодки"))
+	assert.Equal(t, 0, priority("фильтр › Масляный фильтр"))
+	assert.Equal(t, 1, priority("Рулевое управления › Наконечник поперечной рулевой тяги"))
+	assert.Equal(t, 2, priority("Система сцепления / навесные части › Комплект сцепления"))
+	assert.Equal(t, len(priorities), priority("Внутренняя отделка › Ручка двери"))
+}
+
+func TestFetchNowLoadsTheSearchsSections(t *testing.T) {
+	api := &fakeAPI{}
+	c, store := newCrawler(api)
+	store.matching = []int64{11, 2}
+
+	names, err := c.FetchNow(context.Background(), 40, "brake-pads", nil)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []int64{11, 2}, api.asked)
+	assert.ElementsMatch(t, []string{"Колодки", "Фильтр масляный"}, names, "to be translated before the search reads them")
+	assert.Len(t, store.parts[11], 1)
+
+	names, err = c.FetchNow(context.Background(), 41, "brake-pads", nil)
+	require.NoError(t, err)
+	assert.Empty(t, names, "a car outside the catalogue has nothing to load")
 }

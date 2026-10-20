@@ -87,6 +87,11 @@ func (r *CrawlRepository) SaveParts(ctx context.Context, modID, sectionID int64,
 			ON CONFLICT DO NOTHING`, modID, sectionID, sup, art, num, brand, bkey, name); err != nil {
 			return fmt.Errorf("postgres: save section %d of %d: %w", sectionID, modID, err)
 		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO autodb_mod_sections (mod_id, section_id) VALUES ($1, $2)
+			ON CONFLICT (mod_id, section_id) DO UPDATE SET fetched_at = now()`, modID, sectionID); err != nil {
+			return fmt.Errorf("postgres: mark section %d of %d stored: %w", sectionID, modID, err)
+		}
 		// The brands' names, to tell whose a search hit is.
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO autodb_suppliers (id, name, name_key)
@@ -96,6 +101,80 @@ func (r *CrawlRepository) SaveParts(ctx context.Context, modID, sectionID int64,
 		}
 		return nil
 	})
+}
+
+// SaveSections records the paths of sections, the same for every vehicle.
+func (r *CrawlRepository) SaveSections(ctx context.Context, sections []crawler.Section) error {
+	ids, paths := make([]int64, len(sections)), make([]string, len(sections))
+	for i, s := range sections {
+		ids[i], paths[i] = s.ID, s.Path
+	}
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO autodb_sections (id, path)
+		SELECT DISTINCT ON (x.id) x.id, x.path FROM unnest($1::bigint[], $2::text[]) AS x(id, path)
+		ON CONFLICT (id) DO UPDATE SET path = excluded.path`, ids, paths)
+	if err != nil {
+		return fmt.Errorf("postgres: save section paths: %w", err)
+	}
+	return nil
+}
+
+// Fetched returns the sections of a modification stored since then.
+func (r *CrawlRepository) Fetched(ctx context.Context, modID int64, since time.Time) (map[int64]bool, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT section_id FROM autodb_mod_sections WHERE mod_id = $1 AND fetched_at >= $2`, modID, since)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: stored sections of %d: %w", modID, err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		return nil, fmt.Errorf("postgres: stored sections of %d: %w", modID, err)
+	}
+	out := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out, nil
+}
+
+// Matching finds the sections a buyer's search names for their vehicle:
+// those whose paths hold a word of the category or of its subcategories --
+// the shop's words are Ukrainian and Russian, and the catalogue's paths
+// Russian -- or one of the search's own words. Sections stored since then
+// are left out; the more specific ones, deeper in the tree, come first.
+func (r *CrawlRepository) Matching(ctx context.Context, vehicleID int64, category string, words []string, since time.Time, limit int) (int64, []int64, error) {
+	var modID int64
+	err := r.pool.QueryRow(ctx, `SELECT autodb_mod_id FROM vehicles WHERE id = $1 AND autodb_mod_id IS NOT NULL`, vehicleID).Scan(&modID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil, nil
+	}
+	if err != nil {
+		return 0, nil, fmt.Errorf("postgres: modification of vehicle %d: %w", vehicleID, err)
+	}
+	if words == nil {
+		words = []string{}
+	}
+	rows, err := r.pool.Query(ctx, `
+		WITH terms AS (
+			SELECT lower(k.word) AS term FROM category_keywords k JOIN categories c ON c.id = k.category_id
+			WHERE $2 <> '' AND (c.slug = $2 OR c.parent_id = (SELECT id FROM categories WHERE slug = $2))
+			UNION
+			SELECT lower(w) FROM unnest($3::text[]) w WHERE char_length(w) >= 4
+		)
+		SELECT s.id FROM autodb_sections s
+		WHERE EXISTS (SELECT 1 FROM terms WHERE lower(s.path) LIKE '%' || terms.term || '%')
+		  AND NOT EXISTS (SELECT 1 FROM autodb_mod_sections f
+		                  WHERE f.mod_id = $1 AND f.section_id = s.id AND f.fetched_at >= $4)
+		ORDER BY char_length(s.path) - char_length(replace(s.path, '›', '')) DESC, s.id
+		LIMIT $5`, modID, category, words, since, limit)
+	if err != nil {
+		return 0, nil, fmt.Errorf("postgres: sections matching a search: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		return 0, nil, fmt.Errorf("postgres: sections matching a search: %w", err)
+	}
+	return modID, ids, nil
 }
 
 // Progress records how far a crawl is.

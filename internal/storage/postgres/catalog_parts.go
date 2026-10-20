@@ -223,6 +223,21 @@ func (r *CatalogPartRepository) Untranslated(ctx context.Context, limit int) ([]
 	return names, nil
 }
 
+// Missing returns those of names with no translation yet.
+func (r *CatalogPartRepository) Missing(ctx context.Context, names []string) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT x FROM unnest($1::text[]) x
+		WHERE NOT EXISTS (SELECT 1 FROM autodb_part_names n WHERE n.name = x)`, names)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: untranslated of %d names: %w", len(names), err)
+	}
+	out, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("postgres: scan part names: %w", err)
+	}
+	return out, nil
+}
+
 // SaveNames stores translations; a name translated again is replaced.
 func (r *CatalogPartRepository) SaveNames(ctx context.Context, names []partnames.Name) error {
 	name, uk, cat := make([]string, len(names)), make([]string, len(names)), make([]string, len(names))

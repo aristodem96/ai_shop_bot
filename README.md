@@ -262,9 +262,15 @@ LOCKED`), a worker walks the tree in the background with retries, and the bot
 only ever reads what was stored. A car one buyer chose is there for the next.
 A buyer who chose a car or asked about one still loading is sent a message
 when it is loaded, and a failed crawl someone waits for is tried again.
-Every call to the API waits on one rate, with background work kept to a
-share of it, so a buyer's lookup never queues behind a crawl and the account
-never sees a burst.
+A crawl takes what buyers ask for most first -- brakes, filters, the
+chassis -- so a car is of use in its first minute rather than its last, and
+a buyer who asks for a part before the crawl reaches it does not wait for
+it: the search loads that part's sections at once, found by the shop's
+category words in the catalogue's section paths, which are the same for
+every car. Every call to the API waits on one rate; background work keeps
+to a share of it while buyers are asking and takes all of it when they are
+not, so a buyer's lookup never queues behind a crawl and the account never
+sees a burst.
 
 ### Two sources of cars, one list of fitments
 

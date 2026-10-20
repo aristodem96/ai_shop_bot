@@ -490,6 +490,10 @@ var catalogNotes = map[string]string{
 	"failed":  "the catalogue of this car could not be loaded right now; catalog_parts may be incomplete",
 }
 
+// fetchNowWait bounds how long a search waits for the sections it loads
+// itself: a few seconds of a buyer's time, inside the answer's deadline.
+const fetchNowWait = 20 * time.Second
+
 // addCatalogParts adds what the shop can order for the car beyond its stock.
 // Price filters do not apply: these parts have no price until a manager
 // quotes one.
@@ -509,6 +513,11 @@ func (tb *toolbox) addCatalogParts(ctx context.Context, userID int64, out map[st
 		// again if it must be, and have the buyer told when it is done.
 		if err := tb.loader.Watch(ctx, userID, f.VehicleID); err != nil {
 			return err
+		}
+		if f.Category != "" || f.Query != "" {
+			fetchCtx, cancel := context.WithTimeout(ctx, fetchNowWait)
+			tb.loader.FetchNow(fetchCtx, f.VehicleID, f.Category, f.Query)
+			cancel()
 		}
 		state = "loading"
 	}

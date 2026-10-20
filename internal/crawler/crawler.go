@@ -13,6 +13,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -80,6 +82,23 @@ type Store interface {
 	// RetryFailed queues again the failed crawls someone waits for that
 	// failed more than after ago, and forgets waits older than keep.
 	RetryFailed(ctx context.Context, after, keep time.Duration) error
+	// SaveSections records the sections' paths, which are the same for
+	// every vehicle: a buyer's search finds its sections by them.
+	SaveSections(ctx context.Context, sections []Section) error
+	// Fetched returns the sections of a modification stored since then.
+	Fetched(ctx context.Context, modID int64, since time.Time) (map[int64]bool, error)
+	// Matching returns a vehicle's modification and up to limit sections
+	// not stored for it since then whose paths hold the words of the
+	// category (and its subcategories) or any of words; zero for a vehicle
+	// not from the catalogue.
+	Matching(ctx context.Context, vehicleID int64, category string, words []string, since time.Time, limit int) (int64, []int64, error)
+}
+
+// Section is a section with no subsections, where parts are listed, and
+// its path in the tree: "тормозная система › Тормозные колодки".
+type Section struct {
+	ID   int64
+	Path string
 }
 
 // Config tunes a Crawler.
@@ -245,6 +264,17 @@ func (c *Crawler) Crawl(ctx context.Context, modID int64) error {
 	if err != nil {
 		return err
 	}
+	if err := c.store.SaveSections(ctx, leaves); err != nil {
+		c.log.WarnContext(ctx, "could not save section paths", slog.Any("error", err))
+	}
+	// What buyers ask for most comes first, so a car is of use in its first
+	// minute rather than its last.
+	slices.SortStableFunc(leaves, func(a, b Section) int { return priority(a.Path) - priority(b.Path) })
+	// A buyer's search may have stored some already.
+	fetched, err := c.store.Fetched(ctx, modID, time.Now().Add(-c.cfg.MaxAge))
+	if err != nil {
+		return err
+	}
 	// The tree is walked: from here on the buyer can see a percentage.
 	if err := c.store.Progress(ctx, modID, len(leaves), 0, 0); err != nil {
 		c.log.WarnContext(ctx, "could not save crawl progress", slog.Any("error", err))
@@ -257,13 +287,20 @@ func (c *Crawler) Crawl(ctx context.Context, modID int64) error {
 	)
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(c.cfg.Parallel)
-	for _, sec := range leaves {
+	for _, leaf := range leaves {
+		sec := leaf.ID
 		g.Go(func() error {
-			got, err := retry(gctx, func() ([]autodb.Part, error) {
-				return c.api.SectionParts(gctx, autodb.Passenger, modID, sec)
-			})
-			if err == nil {
-				err = c.store.SaveParts(gctx, modID, sec, keyed(got))
+			var (
+				got []autodb.Part
+				err error
+			)
+			if !fetched[sec] {
+				got, err = retry(gctx, func() ([]autodb.Part, error) {
+					return c.api.SectionParts(gctx, autodb.Passenger, modID, sec)
+				})
+				if err == nil {
+					err = c.store.SaveParts(gctx, modID, sec, keyed(got))
+				}
 			}
 			mu.Lock()
 			defer mu.Unlock()
@@ -294,32 +331,37 @@ func (c *Crawler) Crawl(ctx context.Context, modID int64) error {
 }
 
 // leaves walks the sections tree breadth first, a level at a time, and
-// returns the sections with no children: the ones parts are listed in.
-func (c *Crawler) leaves(ctx context.Context, modID int64) ([]int64, error) {
-	var leaves []int64
-	level := []int64{0}
+// returns the sections with no children, the ones parts are listed in,
+// with their paths.
+func (c *Crawler) leaves(ctx context.Context, modID int64) ([]Section, error) {
+	var leaves []Section
+	level := []Section{{}}
 	for len(level) > 0 {
 		var (
 			mu   sync.Mutex
-			next []int64
+			next []Section
 		)
 		g, gctx := errgroup.WithContext(ctx)
 		g.SetLimit(c.cfg.Parallel)
 		for _, parent := range level {
 			g.Go(func() error {
 				secs, err := retry(gctx, func() ([]autodb.Section, error) {
-					return c.api.Sections(gctx, autodb.Passenger, modID, parent)
+					return c.api.Sections(gctx, autodb.Passenger, modID, parent.ID)
 				})
 				if err != nil {
-					return fmt.Errorf("crawler: sections of %d under %d: %w", modID, parent, err)
+					return fmt.Errorf("crawler: sections of %d under %d: %w", modID, parent.ID, err)
 				}
 				mu.Lock()
 				defer mu.Unlock()
 				for _, s := range secs {
+					path := s.Name
+					if parent.Path != "" {
+						path = parent.Path + " › " + s.Name
+					}
 					if s.HasChildren {
-						next = append(next, s.ID)
+						next = append(next, Section{ID: s.ID, Path: path})
 					} else {
-						leaves = append(leaves, s.ID)
+						leaves = append(leaves, Section{ID: s.ID, Path: path})
 					}
 				}
 				return nil
@@ -331,6 +373,77 @@ func (c *Crawler) leaves(ctx context.Context, modID int64) ([]int64, error) {
 		level = next
 	}
 	return leaves, nil
+}
+
+// priorities are the parts buyers ask for most, by words of the catalogue's
+// section paths, most wanted first: wear parts, then the chassis, then the
+// engine's service parts. A section matching none comes last.
+var priorities = [][]string{
+	{"тормоз", "фильтр", "сервис", "колодк"},
+	{"амортиз", "подвеск", "рулев", "рычаг", "шарнир", "стабилизат", "ступиц", "пружин", "сайлентблок"},
+	{"сцеплен", "ремен", "ремн", "свеч", "зажиган", "охлажд", "привод колеса", "шрус", "опора двиг", "подшипник"},
+}
+
+// priority ranks a section by its path: lower comes first.
+func priority(path string) int {
+	path = strings.ToLower(path)
+	for rank, words := range priorities {
+		for _, w := range words {
+			if strings.Contains(path, w) {
+				return rank
+			}
+		}
+	}
+	return len(priorities)
+}
+
+// fetchNowLimit bounds the sections one search loads while a buyer waits,
+// and fetchNowParallel how many at once: a few seconds at a buyer's rate.
+const (
+	fetchNowLimit    = 6
+	fetchNowParallel = 3
+)
+
+// FetchNow loads, while a buyer waits, the sections of their car's
+// catalogue that a search names -- by its category's words or its own --
+// and that are not stored yet, at a buyer's priority rather than the
+// background's. It returns the names of the parts it brought, to be
+// translated before the search reads them.
+func (c *Crawler) FetchNow(ctx context.Context, vehicleID int64, category string, words []string) ([]string, error) {
+	modID, secs, err := c.store.Matching(ctx, vehicleID, category, words, time.Now().Add(-c.cfg.MaxAge), fetchNowLimit)
+	if err != nil || len(secs) == 0 {
+		return nil, err
+	}
+	var (
+		mu    sync.Mutex
+		names []string
+		seen  = map[string]bool{}
+	)
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(fetchNowParallel)
+	for _, sec := range secs {
+		g.Go(func() error {
+			got, err := c.api.SectionParts(gctx, autodb.Passenger, modID, sec)
+			if err == nil {
+				err = c.store.SaveParts(gctx, modID, sec, keyed(got))
+			}
+			if err != nil {
+				c.log.WarnContext(gctx, "could not load a section for a buyer", slog.Int64("mod_id", modID), slog.Int64("section", sec), slog.Any("error", err))
+				return nil
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			for _, p := range got {
+				if p.Name != "" && !seen[p.Name] {
+					seen[p.Name] = true
+					names = append(names, p.Name)
+				}
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
+	return names, ctx.Err()
 }
 
 // retry asks again after a failure that may pass. A refused address or a

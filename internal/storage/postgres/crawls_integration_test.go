@@ -171,3 +171,56 @@ func TestCrawlWaiters(t *testing.T) {
 	_, ok, _ = repo.Claim(ctx)
 	assert.False(t, ok)
 }
+
+func TestSectionsForASearch(t *testing.T) {
+	skipShort(t)
+	ctx := context.Background()
+	repo := NewCrawlRepository(testPool)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(ctx, `DELETE FROM autodb_sections`)
+		_, _ = testPool.Exec(ctx, `DELETE FROM autodb_mod_sections`)
+		_, _ = testPool.Exec(ctx, `DELETE FROM autodb_mod_parts`)
+		_, _ = testPool.Exec(ctx, `DELETE FROM vehicles WHERE autodb_mod_id IS NOT NULL`)
+	})
+	vehicleID, err := NewDirectoryRepository(testPool).UpsertVehicle(ctx,
+		directory.ToVehicle("DAEWOO", autodb.Model{Name: "LANOS (KLAT)"}, autodb.Modification{ID: 9201, Name: "DAEWOO LANOS 1.5",
+			Attrs: map[string][]string{"ConstructionInterval": {"05.1997 -"}}}), 9201, 0)
+	require.NoError(t, err)
+
+	require.NoError(t, repo.SaveSections(ctx, []crawler.Section{
+		{ID: 100030, Path: "тормозная система › Тормозной механизм › Комплект тормозных колодок"},
+		{ID: 100300, Path: "Подвеска оси / система подвески / колеса › Рычаг независимой подвески колеса"},
+		{ID: 100310, Path: "Подвеска оси › Несущий / направляющий шарнир"},
+		{ID: 100770, Path: "Внутренняя отделка › Ручка двери"},
+	}))
+	since := time.Now().Add(-time.Hour)
+
+	modID, secs, err := repo.Matching(ctx, vehicleID, "brake-pads", nil, since, 6)
+	require.NoError(t, err)
+	assert.Equal(t, int64(9201), modID)
+	assert.Equal(t, []int64{100030}, secs, "by the category's words: \"колодок\"")
+
+	_, secs, err = repo.Matching(ctx, vehicleID, "arms", nil, since, 6)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []int64{100300, 100310}, secs, "the shop's Russian words find the catalogue's sections: \"рычаг\", \"направляющий шарнир\"")
+
+	_, secs, err = repo.Matching(ctx, vehicleID, "", []string{"шарнир", "на"}, since, 6)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{100310}, secs, "by the search's own words; short ones are no evidence")
+
+	require.NoError(t, repo.SaveParts(ctx, modID, 100030, nil))
+	fetched, err := repo.Fetched(ctx, modID, since)
+	require.NoError(t, err)
+	assert.Equal(t, map[int64]bool{100030: true}, fetched, "a section stored, even empty, is stored")
+	_, secs, err = repo.Matching(ctx, vehicleID, "brake-pads", nil, since, 6)
+	require.NoError(t, err)
+	assert.Empty(t, secs, "and not loaded again")
+	_, secs, err = repo.Matching(ctx, vehicleID, "brake-pads", nil, time.Now().Add(time.Hour), 6)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{100030}, secs, "unless it is older than wanted")
+
+	modID, secs, err = repo.Matching(ctx, vehicleByCode(t, "lanos-15"), "brake-pads", nil, since, 6)
+	require.NoError(t, err)
+	assert.Zero(t, modID)
+	assert.Empty(t, secs, "a car from the shop's own list has no catalogue")
+}

@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -365,7 +366,7 @@ func (a *app) wireConsultant() error {
 	}
 	requests := postgres.NewPartRequestRepository(a.pool)
 	consultant.UseOrderCatalog(catalogParts)
-	consultant.UseCatalogLoader(c.crawl)
+	consultant.UseCatalogLoader(catalogueLoader{crawl: c.crawl, names: names, log: a.log})
 	a.bot.UseRequests(requests, catalogParts)
 	// The buttons' catalogue lists them too, after the stock.
 	a.catalog.UseOrderParts(catalogParts)
@@ -443,4 +444,32 @@ func (a *app) serveHTTP(ctx context.Context) {
 		defer cancel()
 		return server.Shutdown(shutdownCtx)
 	})
+}
+
+// catalogueLoader is the consultant's way to a car's parts catalogue: it
+// queues the car, and loads the sections a search names at once, with their
+// names translated -- a search reads parts by Ukrainian name and category.
+type catalogueLoader struct {
+	crawl *crawler.Crawler
+	names *partnames.Translator
+	log   *slog.Logger
+}
+
+func (l catalogueLoader) Watch(ctx context.Context, userID, vehicleID int64) error {
+	return l.crawl.Watch(ctx, userID, vehicleID)
+}
+
+func (l catalogueLoader) FetchNow(ctx context.Context, vehicleID int64, category, query string) {
+	start := time.Now()
+	got, err := l.crawl.FetchNow(ctx, vehicleID, category, strings.Fields(strings.ToLower(query)))
+	if err != nil {
+		l.log.WarnContext(ctx, "could not load sections for a search", slog.Int64("vehicle_id", vehicleID), slog.Any("error", err))
+	}
+	if len(got) > 0 {
+		if err := l.names.TranslateNow(ctx, got); err != nil {
+			l.log.WarnContext(ctx, "could not translate a search's part names", slog.Any("error", err))
+		}
+	}
+	l.log.InfoContext(ctx, "sections loaded for a search", slog.Int64("vehicle_id", vehicleID),
+		slog.String("category", category), slog.Int("names", len(got)), slog.Duration("took", time.Since(start).Round(time.Millisecond)))
 }

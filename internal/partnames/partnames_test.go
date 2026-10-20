@@ -31,8 +31,22 @@ func (s *memStore) Untranslated(_ context.Context, limit int) ([]string, error) 
 
 func (s *memStore) SaveNames(_ context.Context, names []Name) error {
 	s.saved = append(s.saved, names...)
-	s.pending = s.pending[len(names):]
+	s.pending = s.pending[min(len(names), len(s.pending)):]
 	return nil
+}
+
+func (s *memStore) Missing(_ context.Context, names []string) ([]string, error) {
+	var out []string
+	for _, n := range names {
+		known := false
+		for _, x := range s.saved {
+			known = known || x.Name == n
+		}
+		if !known {
+			out = append(out, n)
+		}
+	}
+	return out, nil
 }
 
 func newTranslator(model llm.Client, store Store) *Translator {
@@ -74,4 +88,15 @@ func TestPassStopsWhenTheModelSkipsEverything(t *testing.T) {
 	fake := llm.NewFake(llm.Say("Ремінь"))
 	err := newTranslator(fake, store).Pass(context.Background())
 	require.ErrorIs(t, err, ErrNoAnswer, "rather than asking about the same batch forever")
+}
+
+func TestTranslateNowOnlyWhatIsMissing(t *testing.T) {
+	store := &memStore{saved: []Name{{Name: "Ремень", NameUK: "Ремінь"}}}
+	fake := llm.NewFake(llm.Call("c1", toolName, map[string]any{"names": []map[string]any{
+		{"name": "Шарнир независимой подвески", "uk": "Кульова опора", "category": "brake-pads"},
+	}}))
+	require.NoError(t, newTranslator(fake, store).TranslateNow(context.Background(), []string{"Ремень", "Шарнир независимой подвески"}))
+	require.Len(t, fake.Requests, 1)
+	assert.NotContains(t, fake.Requests[0].Messages[0].Text, `"Ремень"`, "a translated name is not asked again")
+	assert.Equal(t, "Кульова опора", store.saved[1].NameUK)
 }

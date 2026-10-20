@@ -165,7 +165,14 @@ func TestPickupOrderIsReadyToCollect(t *testing.T) {
 	assert.Contains(t, result(model, 1).Content, "ready to collect at the shop, at the address", "not «being prepared for shipping»")
 }
 
-type fakeLoader struct{ watched [][2]int64 }
+type fakeLoader struct {
+	watched [][2]int64
+	fetched []string
+}
+
+func (l *fakeLoader) FetchNow(_ context.Context, _ int64, category, query string) {
+	l.fetched = append(l.fetched, category+"|"+query)
+}
 
 func (l *fakeLoader) Watch(_ context.Context, user, vehicle int64) error {
 	l.watched = append(l.watched, [2]int64{user, vehicle})
@@ -187,6 +194,7 @@ func TestSearchLoadsAnUnloadedCatalogue(t *testing.T) {
 			_, err := f.agent.Reply(context.Background(), 7, 7, "рульова рейка")
 			require.NoError(t, err)
 			assert.Equal(t, [][2]int64{{7, octavia.ID}}, loader.watched, "queued again if it must be, and the buyer waits")
+			assert.Equal(t, []string{"|рейк"}, loader.fetched, "the sections the search names are loaded now")
 			assert.Contains(t, result(model, 1).Content, "The bot will message the buyer by itself",
 				"the model promises the message the bot will send")
 		})
@@ -205,5 +213,6 @@ func TestSearchDoesNotReloadALoadedCatalogue(t *testing.T) {
 	_, err := f.agent.Reply(context.Background(), 7, 7, "колодки")
 	require.NoError(t, err)
 	assert.Empty(t, loader.watched)
+	assert.Empty(t, loader.fetched, "a loaded catalogue has every section")
 	assert.NotContains(t, result(model, 1).Content, "catalog_note")
 }

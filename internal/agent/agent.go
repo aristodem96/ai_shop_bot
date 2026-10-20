@@ -70,6 +70,11 @@ type CatalogLoader interface {
 	// Watch queues the car's catalogue unless it is loaded, and has the
 	// buyer told by the bot when it is.
 	Watch(ctx context.Context, userID, vehicleID int64) error
+	// FetchNow loads at once the sections of the car's catalogue a search
+	// names, by its category or its words, so a buyer asking while the
+	// rest loads gets an answer now. A failure leaves the search to what
+	// is stored.
+	FetchNow(ctx context.Context, vehicleID int64, category, query string)
 }
 
 // CatalogFits says what cars a stock product fits by the parts catalogue.

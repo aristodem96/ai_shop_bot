@@ -32,6 +32,8 @@ type Name struct {
 type Store interface {
 	// Untranslated returns crawled names with no translation yet.
 	Untranslated(ctx context.Context, limit int) ([]string, error)
+	// Missing returns those of names with no translation yet.
+	Missing(ctx context.Context, names []string) ([]string, error)
 	SaveNames(ctx context.Context, names []Name) error
 }
 
@@ -75,6 +77,27 @@ func (t *Translator) Run(ctx context.Context) error {
 		case <-t.wake:
 		case <-time.After(t.idle):
 		}
+	}
+	return nil
+}
+
+// TranslateNow translates those of names not translated yet, while a buyer
+// waits for a search that reads them.
+func (t *Translator) TranslateNow(ctx context.Context, names []string) error {
+	missing, err := t.store.Missing(ctx, names)
+	if err != nil {
+		return err
+	}
+	for len(missing) > 0 {
+		n := min(len(missing), batch)
+		got, err := t.Translate(ctx, missing[:n])
+		if err != nil {
+			return err
+		}
+		if err := t.store.SaveNames(ctx, got); err != nil {
+			return err
+		}
+		missing = missing[n:]
 	}
 	return nil
 }
