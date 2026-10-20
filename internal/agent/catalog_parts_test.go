@@ -39,6 +39,10 @@ func (f *fakeOrderCatalog) CatalogPart(_ context.Context, id int64) (*domain.Cat
 
 func (f *fakeOrderCatalog) CrawlState(context.Context, int64) (string, error) { return f.state, nil }
 
+func (f *fakeOrderCatalog) Kinds(context.Context, service.SearchFilter, int) ([]domain.PartKind, int, error) {
+	return []domain.PartKind{{Name: bremboPads.Name, Count: 14}, {Name: "Пильовик амортизатора", Count: 3}}, 17, nil
+}
+
 func TestSearchOffersCatalogParts(t *testing.T) {
 	model := llm.NewFake(
 		llm.Call("c1", "search_parts", map[string]any{"vehicle_id": octavia.ID, "query": "колодк", "max_price_uah": 900}),
@@ -58,7 +62,10 @@ func TestSearchOffersCatalogParts(t *testing.T) {
 	assert.Contains(t, res, `"catalog_parts":[{"catalog_part_id":77,"name":"Гальмівні колодки","brand":"BREMBO","number":"P 85 075","category":"brake-pads"}]`)
 	assert.Contains(t, res, `"catalog_note"`, "the model is told the car is still loading")
 	require.Len(t, parts.filters, 1)
-	assert.Equal(t, service.SearchFilter{VehicleID: octavia.ID, Query: "колодк", Limit: maxShown}, parts.filters[0],
+	assert.Contains(t, res, `"catalog_kinds":[{"name":"Гальмівні колодки","count":14},{"name":"Пильовик амортизатора","count":3}]`,
+		"what kinds there are, so a sample is never taken for all")
+	assert.Contains(t, res, `"catalog_parts_total":17`)
+	assert.Equal(t, service.SearchFilter{VehicleID: octavia.ID, Query: "колодк", Limit: maxCatalogShown}, parts.filters[0],
 		"no price filter: the parts have no price yet")
 }
 

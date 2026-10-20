@@ -501,6 +501,19 @@ var catalogNotes = map[string]string{
 	"failed":  "the catalogue of this car could not be loaded right now; catalog_parts may be incomplete",
 }
 
+// maxCatalogShown and maxCatalogKinds bound the catalogue's answer to one
+// search: a sample of parts, a few of each kind, and the kinds there are.
+const (
+	maxCatalogShown = 8
+	maxCatalogKinds = 12
+)
+
+// catalogKindView is a kind of part the catalogue has for the car.
+type catalogKindView struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
 // fetchNowWait bounds how long a search waits for the sections it loads
 // itself: a few seconds of a buyer's time, inside the answer's deadline.
 const fetchNowWait = 20 * time.Second
@@ -532,6 +545,7 @@ func (tb *toolbox) addCatalogParts(ctx context.Context, userID int64, out map[st
 		}
 		state = "loading"
 	}
+	f.Limit = maxCatalogShown
 	parts, err := tb.parts.ForVehicle(ctx, f)
 	if err != nil {
 		return err
@@ -541,6 +555,19 @@ func (tb *toolbox) addCatalogParts(ctx context.Context, userID int64, out map[st
 		views[i] = catalogPartView{ID: p.ID, Name: p.Name, Brand: p.Brand, Number: p.Number, Category: p.Category}
 	}
 	out["catalog_parts"] = views
+	// The parts are a sample, a few of each kind; the kinds and the total
+	// say what else there is, so the model never takes the sample for all.
+	if len(parts) > 0 {
+		kinds, total, err := tb.parts.Kinds(ctx, f, maxCatalogKinds)
+		if err != nil {
+			return err
+		}
+		kv := make([]catalogKindView, len(kinds))
+		for i, k := range kinds {
+			kv[i] = catalogKindView{Name: k.Name, Count: k.Count}
+		}
+		out["catalog_kinds"], out["catalog_parts_total"] = kv, total
+	}
 	if note := catalogNotes[state]; note != "" {
 		out["catalog_note"] = note
 	}

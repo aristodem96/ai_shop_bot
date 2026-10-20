@@ -119,27 +119,16 @@ func (r *CatalogPartRepository) ByCategory(ctx context.Context, categoryID, vehi
 // the Ukrainian name or the Russian one. A part listed in several sections
 // comes once.
 func (r *CatalogPartRepository) ForVehicle(ctx context.Context, f service.SearchFilter) ([]domain.CatalogPart, error) {
-	phrases := service.Phrases(f.Query)
+	// A few of every kind rather than the first brands of one: a category
+	// of shock absorbers, boots and bump stops would otherwise show eight
+	// boots, and the consultant tell the buyer there are no shock absorbers.
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, brand, supplier_id, number, name, category FROM (
-			SELECT DISTINCT ON (mp.article_key, mp.brand_key) `+catalogPartColumns+`
-			FROM vehicles v
-			JOIN autodb_mod_parts mp ON mp.mod_id = v.autodb_mod_id`+partNames+`
-			WHERE v.id = $1
-			  AND ($2 = '' OR `+partCategory+` = $2 OR `+partCategory+` IN (
-			      SELECT c.slug FROM categories c JOIN categories s ON s.id = c.parent_id WHERE s.slug = $2))
-			  AND (cardinality($3::text[]) = 0 OR EXISTS (
-			      SELECT 1 FROM unnest($3::text[]) ph
-			      WHERE (SELECT bool_and(lower(coalesce(n.name_uk, '') || ' ' || mp.name) LIKE '%' || w || '%')
-			             FROM unnest(string_to_array(ph, ' ')) w)))
-			  AND ($4 = '' OR mp.article_key = $4)
-			  AND ($5 = '' OR mp.brand_key = $5)
-			  AND `+notStocked+`
-			ORDER BY mp.article_key, mp.brand_key, mp.id
-		) x
-		ORDER BY category = '', brand, number
-		LIMIT $6`,
-		f.VehicleID, f.Category, phrases, domain.NormalizeOEM(f.PartNumber), domain.NormalizeOEM(f.Brand), f.Limit)
+			SELECT x.*, row_number() OVER (PARTITION BY x.name ORDER BY x.brand, x.number) AS nth
+			FROM (`+matchingParts+`) x
+		) y
+		ORDER BY category = '', nth, name
+		LIMIT $6`, matchingArgs(f, f.Limit)...)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: catalogue parts of vehicle %d: %w", f.VehicleID, err)
 	}
@@ -148,6 +137,54 @@ func (r *CatalogPartRepository) ForVehicle(ctx context.Context, f service.Search
 		return nil, fmt.Errorf("postgres: scan catalogue parts: %w", err)
 	}
 	return parts, nil
+}
+
+// Kinds sums up what a search finds in a vehicle's catalogue: up to limit
+// kinds of part, the most numerous first, and how many parts in all.
+func (r *CatalogPartRepository) Kinds(ctx context.Context, f service.SearchFilter, limit int) ([]domain.PartKind, int, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT name, count(*), sum(count(*)) OVER () FROM (`+matchingParts+`) x
+		GROUP BY name ORDER BY count(*) DESC, name
+		LIMIT $6`, matchingArgs(f, limit)...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("postgres: kinds of catalogue parts of vehicle %d: %w", f.VehicleID, err)
+	}
+	var (
+		kinds []domain.PartKind
+		total int
+		k     domain.PartKind
+	)
+	if _, err := pgx.ForEachRow(rows, []any{&k.Name, &k.Count, &total}, func() error {
+		kinds = append(kinds, k)
+		return nil
+	}); err != nil {
+		return nil, 0, fmt.Errorf("postgres: scan kinds of catalogue parts: %w", err)
+	}
+	return kinds, total, nil
+}
+
+// matchingParts are a vehicle's catalogue parts a search names ($1 the
+// vehicle, $2 a category, $3 the query's ways of naming the part, $4 a part
+// number, $5 a brand) that the shop has no product for, once each.
+const matchingParts = `
+	SELECT DISTINCT ON (mp.article_key, mp.brand_key) ` + catalogPartColumns + `
+	FROM vehicles v
+	JOIN autodb_mod_parts mp ON mp.mod_id = v.autodb_mod_id` + partNames + `
+	WHERE v.id = $1
+	  AND ($2 = '' OR ` + partCategory + ` = $2 OR ` + partCategory + ` IN (
+	      SELECT c.slug FROM categories c JOIN categories s ON s.id = c.parent_id WHERE s.slug = $2))
+	  AND (cardinality($3::text[]) = 0 OR EXISTS (
+	      SELECT 1 FROM unnest($3::text[]) ph
+	      WHERE (SELECT bool_and(lower(coalesce(n.name_uk, '') || ' ' || mp.name) LIKE '%' || w || '%')
+	             FROM unnest(string_to_array(ph, ' ')) w)))
+	  AND ($4 = '' OR mp.article_key = $4)
+	  AND ($5 = '' OR mp.brand_key = $5)
+	  AND ` + notStocked + `
+	ORDER BY mp.article_key, mp.brand_key, mp.id`
+
+func matchingArgs(f service.SearchFilter, limit int) []any {
+	return []any{f.VehicleID, f.Category, service.Phrases(f.Query),
+		domain.NormalizeOEM(f.PartNumber), domain.NormalizeOEM(f.Brand), limit}
 }
 
 // CatalogPart returns one part by the id its button carries; ErrNotFound

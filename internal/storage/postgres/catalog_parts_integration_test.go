@@ -134,3 +134,39 @@ func TestCatalogParts(t *testing.T) {
 	assert.Empty(t, page)
 	assert.Equal(t, 1, total, "past the end, still counted for paging back")
 }
+
+func TestCatalogSampleCoversEveryKind(t *testing.T) {
+	skipShort(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(ctx, `DELETE FROM autodb_mod_parts`)
+		_, _ = testPool.Exec(ctx, `DELETE FROM autodb_mod_sections`)
+		_, _ = testPool.Exec(ctx, `DELETE FROM vehicles WHERE autodb_mod_id IS NOT NULL`)
+	})
+	mod := autodb.Modification{ID: 18600, Name: "DAEWOO LANOS 1.5", Attrs: map[string][]string{"ConstructionInterval": {"05.1997 -"}}}
+	vehicleID, err := NewDirectoryRepository(testPool).UpsertVehicle(ctx,
+		directory.ToVehicle("DAEWOO", autodb.Model{Name: "LANOS (KLAT)"}, mod), mod.ID, 0)
+	require.NoError(t, err)
+
+	// Boots from three brands sort before the one shock absorber.
+	part := func(brand, number, name string) crawler.Part {
+		return crawler.Part{SupplierID: 1, ArticleKey: number, Number: number, Brand: brand, BrandKey: brand, Name: name}
+	}
+	require.NoError(t, NewCrawlRepository(testPool).SaveParts(ctx, mod.ID, 100500, []crawler.Part{
+		part("AAA", "B1", "Пыльник амортизатора"), part("BBB", "B2", "Пыльник амортизатора"),
+		part("CCC", "B3", "Пыльник амортизатора"), part("ZZZ", "S1", "Амортизатор"),
+	}))
+	repo := NewCatalogPartRepository(testPool)
+	f := service.SearchFilter{VehicleID: vehicleID, Query: "амортиз", Limit: 2}
+
+	got, err := repo.ForVehicle(ctx, f)
+	require.NoError(t, err)
+	names := []string{got[0].Name, got[1].Name}
+	assert.ElementsMatch(t, []string{"Амортизатор", "Пыльник амортизатора"}, names,
+		"one of each kind before a second of any: the shock absorber is not lost behind three boots")
+
+	kinds, total, err := repo.Kinds(ctx, f, 10)
+	require.NoError(t, err)
+	assert.Equal(t, []domain.PartKind{{Name: "Пыльник амортизатора", Count: 3}, {Name: "Амортизатор", Count: 1}}, kinds)
+	assert.Equal(t, 4, total)
+}

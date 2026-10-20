@@ -165,6 +165,13 @@ type CatalogPart struct {
 	Category string
 }
 
+// PartKind is a kind of part in a car's catalogue, by name, and how many of
+// it there are: "Амортизатор", 45.
+type PartKind struct {
+	Name  string
+	Count int
+}
+
 // CatalogProgress is how far a car's parts catalogue has loaded.
 type CatalogProgress struct {
 	// State is "none" before the load is queued, then "queued", "running",

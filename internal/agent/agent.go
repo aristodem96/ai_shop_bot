@@ -58,6 +58,9 @@ type Orders interface {
 // stock: what the shop can order for it, at a price a manager quotes.
 type OrderCatalog interface {
 	ForVehicle(ctx context.Context, f service.SearchFilter) ([]domain.CatalogPart, error)
+	// Kinds sums up what a search finds: up to limit kinds of part with
+	// their counts, and how many parts in all.
+	Kinds(ctx context.Context, f service.SearchFilter, limit int) ([]domain.PartKind, int, error)
 	CatalogPart(ctx context.Context, id int64) (*domain.CatalogPart, error)
 	// CrawlState is "" for a car outside the catalogue, "none", "queued" or
 	// "running" while its parts are still loading, "done" or "failed".
