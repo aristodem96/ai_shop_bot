@@ -76,7 +76,7 @@ func (r *CrawlRepository) SaveParts(ctx context.Context, modID, sectionID int64,
 	for i, p := range parts {
 		sup[i], art[i], num[i], brand[i], bkey[i], name[i] = p.SupplierID, p.ArticleKey, p.Number, p.Brand, p.BrandKey, p.Name
 	}
-	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+	return cacheTx(ctx, r.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `DELETE FROM autodb_mod_parts WHERE mod_id = $1 AND section_id = $2`, modID, sectionID); err != nil {
 			return fmt.Errorf("postgres: clear section %d of %d: %w", sectionID, modID, err)
 		}
@@ -109,17 +109,18 @@ func (r *CrawlRepository) SaveSections(ctx context.Context, sections []crawler.S
 	for i, s := range sections {
 		ids[i], paths[i] = s.ID, s.Path
 	}
-	_, err := r.pool.Exec(ctx, `
-		INSERT INTO autodb_sections (id, path)
-		SELECT DISTINCT ON (x.id) x.id, x.path FROM unnest($1::bigint[], $2::text[]) AS x(id, path)
-		ON CONFLICT (id) DO UPDATE SET path = excluded.path`, ids, paths)
-	if err != nil {
-		return fmt.Errorf("postgres: save section paths: %w", err)
-	}
-	if _, err := r.pool.Exec(ctx, fileSections+` WHERE s.id = ANY($1)`, ids); err != nil {
-		return fmt.Errorf("postgres: file sections: %w", err)
-	}
-	return nil
+	return cacheTx(ctx, r.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO autodb_sections (id, path)
+			SELECT DISTINCT ON (x.id) x.id, x.path FROM unnest($1::bigint[], $2::text[]) AS x(id, path)
+			ON CONFLICT (id) DO UPDATE SET path = excluded.path`, ids, paths); err != nil {
+			return fmt.Errorf("postgres: save section paths: %w", err)
+		}
+		if _, err := tx.Exec(ctx, fileSections+` WHERE s.id = ANY($1)`, ids); err != nil {
+			return fmt.Errorf("postgres: file sections: %w", err)
+		}
+		return nil
+	})
 }
 
 // fileSections sets a section's category from the shop's words in its path:
@@ -207,9 +208,12 @@ func (r *CrawlRepository) Matching(ctx context.Context, vehicleID int64, categor
 
 // Progress records how far a crawl is.
 func (r *CrawlRepository) Progress(ctx context.Context, modID int64, total, done, parts int) error {
-	_, err := r.pool.Exec(ctx, `
-		UPDATE autodb_crawls SET sections_total = $2, sections_done = $3, parts = $4 WHERE mod_id = $1`,
-		modID, total, done, parts)
+	err := cacheTx(ctx, r.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			UPDATE autodb_crawls SET sections_total = $2, sections_done = $3, parts = $4 WHERE mod_id = $1`,
+			modID, total, done, parts)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("postgres: crawl progress of %d: %w", modID, err)
 	}

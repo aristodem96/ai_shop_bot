@@ -282,7 +282,11 @@ read locally. A car one buyer chose is ready for the next, and is refreshed
 only when it is chosen again after thirty days. The database grows with the
 shop's customers, not with the catalogue: forty cars came to 310 000 rows,
 which a small server holds with ease. Section paths are the same for every
-car, so they are learnt once and serve all of them.
+car, so they are learnt once and serve all of them. Being a cache, it is
+written without waiting for the disk to confirm each commit: on a slow
+disk, hundreds of sections each waiting for one held a crawl to minutes,
+and what a power cut could lose is re-read on the next crawl. Orders,
+payments and stock still wait.
 
 ### The parts catalogue is read from a cache
 

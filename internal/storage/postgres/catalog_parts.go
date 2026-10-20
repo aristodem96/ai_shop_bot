@@ -303,11 +303,15 @@ func (r *CatalogPartRepository) SaveNames(ctx context.Context, names []partnames
 	for i, n := range names {
 		name[i], uk[i], cat[i] = n.Name, n.NameUK, n.Category
 	}
-	if _, err := r.pool.Exec(ctx, `
-		INSERT INTO autodb_part_names (name, name_uk, category)
-		SELECT * FROM unnest($1::text[], $2::text[], $3::text[])
-		ON CONFLICT (name) DO UPDATE SET name_uk = excluded.name_uk, category = excluded.category`,
-		name, uk, cat); err != nil {
+	err := cacheTx(ctx, r.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO autodb_part_names (name, name_uk, category)
+			SELECT * FROM unnest($1::text[], $2::text[], $3::text[])
+			ON CONFLICT (name) DO UPDATE SET name_uk = excluded.name_uk, category = excluded.category`,
+			name, uk, cat)
+		return err
+	})
+	if err != nil {
 		return fmt.Errorf("postgres: save part names: %w", err)
 	}
 	return nil
