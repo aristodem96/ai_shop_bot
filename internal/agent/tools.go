@@ -463,12 +463,23 @@ func (tb *toolbox) searchParts(ctx context.Context, run *runState, input json.Ra
 		views[i] = tb.view(&res.Products[i])
 	}
 	out := map[string]any{"relaxed": res.Relaxed, "products": views}
-	if in.VehicleID != 0 && tb.parts != nil {
+	// Parts on order are a car's: the buyer's saved car when the search
+	// names none, so a search "in general" does not leave them out.
+	orderCar := in.VehicleID
+	if orderCar == 0 && tb.parts != nil {
+		if car, err := tb.garage.Get(ctx, run.userID); err == nil && car != nil {
+			orderCar = car.ID
+		}
+	}
+	if orderCar != 0 && tb.parts != nil {
 		if err := tb.addCatalogParts(ctx, run.userID, out, service.SearchFilter{
-			VehicleID: in.VehicleID, Category: in.Category, Query: in.Query, PartNumber: in.PartNumber,
+			VehicleID: orderCar, Category: in.Category, Query: in.Query, PartNumber: in.PartNumber,
 			Brand: in.Brand, Limit: maxShown,
 		}); err != nil {
 			return nil, err
+		}
+		if _, ok := out["catalog_parts"]; ok && in.VehicleID == 0 {
+			out["catalog_parts_vehicle_id"] = orderCar
 		}
 	}
 	return out, nil
@@ -486,7 +497,7 @@ type catalogPartView struct {
 // answer.
 var catalogNotes = map[string]string{
 	"pending": "the catalogue of this car is being loaded and takes a few minutes; catalog_parts may be incomplete, the buyer can ask again shortly",
-	"loading": "the catalogue of this car is being loaded and takes a few minutes; catalog_parts may be incomplete. The bot will message the buyer by itself as soon as it is loaded, so tell them that, not to ask again later",
+	"loading": "the catalogue of this car is being loaded and takes a few minutes; catalog_parts may be incomplete. Show the catalog_parts that match. If none do, do not say the part is unavailable or that there is none: say it is not found yet because the catalogue is still loading. The bot will message the buyer by itself as soon as it is loaded, so tell them that, not to ask again later",
 	"failed":  "the catalogue of this car could not be loaded right now; catalog_parts may be incomplete",
 }
 

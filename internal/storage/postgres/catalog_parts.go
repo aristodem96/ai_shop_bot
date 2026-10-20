@@ -106,7 +106,9 @@ func (r *CatalogPartRepository) ByCategory(ctx context.Context, categoryID, vehi
 
 // ForVehicle finds the catalogue's parts for a vehicle that the shop has no
 // product for. Query words match the Ukrainian name or the Russian one, a
-// category its subcategories too. A part listed in several sections comes
+// category its subcategories too -- and a part not yet filed, its name not
+// translated, by its section's path holding a word of the category, so a
+// search right after a crawl does not miss what the crawl brought. A part listed in several sections comes
 // once.
 func (r *CatalogPartRepository) ForVehicle(ctx context.Context, f service.SearchFilter) ([]domain.CatalogPart, error) {
 	words := strings.Fields(strings.ToLower(f.Query))
@@ -121,7 +123,13 @@ func (r *CatalogPartRepository) ForVehicle(ctx context.Context, f service.Search
 			LEFT JOIN autodb_part_names n ON n.name = mp.name
 			WHERE v.id = $1
 			  AND ($2 = '' OR n.category = $2 OR n.category IN (
-			      SELECT c.slug FROM categories c JOIN categories s ON s.id = c.parent_id WHERE s.slug = $2))
+			      SELECT c.slug FROM categories c JOIN categories s ON s.id = c.parent_id WHERE s.slug = $2)
+			      OR (coalesce(n.category, '') = '' AND EXISTS (
+			          SELECT 1 FROM autodb_sections sec
+			          JOIN category_keywords k ON lower(sec.path) LIKE '%' || lower(k.word) || '%'
+			          JOIN categories c ON c.id = k.category_id
+			          WHERE sec.id = mp.section_id
+			            AND (c.slug = $2 OR c.parent_id = (SELECT id FROM categories WHERE slug = $2)))))
 			  AND (SELECT coalesce(bool_and(lower(coalesce(n.name_uk, '') || ' ' || mp.name) LIKE '%' || w || '%'), true)
 			       FROM unnest($3::text[]) w)
 			  AND ($4 = '' OR mp.article_key = $4)

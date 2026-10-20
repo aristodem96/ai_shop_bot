@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -215,4 +216,20 @@ func TestSearchDoesNotReloadALoadedCatalogue(t *testing.T) {
 	assert.Empty(t, loader.watched)
 	assert.Empty(t, loader.fetched, "a loaded catalogue has every section")
 	assert.NotContains(t, result(model, 1).Content, "catalog_note")
+}
+
+func TestSearchWithoutACarOffersTheSavedCarsParts(t *testing.T) {
+	model := llm.NewFake(
+		llm.Call("c1", "search_parts", map[string]any{"category": "brake-discs"}),
+		llm.Say("Є під замовлення."),
+	)
+	f := newAgent(t, model)
+	f.agent.UseOrderCatalog(&fakeOrderCatalog{state: "done"})
+	f.garage.saved[1] = octavia.ID
+
+	_, err := f.agent.Reply(context.Background(), 1, 1, "гальмівні диски")
+	require.NoError(t, err)
+	res := result(model, 1).Content
+	assert.Contains(t, res, `"catalog_parts":[`, "a search in general still offers the parts on order of the buyer's car")
+	assert.Contains(t, res, fmt.Sprintf(`"catalog_parts_vehicle_id":%d`, octavia.ID), "and says whose they are")
 }

@@ -22,6 +22,7 @@ func TestCatalogParts(t *testing.T) {
 		_, _ = testPool.Exec(ctx, `DELETE FROM products WHERE source = 'cat-test'`)
 		_, _ = testPool.Exec(ctx, `DELETE FROM autodb_mod_parts`)
 		_, _ = testPool.Exec(ctx, `DELETE FROM autodb_part_names`)
+		_, _ = testPool.Exec(ctx, `DELETE FROM autodb_sections`)
 		_, _ = testPool.Exec(ctx, `DELETE FROM autodb_crawls`)
 		_, _ = testPool.Exec(ctx, `DELETE FROM vehicles WHERE autodb_mod_id IS NOT NULL`)
 	})
@@ -76,6 +77,19 @@ func TestCatalogParts(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, got, 1, "%+v", f)
 		assert.Equal(t, "BREMBO", got[0].Brand, "%+v", f)
+	}
+
+	// Just crawled, its name not translated: the oil filter has no category
+	// yet, but its section's path says what it is.
+	got, err := repo.ForVehicle(ctx, service.SearchFilter{VehicleID: vehicleID, Category: "oil-filters", Limit: 10})
+	require.NoError(t, err)
+	assert.Empty(t, got, "no path known for its section yet")
+	require.NoError(t, crawls.SaveSections(ctx, []crawler.Section{{ID: 100259, Path: "фильтр › Масляный фильтр"}}))
+	for _, cat := range []string{"oil-filters", "filters"} {
+		got, err = repo.ForVehicle(ctx, service.SearchFilter{VehicleID: vehicleID, Category: cat, Limit: 10})
+		require.NoError(t, err)
+		require.Len(t, got, 1, cat)
+		assert.Equal(t, "MANN-FILTER", got[0].Brand, "found by its section before its name is translated")
 	}
 
 	one, err := repo.CatalogPart(ctx, all[0].ID)
